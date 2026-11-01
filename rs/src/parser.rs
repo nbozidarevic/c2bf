@@ -42,7 +42,7 @@ const EQUALITY_OPS: [&[u8]; 2] = [b"==", b"!="];
 const RELATIONAL_OPS: [&[u8]; 4] = [b"<", b">", b"<=", b">="];
 const ADDITIVE_OPS: [&[u8]; 2] = [b"+", b"-"];
 const MULTIPLICATIVE_OPS: [&[u8]; 3] = [b"*", b"/", b"%"];
-const UNARY_OPS: [&[u8]; 4] = [b"!", b"&", b"++", b"--"];
+const UNARY_OPS: [&[u8]; 7] = [b"!", b"&", b"++", b"--", b"-", b"+", b"~"];
 
 fn is_op_in(text: &[u8], ops: &[&[u8]]) -> bool {
     ops.iter().any(|op| *op == text)
@@ -944,6 +944,30 @@ mod tests {
         assert_sexp(
             "int f() { while (1) { break; continue; } return; }",
             "(tu (funcdef f (compound (while (int 1) (compound (break) (continue))) (return))))",
+        );
+    }
+
+    #[test]
+    fn unary_minus_plus_tilde() {
+        assert_sexp(
+            "int f() { return -5; }",
+            "(tu (funcdef f (compound (return (unary - (int 5))))))",
+        );
+        assert_sexp(
+            "int f() { return +5; }",
+            "(tu (funcdef f (compound (return (unary + (int 5))))))",
+        );
+        assert_sexp(
+            "int f() { return ~a; }",
+            "(tu (funcdef f (compound (return (unary ~ (ident a))))))",
+        );
+        assert_sexp(
+            "int f() { return --a; }",
+            "(tu (funcdef f (compound (return (unary -- (ident a))))))",
+        );
+        assert_sexp(
+            "int f() { a = b - -c; }",
+            "(tu (funcdef f (compound (exprstmt (assign = (ident a) (binop - (ident b) (unary - (ident c))))))))",
         );
     }
 

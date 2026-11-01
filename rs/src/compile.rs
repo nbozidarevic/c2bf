@@ -626,6 +626,22 @@ impl Emitter {
                     let v = self.compile_expr(e)?;
                     self.negate(v)
                 }
+                // Wrapping arithmetic: `-x` is `0 - x`, `~x` is
+                // `255 - x`, `+x` is `x` itself. Printed with `%d`
+                // these differ from C `int` values for negatives;
+                // only wrap-back uses agree with the g++ oracle
+                // (see the `unary` differential fixture).
+                b"-" => {
+                    let v = self.compile_expr(e)?;
+                    let zero = self.const_value(0);
+                    Ok(self.subtract_values(zero, v))
+                }
+                b"+" => self.compile_expr(e),
+                b"~" => {
+                    let v = self.compile_expr(e)?;
+                    let top = self.const_value(255);
+                    Ok(self.subtract_values(top, v))
+                }
                 b"&" => self.compile_expr(e),
                 b"++" => {
                     let t = self.compile_expr(e)?;
@@ -808,4 +824,20 @@ fn next_format_arg(vals: &[i32], next: &mut usize) -> Result<i32, CompileError> 
         .ok_or_else(|| err("Too few arguments for format string"))?;
     *next += 1;
     Ok(v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unary_minus_plus_tilde_wrap() {
+        let bf = compile(
+            b"int main() { printf(\"%d\", -5 + 5); printf(\"%d\", ~5 + 6); printf(\"%d\", +5); printf(\"%c\", ~5); }",
+        )
+        .expect("unary program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, vec![b'0', b'0', b'5', 250]);
+    }
 }

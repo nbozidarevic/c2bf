@@ -9,6 +9,10 @@ fix-or-pin work for Phase 1.
 
 - Cells are 1 byte, with wrapping arithmetic ("obmotavanje"): `255 + 1 → 0`,
   `0 − 1 → 255`.
+- Unary `-` and `~` wrap like all arithmetic: `-5` is `251`, `~5` is
+  `250`. Printed with `%d` these differ from C `int` values (`-5`,
+  `-6`); only wrap-back uses (e.g. `-5 + 5`) agree with the g++
+  oracle, as pinned by the `unary` differential fixture.
 - Only `char` variables are supported; anything wider needs multi-cell
   representation (deferred to language expansion).
 - The thesis specifies addressable memory for any integer index (its reference

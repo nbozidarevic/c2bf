@@ -47,6 +47,9 @@ below keep the pre-rename names as history.
   interpreter steps; all byte values now print correctly. Covered
   by the `tests/compile/printnum.c` oracle fixture and a refreshed
   `docs/perf.md`.
+- Unary `-`, `+`, `~` (byte-wrapping: `-x` is `0 - x`, `~x` is
+  `255 - x`); `%d` of a wrapped negative differs from C `int`
+  arithmetic, pinned by the wrap-back `unary` oracle fixture.
 
 ## Phase 5 — Performance
 

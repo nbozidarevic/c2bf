@@ -54,8 +54,8 @@ source order, e.g.
   a conditional.
 - `binop(op)`: `[l, r]`, left-associative. Levels low→high:
   `||`, `&&`, `== !=`, `< > <= >=`, `+ -`, `* / %`.
-- `unary(op)`: `[e]`; `op` is one of `! & ++ --` (no unary minus/plus,
-  no `~`, no casts, no `sizeof` — accepted subset surface).
+- `unary(op)`: `[e]`; `op` is one of `! & ++ -- - + ~` (no casts,
+  no `sizeof` — accepted subset surface). Unary `-`/`~` wrap mod 256.
 - `postfix(op)`: `[e]` (`++`/`--`); `call`: `[callee, args...]`
   (callee is any postfix expression).
 - `paren`: `[e]` — parentheses are kept as nodes, not transparent.
