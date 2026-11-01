@@ -22,14 +22,17 @@ for file in os.listdir(tests_compile_path):
       shell=True,
       stdout=subprocess.PIPE,
       stderr=subprocess.STDOUT
-    ).stdout.read().decode('utf-8')
+    # latin-1: program output is bytes, not text; this keeps the
+    # comparison byte-exact (strict UTF-8 crashes on bytes >= 0x80,
+    # e.g. the unary fixture's %c output) without masking diffs.
+    ).stdout.read().decode('latin-1')
     actual = subprocess.Popen(
       c2bf + " compile -c " + tests_compile_path + "/" + filename + ".c -o " + tests_compile_path + "/tmp.bf; " +
         c2bf + " run -c " + tests_compile_path + "/tmp.bf -i " + tests_compile_path + "/" + filename + ".in",
       shell=True,
       stdout=subprocess.PIPE,
       stderr=subprocess.STDOUT
-    ).stdout.read().decode('utf-8')
+    ).stdout.read().decode('latin-1')
     if actual != expected:
       failed = True
       print("Failed COMPILE test " + filename + ":")
