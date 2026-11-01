@@ -123,12 +123,75 @@ impl Emitter {
         dest
     }
 
+    /// Loop-based plan `(iterations, per_iteration, remainder)` for
+    /// building `value` as `a * b + r`, or `None` when repeated `+`s
+    /// are cheaper. `scratch_dist` is the distance from the destination
+    /// cell to the scratch cell the loop would use.
+    ///
+    /// A loop build costs `9 + a + b + r + 4d` emitted bytes against
+    /// `3 + value` direct (`d` = scratch distance), but executes
+    /// roughly `a * (b + 2d + 2)` increments against `value`. The plan
+    /// is taken only when it is smaller AND its estimated steps stay
+    /// within 25% of direct, so constant construction shrinks programs
+    /// without giving the win back at runtime. Small values never
+    /// loop: no `(a, b)` with `a, b >= 2` beats `3 + value` bytes
+    /// for them, and the scratch cell is allocated only when a plan
+    /// is taken, so direct sites keep their cell layout.
+    fn loop_plan(value: u8, scratch_dist: i32) -> Option<(u8, u8, u8)> {
+        let v = u32::from(value);
+        let d = scratch_dist.unsigned_abs();
+        let direct_bytes = 3 + v;
+        let direct_steps = 2 + v;
+        let mut best: Option<(u32, u32, u8, u8, u8)> = None;
+        for a in 2..=v / 2 {
+            let b = v / a;
+            let r = v - a * b;
+            let bytes = 9 + a + b + r + 4 * d;
+            if bytes >= direct_bytes {
+                continue;
+            }
+            let steps = 3 + a + a * (b + 2 * d + 2) + 2 * d + r;
+            if 4 * steps > 5 * direct_steps {
+                continue;
+            }
+            let candidate = (bytes, steps, a as u8, b as u8, r as u8);
+            if best.map_or(true, |prev| candidate < prev) {
+                best = Some(candidate);
+            }
+        }
+        best.map(|(_, _, a, b, r)| (a, b, r))
+    }
+
     /// Set `dest` to `value` (`setValue`).
     pub fn set_value(&mut self, dest: i32, value: u8) -> i32 {
-        self.move_pointer(dest);
-        self.emit("[-]");
-        for _ in 0..value {
-            self.emit("+");
+        let scratch = self.memory.peek_temp_cell();
+        if let Some((a, b, r)) = Self::loop_plan(value, (scratch - dest).abs()) {
+            let scratch = self.memory.temp_cell();
+            self.move_pointer(dest);
+            self.emit("[-]");
+            self.move_pointer(scratch);
+            self.emit("[-]");
+            for _ in 0..a {
+                self.emit("+");
+            }
+            self.emit("[");
+            self.move_pointer(dest);
+            for _ in 0..b {
+                self.emit("+");
+            }
+            self.move_pointer(scratch);
+            self.emit("-");
+            self.emit("]");
+            self.move_pointer(dest);
+            for _ in 0..r {
+                self.emit("+");
+            }
+        } else {
+            self.move_pointer(dest);
+            self.emit("[-]");
+            for _ in 0..value {
+                self.emit("+");
+            }
         }
         dest
     }
@@ -560,6 +623,7 @@ impl Emitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runner;
 
     fn bf(em: &Emitter) -> String {
         String::from_utf8(em.output().to_vec()).expect("non-utf8 bf")
@@ -694,5 +758,64 @@ mod tests {
         let a = em.const_value(5);
         let b = em.const_value(7);
         assert_eq!(em.less_than(a, b).unwrap(), 6);
+    }
+
+    #[test]
+    fn loop_plan_picks_smallest_bytes_within_step_bound() {
+        assert_eq!(Emitter::loop_plan(200, 1), Some((8, 25, 0)));
+        assert_eq!(Emitter::loop_plan(100, 1), Some((4, 25, 0)));
+        assert_eq!(Emitter::loop_plan(48, 1), None);
+        assert_eq!(Emitter::loop_plan(5, 1), None);
+        assert_eq!(Emitter::loop_plan(0, 1), None);
+        assert_eq!(Emitter::loop_plan(200, 10), None);
+    }
+
+    #[test]
+    fn set_value_loop_construction_exact() {
+        let mut em = Emitter::new();
+        assert_eq!(em.set_value(0, 200), 0);
+        assert_eq!(
+            bf(&em),
+            format!("[-]>[-]{}[<{}>-]<", "+".repeat(8), "+".repeat(25))
+        );
+    }
+
+    #[test]
+    fn set_value_small_and_distant_values_stay_direct() {
+        let mut em = Emitter::new();
+        em.set_value(0, 3);
+        assert_eq!(bf(&em), "[-]+++");
+        // Scratch ten cells away: no loop stays within the step bound.
+        let mut em = Emitter::new();
+        em.set_value(10, 200);
+        assert_eq!(em.output().len(), 10 + 3 + 200);
+    }
+
+    #[test]
+    fn set_value_builds_every_byte_value() {
+        for (dest, value) in [
+            (0, 0u8),
+            (0, 1),
+            (0, 47),
+            (0, 48),
+            (0, 57),
+            (0, 100),
+            (2, 100),
+            (0, 127),
+            (4, 200),
+            (0, 200),
+            (0, 254),
+            (0, 255),
+        ] {
+            let mut em = Emitter::new();
+            em.set_value(dest, value);
+            em.move_pointer(dest);
+            let mut code = bf(&em);
+            code.push('.');
+            let mut out = Vec::new();
+            runner::run(code.as_bytes(), &mut std::io::empty(), &mut out)
+                .expect("bf runs");
+            assert_eq!(out, vec![value], "dest {dest} value {value}");
+        }
     }
 }

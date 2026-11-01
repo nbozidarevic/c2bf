@@ -20,6 +20,13 @@ impl Memory {
         Self::default()
     }
 
+    /// Index the next fresh temporary cell would get, without
+    /// allocating it, so a caller can price a plan that may need a
+    /// scratch cell before committing to one.
+    pub fn peek_temp_cell(&self) -> i32 {
+        self.next
+    }
+
     /// Allocate a fresh temporary cell (`getTemporaryCell`).
     pub fn temp_cell(&mut self) -> i32 {
         let cell = self.next;
@@ -42,6 +49,15 @@ impl Memory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn peek_does_not_allocate() {
+        let mut m = Memory::new();
+        assert_eq!(m.peek_temp_cell(), 0);
+        assert_eq!(m.peek_temp_cell(), 0);
+        assert_eq!(m.temp_cell(), 0);
+        assert_eq!(m.peek_temp_cell(), 1);
+    }
 
     #[test]
     fn temps_count_from_zero() {
