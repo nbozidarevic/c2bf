@@ -164,9 +164,22 @@ impl Emitter {
 
     /// Set `dest` to `value` (`setValue`).
     pub fn set_value(&mut self, dest: i32, value: u8) -> i32 {
-        let scratch = self.memory.peek_temp_cell();
-        if let Some((a, b, r)) = Self::loop_plan(value, (scratch - dest).abs()) {
+        // The scratch cell must differ from `dest`. Normally `dest` is
+        // already allocated, so the next free cell qualifies; but a
+        // caller-supplied `dest` can equal the next free index (e.g.
+        // `set_value(0, _)` on a fresh emitter), in which case the
+        // scratch would be `dest` itself and the loop below could
+        // never empty it. Price the plan against the cell after
+        // `dest` in that case, and reserve `dest` before allocating
+        // the scratch so the two stay distinct.
+        let peeked = self.memory.peek_temp_cell();
+        let planned = if peeked == dest { peeked + 1 } else { peeked };
+        if let Some((a, b, r)) = Self::loop_plan(value, (planned - dest).abs()) {
+            if peeked == dest {
+                let _reserved = self.memory.temp_cell();
+            }
             let scratch = self.memory.temp_cell();
+            debug_assert_eq!(scratch, planned);
             self.move_pointer(dest);
             self.emit("[-]");
             self.move_pointer(scratch);
@@ -778,6 +791,15 @@ mod tests {
             bf(&em),
             format!("[-]>[-]{}[<{}>-]<", "+".repeat(8), "+".repeat(25))
         );
+    }
+
+    #[test]
+    fn set_value_scratch_is_distinct_from_unallocated_dest() {
+        let mut em = Emitter::new();
+        em.set_value(0, 200);
+        // Cell 0 was the destination: the loop reserved it and used
+        // cell 1 as the scratch, so the next fresh cell is 2.
+        assert_eq!(em.const_value(0), 2);
     }
 
     #[test]
