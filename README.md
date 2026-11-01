@@ -1,15 +1,15 @@
-# freud
-`freud` transpiles a C subset to Brainfuck — and, as helpers around
+# c2bf
+`c2bf` transpiles a C subset to Brainfuck — and, as helpers around
 that, runs Brainfuck programs and pretty-prints Brainfuck code.
 
 ## Quick start
 
 ```
 > cargo build --release --manifest-path rs/Cargo.toml
-> ./rs/target/release/freud program.c -o program.bf
+> ./rs/target/release/c2bf program.c -o program.bf
 ```
 
-`freud program.c` (no command) compiles. Without `-o`, Brainfuck goes
+`c2bf program.c` (no command) compiles. Without `-o`, Brainfuck goes
 to stdout; without a code file, source is read from stdin.
 
 ## Commands
@@ -28,15 +28,15 @@ with usage; exit code is 1.
 Run a transpiled program, feeding it input:
 
 ```
-> ./rs/target/release/freud run -c program.bf -i input.txt
+> ./rs/target/release/c2bf run -c program.bf -i input.txt
 ```
 
 ## Embedding
 
 The core is a dependency-free Rust library. Adapters live outside it:
 
-- C/C++: C ABI in [rs/ffi/](/Users/nenad/Code/freud/rs/ffi) (`freud.h`, `freud_compile`/`freud_run`/`freud_format`).
-- Web: WebAssembly adapter in [rs/wasm/](/Users/nenad/Code/freud/rs/wasm) and the demo in [demo/](/Users/nenad/Code/freud/demo). npm publishing and Pages deployment are manual, owner-gated steps; see [rs/wasm/README.md](/Users/nenad/Code/freud/rs/wasm/README.md).
+- C/C++: C ABI in [rs/ffi/](rs/ffi) (`c2bf.h`, `c2bf_compile`/`c2bf_run`/`c2bf_format`).
+- Web: WebAssembly adapter in [rs/wasm/](rs/wasm) and the demo in [demo/](demo). npm publishing and Pages deployment are manual, owner-gated steps; see [rs/wasm/README.md](rs/wasm/README.md).
 
 ## Tests
 

@@ -34,7 +34,7 @@ jobs:
         run: |
           for f in tests/differential/micro/*.c; do
             echo "=== $f"
-            ./rs/target/release/freud compile -c "$f"
+            ./rs/target/release/c2bf compile -c "$f"
           done
 
   golden-tokenizer:
@@ -121,10 +121,10 @@ jobs:
             ./rs/target/release/bfcompile "$f" > /tmp/b.rs || { echo "FAILED: $f"; fail=1; continue; }
             cmp -s /tmp/b.rs "tests/golden/bf/micro_$n.bf" || { echo "DIFFERS: $f"; fail=1; }
           done
-          ./rs/target/release/freud compile tests/compile/io.c > /tmp/c.rs || { echo "FAILED: freud compile positional"; fail=1; }
-          cmp -s /tmp/c.rs tests/golden/bf/io.bf || { echo "DIFFERS: freud compile positional"; fail=1; }
-          ./rs/target/release/freud compile < tests/compile/io.c > /tmp/s.rs || { echo "FAILED: freud compile stdin"; fail=1; }
-          cmp -s /tmp/s.rs tests/golden/bf/io.bf || { echo "DIFFERS: freud compile stdin"; fail=1; }
+          ./rs/target/release/c2bf compile tests/compile/io.c > /tmp/c.rs || { echo "FAILED: c2bf compile positional"; fail=1; }
+          cmp -s /tmp/c.rs tests/golden/bf/io.bf || { echo "DIFFERS: c2bf compile positional"; fail=1; }
+          ./rs/target/release/c2bf compile < tests/compile/io.c > /tmp/s.rs || { echo "FAILED: c2bf compile stdin"; fail=1; }
+          cmp -s /tmp/s.rs tests/golden/bf/io.bf || { echo "DIFFERS: c2bf compile stdin"; fail=1; }
           exit $fail
 
       - name: Reject error fixtures
@@ -172,7 +172,7 @@ jobs:
           fail=0
           for f in tests/run/*.bf; do
             base="${f%.bf}"
-            ec_rs=0; timeout 60 ./rs/target/release/freud run -c "$f" -i "$base.in" > /tmp/r.rs 2>&1 || ec_rs=$?
+            ec_rs=0; timeout 60 ./rs/target/release/c2bf run -c "$f" -i "$base.in" > /tmp/r.rs 2>&1 || ec_rs=$?
             exp=0; case "$base" in *unbalanced*) exp=1;; esac
             if [ "$ec_rs" != "$exp" ]; then echo "EXIT DIFFERS: $f ($ec_rs vs $exp)"; fail=1; fi
             cmp -s /tmp/r.rs "$base.out" || { echo "DIFFERS: $f"; fail=1; }
@@ -185,7 +185,7 @@ jobs:
           for f in tests/compile/*.c; do
             base="${f%.c}"
             ./rs/target/release/bfcompile "$f" > /tmp/e.bf || { echo "BFCOMPILE FAILED: $f"; fail=1; continue; }
-            timeout 300 ./rs/target/release/freud run -c /tmp/e.bf -i "$base.in" > /tmp/e.rs || { echo "FREUD RUN FAILED: $f"; fail=1; continue; }
+            timeout 300 ./rs/target/release/c2bf run -c /tmp/e.bf -i "$base.in" > /tmp/e.rs || { echo "C2BF RUN FAILED: $f"; fail=1; continue; }
             g++ -w "$f" -o /tmp/e.o || { echo "GCC FAILED: $f"; fail=1; continue; }
             /tmp/e.o < "$base.in" > /tmp/e.gcc || { echo "GCC RUN FAILED: $f"; fail=1; continue; }
             cmp -s /tmp/e.rs /tmp/e.gcc || { echo "E2E DIFFERS: $f"; fail=1; }
@@ -209,9 +209,9 @@ jobs:
           fail=0
           for f in tests/format/*.in; do
             base="${f%.in}"; n=$(basename "$f" .in)
-            ./rs/target/release/freud format -c "$f" > /tmp/f.rs || { echo "FAILED: $f"; fail=1; continue; }
+            ./rs/target/release/c2bf format -c "$f" > /tmp/f.rs || { echo "FAILED: $f"; fail=1; continue; }
             cmp -s /tmp/f.rs "$base.out" || { echo "DIFFERS: $f"; fail=1; }
-            ./rs/target/release/freud format -c "$f" -m > /tmp/fm.rs || { echo "FAILED: $f -m"; fail=1; continue; }
+            ./rs/target/release/c2bf format -c "$f" -m > /tmp/fm.rs || { echo "FAILED: $f -m"; fail=1; continue; }
             cmp -s /tmp/fm.rs "tests/golden/format-min/$n.out" || { echo "DIFFERS: $f -m"; fail=1; }
           done
           exit $fail
@@ -225,7 +225,7 @@ jobs:
             if [ "$ec" != "$2" ]; then echo "EXIT DIFFERS: $1 ($ec vs $2)"; fail=1; fi
             cmp -s /tmp/c.rs "tests/golden/cli/$1.out" || { echo "DIFFERS: $1"; cmp -l /tmp/c.rs "tests/golden/cli/$1.out" | head -5; fail=1; }
           }
-          F=./rs/target/release/freud
+          F=./rs/target/release/c2bf
           t "no-args" 0 "$F"
           t "help" 0 "$F help"
           t "version" 0 "$F --version"
@@ -268,7 +268,7 @@ jobs:
         run: cargo build --release --manifest-path rs/Cargo.toml
 
       - name: Run harness
-        run: ./rs/target/release/freud-bench
+        run: ./rs/target/release/c2bf-bench
 
   c-abi:
     strategy:
@@ -292,11 +292,11 @@ jobs:
       - name: Build and run C example
         run: |
           cc -std=c11 -Wall -Wextra -Werror rs/ffi/example.c -Irs/ffi \
-            -o /tmp/freud_example -Lrs/target/release -lfreud
+            -o /tmp/c2bf_example -Lrs/target/release -lc2bf
           if [ "$(uname)" = "Darwin" ]; then
-            DYLD_LIBRARY_PATH=rs/target/release /tmp/freud_example
+            DYLD_LIBRARY_PATH=rs/target/release /tmp/c2bf_example
           else
-            LD_LIBRARY_PATH=rs/target/release /tmp/freud_example
+            LD_LIBRARY_PATH=rs/target/release /tmp/c2bf_example
           fi
 
   wasm:
@@ -321,10 +321,10 @@ jobs:
 
       - name: Build Node bundle and smoke-test
         run: |
-          wasm-pack build rs/wasm --target nodejs --out-dir /tmp/freud-node-pkg
-          node rs/wasm/smoke.cjs /tmp/freud-node-pkg
+          wasm-pack build rs/wasm --target nodejs --out-dir /tmp/c2bf-node-pkg
+          node rs/wasm/smoke.cjs /tmp/c2bf-node-pkg
 
       - name: Validate publishable npm package shape
         run: |
-          wasm-pack build rs/wasm --target bundler --out-dir /tmp/freud-pkg
-          cd /tmp/freud-pkg && npm pack --dry-run
+          wasm-pack build rs/wasm --target bundler --out-dir /tmp/c2bf-pkg
+          cd /tmp/c2bf-pkg && npm pack --dry-run

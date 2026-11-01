@@ -7,7 +7,7 @@ import sys
 
 failed = False
 
-freud = os.environ.get("FREUD_BIN", "../rs/target/release/freud")
+c2bf = os.environ.get("C2BF_BIN", "../rs/target/release/c2bf")
 
 tests_compile_path = "./compile"
 tests_format_path = "./format"
@@ -24,8 +24,8 @@ for file in os.listdir(tests_compile_path):
       stderr=subprocess.STDOUT
     ).stdout.read().decode('utf-8')
     actual = subprocess.Popen(
-      freud + " compile -c " + tests_compile_path + "/" + filename + ".c -o " + tests_compile_path + "/tmp.bf; " +
-        freud + " run -c " + tests_compile_path + "/tmp.bf -i " + tests_compile_path + "/" + filename + ".in",
+      c2bf + " compile -c " + tests_compile_path + "/" + filename + ".c -o " + tests_compile_path + "/tmp.bf; " +
+        c2bf + " run -c " + tests_compile_path + "/tmp.bf -i " + tests_compile_path + "/" + filename + ".in",
       shell=True,
       stdout=subprocess.PIPE,
       stderr=subprocess.STDOUT
@@ -46,7 +46,7 @@ for file in os.listdir(tests_format_path):
   if file.endswith(".in"):
     filename = os.path.splitext(file)[0]
     actual = subprocess.Popen(
-      freud + " format -c " + tests_format_path + "/" + filename + ".in",
+      c2bf + " format -c " + tests_format_path + "/" + filename + ".in",
       shell=True,
       stdout=subprocess.PIPE,
       stderr=subprocess.STDOUT
@@ -64,7 +64,7 @@ for file in os.listdir(tests_run_path):
   if file.endswith(".bf"):
     filename = os.path.splitext(file)[0]
     actual = subprocess.Popen(
-      freud + " run -c " + tests_run_path + "/" + filename + ".bf -i " + tests_run_path + "/" + filename + ".in",
+      c2bf + " run -c " + tests_run_path + "/" + filename + ".bf -i " + tests_run_path + "/" + filename + ".in",
       shell=True,
       stdout=subprocess.PIPE,
       stderr=subprocess.STDOUT

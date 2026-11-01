@@ -1,9 +1,9 @@
-// tokdump: dump the freud-core token stream in differential-test format.
+// tokdump: dump the c2bf-core token stream in differential-test format.
 // One `LINE:COL KIND TEXT` line per token; mirrors the C++ reference.
 use std::io::Write;
 use std::process::exit;
 
-use freud_core::token::{self, Kind};
+use c2bf_core::token::{self, Kind};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

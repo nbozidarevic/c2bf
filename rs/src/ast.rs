@@ -1,4 +1,4 @@
-//! Typed AST for the freud C subset, with S-expression serialization.
+//! Typed AST for the C subset, with S-expression serialization.
 //!
 //! [`dump_tu`] renders exactly the `tests/differential/SPEC.md` v1 format:
 //! single-line S-expression, tokenizer-dump escaping, no positions.

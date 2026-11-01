@@ -1,7 +1,7 @@
-//! Shared command-line layer for the `freud` CLI.
+//! Shared command-line layer for the `c2bf` CLI.
 //!
 //! Transpile-first contract:
-//! - `compile` is the default command: `freud program.c -o program.bf`
+//! - `compile` is the default command: `c2bf program.c -o program.bf`
 //!   just works. `run` and `format` are auxiliary subcommands.
 //! - The code file is positional or `-c`; output is `-o` (stdout by
 //!   default); run input is `-i` (stdin by default). Without a code
@@ -21,9 +21,9 @@ use std::process::exit;
 
 use crate::{compile, format, runner};
 
-pub const USAGE: &str = "Usage: freud [command] [file] [options]\n\nCompiles by default: `freud program.c -o program.bf` transpiles\nprogram.c. Without -o, output goes to stdout; without a file, input\ncomes from stdin (`run` requires a file).\n\nCommands:\n  compile    Transpile C source to Brainfuck (the default command)\n  run        Run a Brainfuck program\n  format     Pretty-print Brainfuck (-m minifies)\n  help       Show this help\n\nOptions:\n  -c file    Code file (same as the positional file)\n  -o file    Output file (default stdout)\n  -i file    Input file for run (default stdin)\n  -m         Minify (format only)\n";
+pub const USAGE: &str = "Usage: c2bf [command] [file] [options]\n\nCompiles by default: `c2bf program.c -o program.bf` transpiles\nprogram.c. Without -o, output goes to stdout; without a file, input\ncomes from stdin (`run` requires a file).\n\nCommands:\n  compile    Transpile C source to Brainfuck (the default command)\n  run        Run a Brainfuck program\n  format     Pretty-print Brainfuck (-m minifies)\n  help       Show this help\n\nOptions:\n  -c file    Code file (same as the positional file)\n  -o file    Output file (default stdout)\n  -i file    Input file for run (default stdin)\n  -m         Minify (format only)\n";
 
-pub const HEADER: &str = "freud \u{2013} C-to-Brainfuck transpiler\n\n";
+pub const HEADER: &str = "c2bf \u{2013} C-to-Brainfuck transpiler\n\n";
 
 /// Parsed flags (`parse_params`).
 pub struct Params {

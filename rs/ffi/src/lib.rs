@@ -1,22 +1,22 @@
-//! C ABI over [`freud_core`]: `compile`, `run`, `format` for C/C++
+//! C ABI over [`c2bf_core`]: `compile`, `run`, `format` for C/C++
 //! (and, through it, JNI) embedders.
 //!
-//! This crate is deliberately separate from `freud-core` (see
+//! This crate is deliberately separate from `c2bf-core` (see
 //! `docs/decisions/0006-distribution-adapters.md`): the core stays a
 //! dependency-free Rust library with no FFI surface, and adapters live
 //! in their own crates. Nothing here changes core behavior.
 //!
-//! Contract (mirrored in `freud.h`):
+//! Contract (mirrored in `c2bf.h`):
 //! - Inputs are `(pointer, length)` byte slices; no NUL termination
 //!   is assumed. A null pointer with a nonzero length is an argument
 //!   error; null with length 0 is an empty input.
 //! - On success (`0`), `*out` points to `*out_len` heap bytes owned
-//!   by the caller, freed with [`freud_free`]. Empty output is
+//!   by the caller, freed with [`c2bf_free`]. Empty output is
 //!   (`NULL`, `0`). On failure, `*out` is `NULL` and `*out_len` is 0.
 //! - Return codes: `0` ok, `1` operation error (see
-//!   [`freud_last_error`]), `2` invalid argument. No panic crosses
+//!   [`c2bf_last_error`]), `2` invalid argument. No panic crosses
 //!   the boundary: panics are caught and reported as code `1`.
-//! - [`freud_last_error`] is thread-local and valid until the next
+//! - [`c2bf_last_error`] is thread-local and valid until the next
 //!   FFI call on the same thread.
 
 use std::cell::RefCell;
@@ -87,7 +87,7 @@ fn guard<F: FnOnce() -> i32>(f: F) -> i32 {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(code) => code,
         Err(_) => {
-            set_error("freud: internal error");
+            set_error("c2bf: internal error");
             1
         }
     }
@@ -96,7 +96,7 @@ fn guard<F: FnOnce() -> i32>(f: F) -> i32 {
 /// Library version (the crate version), as a NUL-terminated string
 /// valid for the life of the process.
 #[no_mangle]
-pub extern "C" fn freud_version() -> *const c_char {
+pub extern "C" fn c2bf_version() -> *const c_char {
     static VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
     VERSION.as_ptr() as *const c_char
 }
@@ -104,7 +104,7 @@ pub extern "C" fn freud_version() -> *const c_char {
 /// Transpile C source to Brainfuck (plus a trailing newline, as the
 /// CLI emits). See the module docs for the output contract.
 #[no_mangle]
-pub extern "C" fn freud_compile(
+pub extern "C" fn c2bf_compile(
     src: *const u8,
     src_len: usize,
     out: *mut *mut u8,
@@ -116,7 +116,7 @@ pub extern "C" fn freud_compile(
             Ok(s) => s,
             Err(code) => return code,
         };
-        match freud_core::compile::compile(src) {
+        match c2bf_core::compile::compile(src) {
             Ok(bf) => deliver(out, out_len, bf),
             Err(e) => {
                 set_error(&e.msg);
@@ -131,7 +131,7 @@ pub extern "C" fn freud_compile(
 /// errors (e.g. unbalanced brackets) report code `1`; partial
 /// output is discarded — stream via the CLI for partial output.
 #[no_mangle]
-pub extern "C" fn freud_run(
+pub extern "C" fn c2bf_run(
     code: *const u8,
     code_len: usize,
     input: *const u8,
@@ -151,7 +151,7 @@ pub extern "C" fn freud_run(
         };
         let mut input = input;
         let mut output = Vec::new();
-        match freud_core::runner::run(code, &mut input, &mut output) {
+        match c2bf_core::runner::run(code, &mut input, &mut output) {
             Ok(()) => deliver(out, out_len, output),
             Err(e) => {
                 set_error(e);
@@ -164,7 +164,7 @@ pub extern "C" fn freud_run(
 /// Pretty-print (`minify == 0`) or minify (`minify != 0`) Brainfuck
 /// code. Infallible apart from argument validation.
 #[no_mangle]
-pub extern "C" fn freud_format(
+pub extern "C" fn c2bf_format(
     code: *const u8,
     code_len: usize,
     minify: std::ffi::c_int,
@@ -178,7 +178,7 @@ pub extern "C" fn freud_format(
             Err(code) => return code,
         };
         let mut output = Vec::new();
-        freud_core::format::format(code, &mut output, minify != 0);
+        c2bf_core::format::format(code, &mut output, minify != 0);
         deliver(out, out_len, output)
     })
 }
@@ -187,7 +187,7 @@ pub extern "C" fn freud_format(
 /// string, or `NULL` when the last call succeeded. Valid until the
 /// next FFI call on the same thread.
 #[no_mangle]
-pub extern "C" fn freud_last_error() -> *const c_char {
+pub extern "C" fn c2bf_last_error() -> *const c_char {
     LAST_ERROR.with(|e| match e.borrow().as_ref() {
         Some(msg) => msg.as_ptr(),
         None => std::ptr::null(),
@@ -198,7 +198,7 @@ pub extern "C" fn freud_last_error() -> *const c_char {
 /// the exact length received. Null is a no-op. Buffers must not be
 /// freed with any other allocator.
 #[no_mangle]
-pub extern "C" fn freud_free(ptr: *mut u8, len: usize) {
+pub extern "C" fn c2bf_free(ptr: *mut u8, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
     }
@@ -213,11 +213,11 @@ pub extern "C" fn freud_free(ptr: *mut u8, len: usize) {
 /// Read a C string for tests (the header's contract, not FFI).
 #[cfg(test)]
 fn last_error_str() -> Option<String> {
-    let ptr = freud_last_error();
+    let ptr = c2bf_last_error();
     if ptr.is_null() {
         return None;
     }
-    // SAFETY: `freud_last_error` returns a valid NUL-terminated
+    // SAFETY: `c2bf_last_error` returns a valid NUL-terminated
     // string or null, checked above.
     Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
 }
@@ -235,7 +235,7 @@ mod tests {
         // SAFETY: the buffer was delivered by the FFI call under
         // test, with exactly this length.
         let bytes = unsafe { std::slice::from_raw_parts(out, len) }.to_vec();
-        freud_free(out, len);
+        c2bf_free(out, len);
         bytes
     }
 
@@ -244,7 +244,7 @@ mod tests {
         let src = b"int main() { printf(\"%d\\n\", 6 * 7); }";
         let mut bf: *mut u8 = std::ptr::null_mut();
         let mut bf_len = 0usize;
-        let rc = freud_compile(src.as_ptr(), src.len(), &mut bf, &mut bf_len);
+        let rc = c2bf_compile(src.as_ptr(), src.len(), &mut bf, &mut bf_len);
         assert_eq!(rc, 0);
         assert!(bf_len > 0);
         let bf = unsafe { take(bf, bf_len) };
@@ -252,7 +252,7 @@ mod tests {
 
         let mut out: *mut u8 = std::ptr::null_mut();
         let mut out_len = 0usize;
-        let rc = freud_run(bf.as_ptr(), bf.len(), std::ptr::null(), 0, &mut out, &mut out_len);
+        let rc = c2bf_run(bf.as_ptr(), bf.len(), std::ptr::null(), 0, &mut out, &mut out_len);
         assert_eq!(rc, 0);
         assert_eq!(unsafe { take(out, out_len) }, b"42\n");
         assert_eq!(last_error_str(), None);
@@ -262,12 +262,12 @@ mod tests {
     fn run_reports_unbalanced_brackets() {
         let mut out: *mut u8 = std::ptr::null_mut();
         let mut out_len = 0usize;
-        let rc = freud_run(b"]".as_ptr(), 1, std::ptr::null(), 0, &mut out, &mut out_len);
+        let rc = c2bf_run(b"]".as_ptr(), 1, std::ptr::null(), 0, &mut out, &mut out_len);
         assert_eq!(rc, 1);
         assert!(out.is_null() && out_len == 0);
         assert_eq!(
             last_error_str().as_deref(),
-            Some(freud_core::runner::ERR_UNEXPECTED_CLOSE)
+            Some(c2bf_core::runner::ERR_UNEXPECTED_CLOSE)
         );
     }
 
@@ -275,7 +275,7 @@ mod tests {
     fn compile_error_reports_message() {
         let mut out: *mut u8 = std::ptr::null_mut();
         let mut out_len = 0usize;
-        let rc = freud_compile(b"int main( {".as_ptr(), 11, &mut out, &mut out_len);
+        let rc = c2bf_compile(b"int main( {".as_ptr(), 11, &mut out, &mut out_len);
         assert_eq!(rc, 1);
         assert!(out.is_null() && out_len == 0);
         assert!(last_error_str().is_some_and(|m| !m.is_empty()));
@@ -285,7 +285,7 @@ mod tests {
     fn format_minifies() {
         let mut out: *mut u8 = std::ptr::null_mut();
         let mut out_len = 0usize;
-        let rc = freud_format(b"a + b [ignored]".as_ptr(), 15, 1, &mut out, &mut out_len);
+        let rc = c2bf_format(b"a + b [ignored]".as_ptr(), 15, 1, &mut out, &mut out_len);
         assert_eq!(rc, 0);
         assert_eq!(unsafe { take(out, out_len) }, b"+[]\n");
     }
@@ -296,26 +296,26 @@ mod tests {
         let mut out_len = 0usize;
         // Null input with a nonzero length.
         assert_eq!(
-            freud_compile(std::ptr::null(), 3, &mut out, &mut out_len),
+            c2bf_compile(std::ptr::null(), 3, &mut out, &mut out_len),
             2
         );
         // Null out-pointers.
         let src = b"int main() {}";
         assert_eq!(
-            freud_compile(src.as_ptr(), src.len(), std::ptr::null_mut(), &mut out_len),
+            c2bf_compile(src.as_ptr(), src.len(), std::ptr::null_mut(), &mut out_len),
             2
         );
         assert_eq!(
-            freud_compile(src.as_ptr(), src.len(), &mut out, std::ptr::null_mut()),
+            c2bf_compile(src.as_ptr(), src.len(), &mut out, std::ptr::null_mut()),
             2
         );
     }
 
     #[test]
     fn version_is_present() {
-        let ptr = freud_version();
+        let ptr = c2bf_version();
         assert!(!ptr.is_null());
-        // SAFETY: `freud_version` returns a valid NUL-terminated string.
+        // SAFETY: `c2bf_version` returns a valid NUL-terminated string.
         let v = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
         assert!(!v.is_empty());
     }

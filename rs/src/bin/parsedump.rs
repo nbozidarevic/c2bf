@@ -1,10 +1,10 @@
-// parsedump: dump the freud-core parse tree in differential-test format.
+// parsedump: dump the c2bf-core parse tree in differential-test format.
 // One single-line S-expression (see tests/differential/SPEC.md).
 use std::io::Write;
 use std::process::exit;
 
-use freud_core::ast;
-use freud_core::parser;
+use c2bf_core::ast;
+use c2bf_core::parser;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

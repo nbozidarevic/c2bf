@@ -1,6 +1,6 @@
-# WebAssembly adapter (`freud-wasm`)
+# WebAssembly adapter (`c2bf-wasm`)
 
-A `wasm-bindgen` adapter over `freud-core`, kept in its own crate so
+A `wasm-bindgen` adapter over `c2bf-core`, kept in its own crate so
 the core never depends on `wasm-bindgen` (pollution veto, see
 `docs/decisions/0006-distribution-adapters.md`). It exports
 `compile`, `run`, `format_code`, and `version` for the browser demo
@@ -18,7 +18,7 @@ wasm-pack build rs/wasm --target web --out-dir demo/pkg
 For Node (smoke tests, bundlers) and for npm publishing:
 
 ```
-wasm-pack build rs/wasm --target bundler --out-dir /tmp/freud-pkg
+wasm-pack build rs/wasm --target bundler --out-dir /tmp/c2bf-pkg
 ```
 
 ## Tests
@@ -32,8 +32,8 @@ cargo test --manifest-path rs/wasm/Cargo.toml
 Node smoke test against a `--target nodejs` build:
 
 ```
-wasm-pack build rs/wasm --target nodejs --out-dir /tmp/freud-node-pkg
-node rs/wasm/smoke.cjs /tmp/freud-node-pkg
+wasm-pack build rs/wasm --target nodejs --out-dir /tmp/c2bf-node-pkg
+node rs/wasm/smoke.cjs /tmp/c2bf-node-pkg
 ```
 
 Both builds and the smoke test run in the `wasm` CI job.
@@ -45,15 +45,14 @@ contains `package.json`, the JS glue, TypeScript definitions, and the
 `.wasm` binary. Publishing is deliberately manual:
 
 ```
-wasm-pack build rs/wasm --target bundler --out-dir /tmp/freud-pkg
-cd /tmp/freud-pkg
+wasm-pack build rs/wasm --target bundler --out-dir /tmp/c2bf-pkg
+cd /tmp/c2bf-pkg
 npm publish --access public   # needs an npm account + token
 ```
 
 The published name and version come from `rs/wasm/Cargo.toml`
-(`freud-wasm`, currently `0.0.0`); set a real version before the
-first publish, and expect the `freud-*` name to change with the
-Phase 8 rename.
+(`c2bf-wasm`, currently `0.0.0`); set a real version before the
+first publish.
 
 ## Demo site (owner-gated, not deployed by CI)
 

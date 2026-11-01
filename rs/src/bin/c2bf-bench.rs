@@ -1,11 +1,11 @@
-//! `freud-bench`: performance harness (Phase 5).
+//! `c2bf-bench`: performance harness (Phase 5).
 //!
 //! In-process timing of transpilation (`compile`) and execution
 //! (`runner::run`) for the corpus under `tests/compile/`, plus
 //! synthetic runner microbenchmarks. Excludes process startup.
 //!
 //! Usage (from the repo root):
-//!   freud-bench [--quick] [--json | --md | --write docs/perf.md] [root]
+//!   c2bf-bench [--quick] [--json | --md | --write docs/perf.md] [root]
 //!
 //! Timing is adaptive: each case runs at least 3 iterations and until
 //! ~2s total elapsed (cap 100 iterations), so fast and slow cases both
@@ -19,7 +19,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use freud_core::{compile, runner};
+use c2bf_core::{compile, runner};
 
 struct Stats {
     iters: usize,
@@ -169,7 +169,7 @@ fn bench_micros(target_ms: u128, cap: usize) -> Vec<Micro> {
 fn md_fragment(cases: &[Case], micros: &[Micro]) -> String {
     let mut s = String::new();
     s.push_str(&format!(
-        "In-process timing on {}-{} (`freud-bench`, adaptive iterations: at least 3, until ~2s total, cap 100). Times exclude process startup.\n\n",
+        "In-process timing on {}-{} (`c2bf-bench`, adaptive iterations: at least 3, until ~2s total, cap 100). Times exclude process startup.\n\n",
         env::consts::OS,
         env::consts::ARCH
     ));
@@ -236,7 +236,7 @@ fn json_report(cases: &[Case], micros: &[Micro]) -> String {
 fn table_report(cases: &[Case], micros: &[Micro]) -> String {
     let mut s = String::new();
     s.push_str(&format!(
-        "freud-bench on {}-{} (adaptive: >=3 iters, ~2s target, cap 100)\n\n",
+        "c2bf-bench on {}-{} (adaptive: >=3 iters, ~2s target, cap 100)\n\n",
         env::consts::OS,
         env::consts::ARCH
     ));
@@ -316,7 +316,7 @@ fn main() {
                     .expect("bad --cap value");
             }
             s if s.starts_with('-') => {
-                eprintln!("freud-bench: unknown flag {s}");
+                eprintln!("c2bf-bench: unknown flag {s}");
                 std::process::exit(2);
             }
             s => root = PathBuf::from(s),

@@ -3,7 +3,7 @@
 use std::io::Write;
 use std::process::exit;
 
-use freud_core::compile;
+use c2bf_core::compile;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();

@@ -1,4 +1,4 @@
-//! Tokenizer for the freud C subset.
+//! Tokenizer for the C subset.
 //!
 //! Mirrors `tests/differential/tokdump.cpp` token-for-token: same token
 //! boundaries, same 1-based line/col tracking (including the `//` and `#`

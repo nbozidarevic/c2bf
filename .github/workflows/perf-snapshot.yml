@@ -20,7 +20,7 @@ jobs:
         run: cargo build --release --manifest-path rs/Cargo.toml
 
       - name: Generate perf results
-        run: ./rs/target/release/freud-bench --write docs/perf.md
+        run: ./rs/target/release/c2bf-bench --write docs/perf.md
 
       - name: Upload perf doc
         uses: actions/upload-artifact@v4

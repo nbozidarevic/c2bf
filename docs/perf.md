@@ -6,9 +6,9 @@ goes. Transpile time is measured too, for context.
 
 ## Method
 
-- Harness: `rs/src/bin/freud-bench.rs`, run from the repo root after
+- Harness: `rs/src/bin/c2bf-bench.rs`, run from the repo root after
   `cargo build --release --manifest-path rs/Cargo.toml`:
-  `./rs/target/release/freud-bench`.
+  `./rs/target/release/c2bf-bench`.
 - In-process timing (excludes process startup). Each case runs at
   least 3 iterations and until ~2s total elapsed (cap 100 iterations);
   the mean and min over those iterations are reported.
@@ -61,7 +61,7 @@ Runner microbenchmarks:
 
 Refresh this file after any change to the runner, the code emitter,
 or the harness itself: regenerate with
-`./rs/target/release/freud-bench --write docs/perf.md` and commit the
+`./rs/target/release/c2bf-bench --write docs/perf.md` and commit the
 result (or run the `perf-snapshot` workflow from the Actions tab and
 commit its artifact). Perf-affecting changes without a refreshed
 results section are incomplete.

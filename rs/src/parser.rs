@@ -1,4 +1,4 @@
-//! Recursive-descent parser for the freud C subset.
+//! Recursive-descent parser for the C subset.
 //!
 //! Mirrors `tests/differential/parse.cpp` routine-for-routine: same
 //! accepted language, same tree shapes (see `tests/differential/SPEC.md`),

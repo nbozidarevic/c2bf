@@ -1,6 +1,6 @@
 // Demo wiring: load the wasm-pack `--target web` build from ./pkg/
 // and hook up the Transpile / Run buttons. No framework, no bundler.
-import init, { compile, run, version } from "./pkg/freud_wasm.js";
+import init, { compile, run, version } from "./pkg/c2bf_wasm.js";
 
 const srcEl = document.getElementById("src");
 const inputEl = document.getElementById("input");
@@ -20,7 +20,7 @@ function showError(err) {
 function transpile() {
   const bf = compile(srcEl.value);
   bfEl.textContent = bf;
-  statusEl.textContent = `Transpiled ok (freud ${version()}).`;
+  statusEl.textContent = `Transpiled ok (c2bf ${version()}).`;
   statusEl.classList.remove("error");
   return bf;
 }
@@ -39,7 +39,7 @@ runBtn.addEventListener("click", () => {
     const input = new TextEncoder().encode(inputEl.value);
     const output = run(bf, input);
     outEl.textContent = decoder.decode(output);
-    statusEl.textContent = `Ran ok (freud ${version()}).`;
+    statusEl.textContent = `Ran ok (c2bf ${version()}).`;
     statusEl.classList.remove("error");
   } catch (err) {
     showError(err);
@@ -52,7 +52,7 @@ try {
   await init();
   compileBtn.disabled = false;
   runBtn.disabled = false;
-  statusEl.textContent = `Ready (freud ${version()}).`;
+  statusEl.textContent = `Ready (c2bf ${version()}).`;
 } catch (err) {
   showError(`failed to load WebAssembly: ${err}`);
 }

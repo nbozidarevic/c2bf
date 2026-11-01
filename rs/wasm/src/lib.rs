@@ -1,7 +1,7 @@
-//! WebAssembly adapter over [`freud_core`]: `compile`, `run`, and
+//! WebAssembly adapter over [`c2bf_core`]: `compile`, `run`, and
 //! `format` for the browser demo and the npm package.
 //!
-//! Kept in its own crate so `freud-core` never depends on
+//! Kept in its own crate so `c2bf-core` never depends on
 //! `wasm-bindgen` (pollution veto, see
 //! `docs/decisions/0006-distribution-adapters.md`). The exported
 //! functions are thin wrappers: strings in, strings or byte arrays
@@ -19,7 +19,7 @@ use wasm_bindgen::prelude::*;
 /// CLI emits). Throws the compile diagnostic on failure.
 #[wasm_bindgen]
 pub fn compile(src: &str) -> Result<String, JsValue> {
-    freud_core::compile::compile(src.as_bytes())
+    c2bf_core::compile::compile(src.as_bytes())
         .map(|bf| String::from_utf8_lossy(&bf).into_owned())
         .map_err(|e| JsValue::from_str(&e.msg))
 }
@@ -31,7 +31,7 @@ pub fn compile(src: &str) -> Result<String, JsValue> {
 pub fn run(code: &str, input: &[u8]) -> Result<Vec<u8>, JsValue> {
     let mut input = input;
     let mut output = Vec::new();
-    freud_core::runner::run(code.as_bytes(), &mut input, &mut output)
+    c2bf_core::runner::run(code.as_bytes(), &mut input, &mut output)
         .map(|()| output)
         .map_err(JsValue::from_str)
 }
@@ -40,7 +40,7 @@ pub fn run(code: &str, input: &[u8]) -> Result<Vec<u8>, JsValue> {
 #[wasm_bindgen]
 pub fn format_code(code: &str, minify: bool) -> String {
     let mut output = Vec::new();
-    freud_core::format::format(code.as_bytes(), &mut output, minify);
+    c2bf_core::format::format(code.as_bytes(), &mut output, minify);
     String::from_utf8_lossy(&output).into_owned()
 }
 

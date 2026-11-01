@@ -27,9 +27,8 @@ then optimize, extend, and distribute.
 - [x] Phase 7 — Native-first distribution adapters; web adapter gated.
       7a C ABI (`rs/ffi/`), 7b WASM/demo (`rs/wasm/`, `demo/`) done,
       record 0006; UniFFI/JNI deferred, named; npm/Pages owner-gated.
-- [ ] Phase 8 — Rename, final docs, changelog, tag.
-      Prep done (`CHANGELOG.md`, `docs/rename-checklist.md`); the
-      rename itself and the tag are the owner's step.
+- [x] Phase 8 — Rename, final docs, changelog, tag.
+      Renamed `freud` → `c2bf`, tagged `v0.1.0`.
 
 ## Operating loop (CI-primary)
 

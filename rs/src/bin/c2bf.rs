@@ -1,6 +1,6 @@
-//! `freud`: transpile-first CLI (compile by default; run/format/help auxiliary).
+//! `c2bf`: transpile-first CLI (compile by default; run/format/help auxiliary).
 
-use freud_core::cli;
+use c2bf_core::cli;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -8,7 +8,7 @@ fn main() {
         cli::print_header_and_usage();
         return;
     }
-    // Note: flags parse before dispatch, so `freud bogus -c` reports
+    // Note: flags parse before dispatch, so `c2bf bogus -c` reports
     // the missing value (compile path), not an unknown command.
     let (command, cmd_args) = match args[0].as_str() {
         "compile" | "run" | "format" => (args[0].as_str(), &args[1..]),
@@ -17,7 +17,7 @@ fn main() {
             return;
         }
         "--version" => {
-            println!("freud {}", env!("CARGO_PKG_VERSION"));
+            println!("c2bf {}", env!("CARGO_PKG_VERSION"));
             return;
         }
         _ => ("compile", &args[..]),

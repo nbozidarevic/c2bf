@@ -1,5 +1,12 @@
 # Rename checklist (Phase 8, owner-executed)
 
+Status: completed — renamed to `c2bf` and tagged `v0.1.0`. `freud`
+below is the pre-rename name; this file is the record of the sweep
+as executed. A post-rename `git grep -i freud` is expected to return
+only historical records (decision records, baseline, the entries in
+the [changelog](../CHANGELOG.md) below the rename
+entry) plus this checklist itself.
+
 The rename from `freud` to the owner's chosen name (`c2bf` family per
 decision 0001; exact name is the owner's call) is a single sweep:
 every item below changes together, goldens regenerate, CI goes green,

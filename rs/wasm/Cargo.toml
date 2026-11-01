@@ -1,14 +1,14 @@
 [package]
-name = "freud-wasm"
+name = "c2bf-wasm"
 version = "0.0.0"
 edition = "2021"
-description = "WebAssembly adapter over freud-core (gated web distribution; kept out of the core crate)"
+description = "WebAssembly adapter over c2bf-core (gated web distribution; kept out of the core crate)"
 license = "MIT"
 
 [lib]
-name = "freud_wasm"
+name = "c2bf_wasm"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-freud-core = { path = ".." }
+c2bf-core = { path = ".." }
 wasm-bindgen = "0.2"

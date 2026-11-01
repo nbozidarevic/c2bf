@@ -1,19 +1,18 @@
 # Changelog
 
-All notable changes to this project. The project has no releases or
-tags yet; the version is `0.0.0` throughout, and entries below are
-grouped by the roadmap phases that produced them. The rename to the
-`c2bf` family (see "Rename pending" below) will be the first
-release-shaped change.
+All notable changes to this project. The version is `0.0.0`
+throughout, and entries below are grouped by the roadmap phases that
+produced them. The rename to `c2bf` (below) is the first
+release-shaped change, tagged `v0.1.0`.
 
-## Rename pending (owner's step, Phase 8)
+## Rename to `c2bf` (Phase 8)
 
-The project is still named `freud` everywhere: crate names, binaries,
-the C ABI (`freud_*`), the WASM package, docs, and CI. Renaming is
-the owner's final step; `docs/rename-checklist.md` is the complete,
-evidence-based inventory of what changes, and this file will gain a
-release entry when the rename lands. The exact new name is the
-owner's call (`c2bf` family per `docs/decisions/0001`).
+The project was renamed from `freud` to `c2bf` in a single sweep, per
+`docs/rename-checklist.md`: crate names (`c2bf-core`, `c2bf-ffi`,
+`c2bf-wasm`), binaries (`c2bf`, `c2bf-bench`), the C ABI (`c2bf_*`,
+`c2bf.h`), the WASM package, docs, tests, and CI. Golden outputs
+were regenerated; the rename changed no code generation. Entries
+below keep the pre-rename names as history.
 
 ## Phase 7 — Distribution adapters
 

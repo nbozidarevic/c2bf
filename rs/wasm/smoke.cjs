@@ -1,6 +1,6 @@
 // Node smoke test for the wasm-pack `--target nodejs` build.
 // Usage: node rs/wasm/smoke.cjs <path-to-built-dir>
-// The built dir contains freud_wasm.js (CommonJS) next to its .wasm.
+// The built dir contains c2bf_wasm.js (CommonJS) next to its .wasm.
 // Exits nonzero on the first failed assertion.
 "use strict";
 
@@ -12,7 +12,7 @@ if (!dir) {
   console.error("usage: node smoke.cjs <built-dir>");
   process.exit(2);
 }
-const { compile, run, format_code, version } = require(path.join(dir, "freud_wasm.js"));
+const { compile, run, format_code, version } = require(path.join(dir, "c2bf_wasm.js"));
 
 assert.match(version(), /^\d+\.\d+\.\d+$/, "version looks like semver");
 

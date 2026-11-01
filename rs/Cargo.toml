@@ -1,5 +1,5 @@
 [package]
-name = "freud-core"
+name = "c2bf-core"
 version = "0.0.0"
 edition = "2021"
 
@@ -10,7 +10,7 @@ members = [".", "ffi", "wasm"]
 default-members = ["."]
 
 [lib]
-name = "freud_core"
+name = "c2bf_core"
 path = "src/lib.rs"
 
 [[bin]]
@@ -26,9 +26,9 @@ name = "bfcompile"
 path = "src/bin/bfcompile.rs"
 
 [[bin]]
-name = "freud"
-path = "src/bin/freud.rs"
+name = "c2bf"
+path = "src/bin/c2bf.rs"
 
 [[bin]]
-name = "freud-bench"
-path = "src/bin/freud-bench.rs"
+name = "c2bf-bench"
+path = "src/bin/c2bf-bench.rs"
