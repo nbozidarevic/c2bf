@@ -57,6 +57,12 @@ below keep the pre-rename names as history.
 - Runner optimization: jump table for brackets, buffered I/O.
 - Peephole post-pass evaluated by measurement and rejected (zero
   occurrences in the golden corpus).
+- Loop-based constant construction in `set_value`: large constants
+  build as `a * b + r` over a scratch cell when smaller in emitted
+  bytes and within 25% of direct in estimated steps; all 60+
+  `+` runs in the golden corpus are gone, `hello_world` halves,
+  corpus totals barely move (helpers dominate). Goldens
+  regenerated; `docs/perf.md` refreshed.
 
 ## Phase 3 — Transpile-first reframe
 
