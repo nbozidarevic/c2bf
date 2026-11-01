@@ -119,8 +119,8 @@ listed under "Leave alone".
 
 ## 6. Publish again, under the new name (owner, only if wanted)
 
-- [ ] npm: set the new package name/version in `rs/wasm/Cargo.toml`
-      and publish the `--target bundler` output (see
-      `rs/wasm/README.md`).
+- [x] npm: do not publish. Publishing an npm package was declined
+      by the owner (2026-11-01); no npm package for `c2bf` will be
+      published.
 - [ ] GitHub Pages: re-dispatch `.github/workflows/pages.yml` so
       the demo rebuilds under the new bundle file names.

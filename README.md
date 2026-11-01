@@ -36,7 +36,7 @@ Run a transpiled program, feeding it input:
 The core is a dependency-free Rust library. Adapters live outside it:
 
 - C/C++: C ABI in [rs/ffi/](rs/ffi) (`c2bf.h`, `c2bf_compile`/`c2bf_run`/`c2bf_format`).
-- Web: WebAssembly adapter in [rs/wasm/](rs/wasm) and the demo in [demo/](demo). npm publishing and Pages deployment are manual, owner-gated steps; see [rs/wasm/README.md](rs/wasm/README.md).
+- Web: WebAssembly adapter in [rs/wasm/](rs/wasm) and the demo in [demo/](demo). Pages deployment is a manual, owner-gated step; see [rs/wasm/README.md](rs/wasm/README.md). No npm package will be published.
 
 ## Tests
 

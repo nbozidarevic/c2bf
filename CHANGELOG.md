@@ -24,7 +24,8 @@ below keep the pre-rename names as history.
   `compile`/`run`/`format_code`, a static demo page, a Node smoke
   test, and a dispatch-only GitHub Pages workflow. All three
   `wasm-pack` targets (`web`, `nodejs`, `bundler`) are CI-verified;
-  npm publishing and Pages deployment are manual, owner-gated steps.
+  Pages deployment is a manual, owner-gated step. npm publishing is
+  not planned.
 - UniFFI (Kotlin/Swift) and JNI (Java) bridges are named and
   deferred; both build on the C ABI. See
   `docs/decisions/0006-distribution-adapters.md`.

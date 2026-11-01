@@ -4,7 +4,7 @@ A `wasm-bindgen` adapter over `c2bf-core`, kept in its own crate so
 the core never depends on `wasm-bindgen` (pollution veto, see
 `docs/decisions/0006-distribution-adapters.md`). It exports
 `compile`, `run`, `format_code`, and `version` for the browser demo
-and the npm package. The adapter adds no behavior.
+and local bundler builds. The adapter adds no behavior.
 
 ## Build
 
@@ -15,7 +15,7 @@ and the npm package. The adapter adds no behavior.
 wasm-pack build rs/wasm --target web --out-dir demo/pkg
 ```
 
-For Node (smoke tests, bundlers) and for npm publishing:
+For Node (smoke tests, bundlers):
 
 ```
 wasm-pack build rs/wasm --target bundler --out-dir /tmp/c2bf-pkg
@@ -38,21 +38,13 @@ node rs/wasm/smoke.cjs /tmp/c2bf-node-pkg
 
 Both builds and the smoke test run in the `wasm` CI job.
 
-## npm publishing (owner-gated, not run by CI)
+## No npm publishing
 
-The `--target bundler` output directory *is* the npm package: it
-contains `package.json`, the JS glue, TypeScript definitions, and the
-`.wasm` binary. Publishing is deliberately manual:
-
-```
-wasm-pack build rs/wasm --target bundler --out-dir /tmp/c2bf-pkg
-cd /tmp/c2bf-pkg
-npm publish --access public   # needs an npm account + token
-```
-
-The published name and version come from `rs/wasm/Cargo.toml`
-(`c2bf-wasm`, currently `0.0.0`); set a real version before the
-first publish.
+No npm package will be published for `c2bf` (owner decision,
+2026-11-01). Do not run `npm publish`. The `--target bundler`
+output is for local bundler use only. CI validates that output's
+shape with `npm pack --dry-run`, which contacts no registry and
+publishes nothing.
 
 ## Demo site (owner-gated, not deployed by CI)
 

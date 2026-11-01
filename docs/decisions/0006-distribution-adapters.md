@@ -53,3 +53,11 @@ has been run.
 - The workspace root (`rs/Cargo.toml`) declares
   `default-members = ["."]`, so existing core build/test commands
   keep their meaning; adapter crates build via their own manifests.
+
+## Update (2026-11-01): npm publishing declined
+
+No npm package will be published for `c2bf` (owner decision). The
+WASM adapter remains for the demo and local bundler use. CI's
+`npm pack --dry-run` is a shape check only; it contacts no registry
+and publishes nothing. Pages deployment remains a manual,
+owner-gated step.
