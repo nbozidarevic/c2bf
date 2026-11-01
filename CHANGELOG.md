@@ -1,9 +1,9 @@
 # Changelog
 
-All notable changes to this project. The version is `0.0.0`
-throughout, and entries below are grouped by the roadmap phases that
-produced them. The rename to `c2bf` (below) is the first
-release-shaped change, tagged `v0.1.0`.
+All notable changes to this project. Crate versions were `0.0.0`
+until the rename to `c2bf` (below); they are `0.1.0` from that
+point, matching tag `v0.1.0`. Entries below are grouped by the
+roadmap phases that produced them.
 
 ## Rename to `c2bf` (Phase 8)
 
@@ -11,7 +11,8 @@ The project was renamed from `freud` to `c2bf` in a single sweep, per
 `docs/rename-checklist.md`: crate names (`c2bf-core`, `c2bf-ffi`,
 `c2bf-wasm`), binaries (`c2bf`, `c2bf-bench`), the C ABI (`c2bf_*`,
 `c2bf.h`), the WASM package, docs, tests, and CI. Golden outputs
-were regenerated; the rename changed no code generation. Entries
+were regenerated; the rename changed no code generation. The rename
+also moved the crate versions from `0.0.0` to `0.1.0`. Entries
 below keep the pre-rename names as history.
 
 ## Phase 7 — Distribution adapters
