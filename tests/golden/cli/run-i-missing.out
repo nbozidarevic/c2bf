@@ -1,8 +1,8 @@
 Parameter -i is missing a value.
 
-Usage: freud [command] [file] [options]
+Usage: c2bf [command] [file] [options]
 
-Compiles by default: `freud program.c -o program.bf` transpiles
+Compiles by default: `c2bf program.c -o program.bf` transpiles
 program.c. Without -o, output goes to stdout; without a file, input
 comes from stdin (`run` requires a file).
 
