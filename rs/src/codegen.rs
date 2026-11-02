@@ -389,6 +389,90 @@ impl Emitter {
         Ok(())
     }
 
+    /// Add a copy of `source` into `dest`, preserving `source`.
+    /// Unlike `add_values`, this adds to `dest`'s existing value
+    /// instead of returning a fresh cell, and needs only one
+    /// duplicate plus one drain loop.
+    fn add_copy_to(&mut self, source: i32, dest: i32) {
+        let helper = self.duplicate_value(source);
+        self.move_pointer(helper);
+        self.emit("[-");
+        self.move_pointer(dest);
+        self.emit("+");
+        self.move_pointer(helper);
+        self.emit("]");
+    }
+
+    /// Combine two bit cells (`0`/`1`) with AND, returning a fresh
+    /// bit cell. Consumes `abit`: the loop clears it after copying
+    /// `bbit` through. `bbit` is preserved but unused afterwards.
+    fn combine_and(&mut self, abit: i32, bbit: i32) -> Result<i32, CompileError> {
+        let bit = self.const_value(0);
+        self.move_pointer(abit);
+        self.emit("[");
+        self.copy_value(bbit, bit);
+        self.set_value(abit, 0);
+        self.move_pointer(abit);
+        self.emit("]");
+        Ok(bit)
+    }
+
+    /// Combine two bit cells (`0`/`1`) with OR, returning a fresh
+    /// bit cell. Consumes `bbit`: the loop sets the result to `1`
+    /// and clears `bbit` to exit. `abit` is preserved but unused
+    /// afterwards.
+    fn combine_or(&mut self, abit: i32, bbit: i32) -> Result<i32, CompileError> {
+        let bit = self.const_value(0);
+        self.copy_value(abit, bit);
+        self.move_pointer(bbit);
+        self.emit("[");
+        self.set_value(bit, 1);
+        self.set_value(bbit, 0);
+        self.move_pointer(bbit);
+        self.emit("]");
+        Ok(bit)
+    }
+
+    /// Combine two bit cells (`0`/`1`) with XOR, returning a fresh
+    /// bit cell. Consumes `bbit`: the loop flips the copied `abit`
+    /// once and clears `bbit` to exit.
+    fn combine_xor(&mut self, abit: i32, bbit: i32) -> Result<i32, CompileError> {
+        let bit = self.const_value(0);
+        self.copy_value(abit, bit);
+        self.move_pointer(bbit);
+        self.emit("[");
+        self.perform_if_else(
+            bit,
+            |em| {
+                em.set_value(bit, 0);
+                Ok(())
+            },
+            |em| {
+                em.set_value(bit, 1);
+                Ok(())
+            },
+        )?;
+        self.set_value(bbit, 0);
+        self.move_pointer(bbit);
+        self.emit("]");
+        Ok(bit)
+    }
+
+    /// Add `place` into `result` when `bit` is nonzero, preserving
+    /// both cells. Cheaper than scaling the bit with
+    /// `multiply_values` and adding the product: the bit is only
+    /// ever `0` or `1`, so the multiply's loop is pure overhead.
+    fn accumulate_bit(&mut self, bit: i32, result: i32, place: i32) -> Result<(), CompileError> {
+        self.perform_if_else(
+            bit,
+            |em| {
+                em.add_copy_to(place, result);
+                Ok(())
+            },
+            |_| Ok(()),
+        )
+    }
+
     /// `result = a <op> b` in a fresh cell, for a bitwise `op`.
     ///
     /// Walks the eight bits LSB-first, halving duplicated copies of
@@ -414,20 +498,11 @@ impl Emitter {
                 let abit = em.divmod_two(ac)?;
                 let bbit = em.divmod_two(bc)?;
                 let bit = match mode {
-                    BitCombine::And => em.multiply_values(abit, bbit),
-                    BitCombine::Or => {
-                        let both = em.multiply_values(abit, bbit);
-                        let sum = em.add_values(abit, bbit);
-                        em.subtract_values(sum, both)
-                    }
-                    BitCombine::Xor => {
-                        let sum = em.add_values(abit, bbit);
-                        em.divmod_two(sum)?
-                    }
+                    BitCombine::And => em.combine_and(abit, bbit)?,
+                    BitCombine::Or => em.combine_or(abit, bbit)?,
+                    BitCombine::Xor => em.combine_xor(abit, bbit)?,
                 };
-                let scaled = em.multiply_values(bit, place);
-                let sum = em.add_values(result, scaled);
-                em.move_value(sum, result);
+                em.accumulate_bit(bit, result, place)?;
                 em.double_in_place(place);
                 let zero_a = em.negate(ac)?;
                 let zero_b = em.negate(bc)?;
@@ -1167,6 +1242,82 @@ mod tests {
             let ca = em.const_value(a);
             em.halve_in_place(ca).unwrap();
             assert_eq!(run_cell(&mut em, ca), a / 2, "halve {a}");
+        }
+    }
+
+    #[test]
+    fn bit_combine_values() {
+        for (a, b, and, or, xor) in [
+            (0u8, 0u8, 0u8, 0u8, 0u8),
+            (0, 1, 0, 1, 1),
+            (1, 0, 0, 1, 1),
+            (1, 1, 1, 1, 0),
+        ] {
+            let mut em = Emitter::new();
+            let ca = em.const_value(a);
+            let cb = em.const_value(b);
+            let r = em.combine_and(ca, cb).unwrap();
+            assert_eq!(run_cell(&mut em, r), and, "{a} & {b}");
+            let mut em = Emitter::new();
+            let ca = em.const_value(a);
+            let cb = em.const_value(b);
+            let r = em.combine_or(ca, cb).unwrap();
+            assert_eq!(run_cell(&mut em, r), or, "{a} | {b}");
+            let mut em = Emitter::new();
+            let ca = em.const_value(a);
+            let cb = em.const_value(b);
+            let r = em.combine_xor(ca, cb).unwrap();
+            assert_eq!(run_cell(&mut em, r), xor, "{a} ^ {b}");
+        }
+    }
+
+    #[test]
+    fn add_copy_to_preserves_source() {
+        for (s, d, want) in [
+            (0u8, 0u8, 0u8),
+            (0, 255, 255),
+            (255, 0, 255),
+            (255, 255, 254),
+            (200, 100, 44),
+            (128, 128, 0),
+            (1, 254, 255),
+        ] {
+            let mut em = Emitter::new();
+            let cs = em.const_value(s);
+            let cd = em.const_value(d);
+            em.add_copy_to(cs, cd);
+            assert_eq!(run_cell(&mut em, cd), want, "{s} + {d}");
+            let mut em = Emitter::new();
+            let cs = em.const_value(s);
+            let cd = em.const_value(d);
+            em.add_copy_to(cs, cd);
+            assert_eq!(run_cell(&mut em, cs), s, "source {s} preserved");
+        }
+    }
+
+    #[test]
+    fn accumulate_bit_adds_place_when_set() {
+        for (bit, place, result, want) in [
+            (0u8, 1u8, 0u8, 0u8),
+            (0, 128, 200, 200),
+            (1, 1, 0, 1),
+            (1, 2, 3, 5),
+            (1, 128, 200, 72),
+            (1, 255, 255, 254),
+            (1, 4, 0, 4),
+        ] {
+            let mut em = Emitter::new();
+            let cb = em.const_value(bit);
+            let cr = em.const_value(result);
+            let cp = em.const_value(place);
+            em.accumulate_bit(cb, cr, cp).unwrap();
+            assert_eq!(run_cell(&mut em, cr), want, "bit {bit} place {place}");
+            let mut em = Emitter::new();
+            let cb = em.const_value(bit);
+            let cr = em.const_value(result);
+            let cp = em.const_value(place);
+            em.accumulate_bit(cb, cr, cp).unwrap();
+            assert_eq!(run_cell(&mut em, cp), place, "place {place} preserved");
         }
     }
 
