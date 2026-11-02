@@ -57,6 +57,10 @@ below keep the pre-rename names as history.
 - Integer literals in hex (`0x`), binary (`0b`), and octal (`0`
   prefix, 8/9 rejected as in g++), with `u`/`l` suffixes; values
   still truncate to a byte. Pinned by the `literals` oracle fixture.
+- Multiple declarators per declaration (`int a = 1, b = 2;`, local
+  and global); a declarator without an initializer is still an
+  error, per declarator as before. The old `n5_multi_decl` negative
+  fixture is retired; pinned by the `multidecl` oracle fixture.
 
 ## Phase 5 — Performance
 

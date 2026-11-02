@@ -236,13 +236,16 @@ impl<'a> Parser<'a> {
         } else {
             return self.fail("expected type name".to_string());
         };
-        let init = if !self.at_punct(b";") {
-            Some(self.parse_init_declarator()?)
-        } else {
-            None
-        };
+        let mut inits = Vec::new();
+        if !self.at_punct(b";") {
+            inits.push(self.parse_init_declarator()?);
+            while self.at_punct(b",") {
+                self.next_tok();
+                inits.push(self.parse_init_declarator()?);
+            }
+        }
         self.expect_punct(b";", "';'")?;
-        Ok(Decl { spec, init })
+        Ok(Decl { spec, inits })
     }
 
     fn parse_init_declarator(&mut self) -> Result<InitDecl, ParseError> {
@@ -909,6 +912,18 @@ mod tests {
     #[test]
     fn decls_with_and_without_init() {
         assert_sexp("int g;\nint;", "(tu (decl int (initdecl g)) (decl int))");
+    }
+
+    #[test]
+    fn multiple_declarators() {
+        assert_sexp(
+            "int f() { int a = 1, b = 2, c; }",
+            "(tu (funcdef f (compound (decl int (initdecl a (int 1)) (initdecl b (int 2)) (initdecl c)))))",
+        );
+        assert_sexp(
+            "int a = 1, b = 2;",
+            "(tu (decl int (initdecl a (int 1)) (initdecl b (int 2))))",
+        );
     }
 
     #[test]

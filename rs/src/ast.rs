@@ -23,7 +23,8 @@ pub struct FuncDef {
 #[derive(Debug)]
 pub struct Decl {
     pub spec: Vec<u8>,
-    pub init: Option<InitDecl>,
+    /// Declarators in order; empty for a bare specifier (`int;`).
+    pub inits: Vec<InitDecl>,
 }
 
 #[derive(Debug)]
@@ -180,7 +181,7 @@ fn dump_external(e: &External, out: &mut Vec<u8>) {
 
 fn dump_decl(d: &Decl, out: &mut Vec<u8>) {
     open_text(out, "decl", &d.spec);
-    if let Some(init) = &d.init {
+    for init in &d.inits {
         out.push(b' ');
         open_text(out, "initdecl", &init.name);
         if let Some(e) = &init.init {

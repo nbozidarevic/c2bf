@@ -107,20 +107,20 @@ fn push_switch_body<'a>(
 }
 
 impl Emitter {
-    /// Compile a declaration: cell first, then the value.
+    /// Compile a declaration: declarators in order, cell first, then
+    /// the value each. A declarator without an initializer is still an
+    /// error, as before (`int x;` pins it) — now per declarator.
     fn compile_decl(&mut self, d: &Decl) -> Result<(), CompileError> {
-        let init = match &d.init {
-            // `int;` — no declarator, the base visitor emits nothing.
-            None => return Ok(()),
-            Some(init) => init,
-        };
-        let e = match &init.init {
-            None => return Err(err("Unsupported init declarator")),
-            Some(e) => e,
-        };
-        let dest = self.memory.var_cell(&init.name);
-        let src = self.compile_expr(e)?;
-        self.copy_value(src, dest);
+        // `int;` — no declarators, the base visitor emits nothing.
+        for init in &d.inits {
+            let e = match &init.init {
+                None => return Err(err("Unsupported init declarator")),
+                Some(e) => e,
+            };
+            let dest = self.memory.var_cell(&init.name);
+            let src = self.compile_expr(e)?;
+            self.copy_value(src, dest);
+        }
         Ok(())
     }
 

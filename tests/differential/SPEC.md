@@ -32,7 +32,8 @@ source order, e.g.
 - `tu`: top-level `decl`/`funcdef` nodes in order (stray `;` skipped).
 - `funcdef(name)`: `[compound body]`. Parameters and return type are
   consumed, not kept.
-- `decl(spec)`: `[initdecl]?` (`int;` has no children).
+- `decl(spec)`: `[initdecl]*` (`int;` has no children; declarators
+  are comma-separated, in order).
 - `initdecl(name)`: `[init]?`.
 - `compound`: block items in order. `exprstmt`: `[expr]`. `empty`: none.
 - `if`: `[cond, then]`; `ifelse`: `[cond, then, else]`.
