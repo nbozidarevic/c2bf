@@ -37,6 +37,15 @@ pub fn parse(src: &[u8]) -> Result<TranslationUnit, ParseError> {
 }
 
 const TYPE_KWS: [&[u8]; 4] = [b"int", b"char", b"short", b"void"];
+/// Words that may extend a type specifier (`unsigned int`, `const
+/// char`, `long long`). They stay identifiers elsewhere — `long`
+/// can still be a variable name — so they are recognized only
+/// inside specifier position (see `parse_spec`).
+const QUALIFIER_WORDS: [&[u8]; 4] = [b"long", b"unsigned", b"signed", b"const"];
+
+fn is_qualifier(text: &[u8]) -> bool {
+    is_op_in(text, &QUALIFIER_WORDS)
+}
 const ASSIGN_OPS: [&[u8]; 6] = [b"=", b"+=", b"-=", b"*=", b"/=", b"%="];
 const EQUALITY_OPS: [&[u8]; 2] = [b"==", b"!="];
 const RELATIONAL_OPS: [&[u8]; 4] = [b"<", b">", b"<=", b">="];
@@ -109,6 +118,42 @@ impl<'a> Parser<'a> {
     fn is_type_tok(&self) -> bool {
         let t = self.peek();
         t.kind == Kind::Kw && is_op_in(&t.text, &TYPE_KWS)
+    }
+
+    /// Whether the next tokens can start a declaration specifier:
+    /// a type keyword, or an identifier followed by a type keyword
+    /// or another identifier (a one-word specifier, or the first
+    /// word of a multi-word one).
+    fn at_spec_start(&self) -> bool {
+        if self.is_type_tok() {
+            return true;
+        }
+        if !self.at_ident() {
+            return false;
+        }
+        let n = self.peek_at(1);
+        (n.kind == Kind::Kw && is_op_in(&n.text, &TYPE_KWS)) || n.kind == Kind::Ident
+    }
+
+    /// Read a type specifier: one or more words joined by a single
+    /// space (`int`, `unsigned int`, `long long`). A following type
+    /// keyword or qualifier is consumed only when yet another word
+    /// follows it, so a declarator named like a qualifier
+    /// (`int long = 1;`) keeps its name: the qualifier before `=`
+    /// is not swallowed into the specifier.
+    fn parse_spec(&mut self) -> Vec<u8> {
+        let mut words = vec![self.next_tok().text];
+        while (self.is_type_tok()
+            || (self.at_ident() && is_qualifier(&self.peek().text)))
+            && {
+                let n = self.peek_at(1);
+                (n.kind == Kind::Kw && is_op_in(&n.text, &TYPE_KWS))
+                    || n.kind == Kind::Ident
+            }
+        {
+            words.push(self.next_tok().text);
+        }
+        words.join(&b' ')
     }
 
     fn next_tok(&mut self) -> Tok {
@@ -190,10 +235,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_external(&mut self) -> Result<External, ParseError> {
-        if self.is_type_tok() || (self.at_ident() && self.peek_at(1).kind == Kind::Ident)
-        {
+        if self.at_spec_start() {
             let mark = self.p;
-            let spec = self.next_tok().text;
+            let spec = self.parse_spec();
             if self.at_ident() {
                 let name = self.next_tok().text;
                 if self.at_punct(b"(") {
@@ -213,10 +257,10 @@ impl<'a> Parser<'a> {
                 self.next_tok();
             } else {
                 loop {
-                    if !self.is_type_tok() {
+                    if !self.at_spec_start() {
                         return self.fail("expected parameter type".to_string());
                     }
-                    self.next_tok();
+                    self.parse_spec();
                     self.expect_ident("parameter name")?;
                     if !self.at_punct(b",") {
                         break;
@@ -232,7 +276,7 @@ impl<'a> Parser<'a> {
 
     fn parse_declaration(&mut self) -> Result<Decl, ParseError> {
         let spec = if self.is_type_tok() || self.at_ident() {
-            self.next_tok().text
+            self.parse_spec()
         } else {
             return self.fail("expected type name".to_string());
         };
@@ -301,7 +345,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_block_item(&mut self) -> Result<BlockItem, ParseError> {
-        if self.is_type_tok() || (self.at_ident() && self.peek_at(1).kind == Kind::Ident) {
+        if self.at_spec_start() {
             Ok(BlockItem::Decl(self.parse_declaration()?))
         } else {
             Ok(BlockItem::Stmt(self.parse_statement()?))
@@ -368,7 +412,7 @@ impl<'a> Parser<'a> {
         }
         self.expect_kw(b"for", "'for'")?;
         self.expect_punct(b"(", "'('")?;
-        let init = if self.is_type_tok() {
+        let init = if self.at_spec_start() {
             ForInit::Decl(self.parse_for_declaration()?)
         } else if self.at_punct(b";") {
             ForInit::Empty
@@ -398,7 +442,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_for_declaration(&mut self) -> Result<ForDecl, ParseError> {
-        let spec = self.next_tok().text;
+        let spec = self.parse_spec();
         if self.at_ident() {
             let name = self.next_tok().text;
             if self.at_punct(b"=") {
@@ -912,6 +956,32 @@ mod tests {
     #[test]
     fn decls_with_and_without_init() {
         assert_sexp("int g;\nint;", "(tu (decl int (initdecl g)) (decl int))");
+    }
+
+    #[test]
+    fn multi_word_type_specs() {
+        assert_sexp(
+            "int f() { unsigned int a = 1; const char b = 2; long c = 3; long long d = 4; }",
+            "(tu (funcdef f (compound (decl unsigned int (initdecl a (int 1))) (decl const char (initdecl b (int 2))) (decl long (initdecl c (int 3))) (decl long long (initdecl d (int 4))))))",
+        );
+        assert_sexp(
+            "unsigned int g = 1;",
+            "(tu (decl unsigned int (initdecl g (int 1))))",
+        );
+        assert_sexp(
+            "int f() { for (unsigned int i = 0; i < 3; i++) {} }",
+            "(tu (funcdef f (compound (for (fordecl unsigned int i (int 0)) (binop < (ident i) (int 3)) (postfix ++ (ident i)) (compound)))))",
+        );
+        // A declarator named like a qualifier keeps its name.
+        assert_sexp(
+            "int f() { int long = 1; }",
+            "(tu (funcdef f (compound (decl int (initdecl long (int 1))))))",
+        );
+        // Multi-word parameter types parse (parameters are discarded).
+        assert_sexp(
+            "int f(unsigned int x) { return 0; }",
+            "(tu (funcdef f (compound (return (int 0)))))",
+        );
     }
 
     #[test]

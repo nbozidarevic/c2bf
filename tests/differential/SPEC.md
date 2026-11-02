@@ -33,7 +33,8 @@ source order, e.g.
 - `funcdef(name)`: `[compound body]`. Parameters and return type are
   consumed, not kept.
 - `decl(spec)`: `[initdecl]*` (`int;` has no children; declarators
-  are comma-separated, in order).
+  are comma-separated, in order). `spec` is one or more words
+  (`unsigned int`, `const char`, `long long`), space-joined.
 - `initdecl(name)`: `[init]?`.
 - `compound`: block items in order. `exprstmt`: `[expr]`. `empty`: none.
 - `if`: `[cond, then]`; `ifelse`: `[cond, then, else]`.
@@ -41,7 +42,8 @@ source order, e.g.
 - `for`: `[init, cond?, incr?, body]` — 2 to 4 children. `init` is
   `fordecl`, `empty-init`, or an expression; `cond`/`incr` appear only
   when non-empty (`for(;;)` → `[empty-init, body]`).
-- `fordecl("spec name"|"spec")`: `[init]?`.
+- `fordecl("spec name"|"spec")`: `[init]?` (`spec` may be
+  multi-word, as in `decl`).
 - `return`: `[expr]?`; `break`, `continue`: none (kind is the keyword).
 - `case`: `[label, body]` (label is an assignment-expression);
   `default`: `[body]`; `goto-label(name)`: `[body]`.

@@ -18,6 +18,10 @@ fix-or-pin work for Phase 1.
 - Integer literals may be decimal, octal, hex, or binary, with `u`/`l`
   suffixes; values truncate mod 256 like all arithmetic, and 8/9 in an
   octal literal is an error, as in g++.
+- Type specifiers may be multi-word (`unsigned int`, `const char`,
+  `long`, `signed`, `long long`); every spelling denotes one byte.
+  Qualifier words stay identifiers outside specifier position, so a
+  variable may still be named `long`.
 - The thesis specifies addressable memory for any integer index (its reference
   interpreter uses `map<int, char>`), i.e. negative indices are legal.
 - The original Brainfuck spec defines a minimum of 30,000 cells; transpiled

@@ -61,6 +61,10 @@ below keep the pre-rename names as history.
   and global); a declarator without an initializer is still an
   error, per declarator as before. The old `n5_multi_decl` negative
   fixture is retired; pinned by the `multidecl` oracle fixture.
+- Multi-word type specifiers (`unsigned int`, `const char`, `long`,
+  `signed`, `long long`), including `for` init declarators and
+  function parameters; all spellings denote one byte. Pinned by
+  the `typespec` oracle fixture.
 
 ## Phase 5 — Performance
 
