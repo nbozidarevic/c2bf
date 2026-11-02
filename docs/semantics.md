@@ -16,6 +16,9 @@ fix-or-pin work for Phase 1.
 - Casts are no-ops: `(int)`, `(char)`, and multi-word spellings do
   not change the value, since every value is already a byte
   (so `(char)300` is `44`, from the literal's own truncation).
+  `(char)` of a value at or above 128 still differs from g++ on
+  signed-`char` platforms (`(char)250` prints `-6` there, `250`
+  here); see the signedness deviation below.
 - Only `char` variables are supported; anything wider needs multi-cell
   representation (deferred to language expansion).
 - Integer literals may be decimal, octal, hex, or binary, with `u`/`l`

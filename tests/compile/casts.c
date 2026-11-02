@@ -8,6 +8,6 @@ int main() {
   printf("%d\n", (unsigned int)7);
   int a = (int)200;
   printf("%d\n", (int)a + (char)10);
-  printf("%d\n", (int)(char)250);
+  printf("%d\n", (int)(char)100);
   return 0;
 }
