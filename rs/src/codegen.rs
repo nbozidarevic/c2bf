@@ -607,8 +607,9 @@ impl Emitter {
                         let q = em.divide_values(a_copy, helper)?;
                         em.move_value(q, digit);
                         let glyph = em.add_values(digit, zero_char);
+                        let is_letter = em.greater_than(digit, nine)?;
                         em.perform_if_else(
-                            em.greater_than(digit, nine)?,
+                            is_letter,
                             |em| {
                                 let d = em.subtract_values(digit, ten);
                                 let g = em.add_values(d, a_char);
