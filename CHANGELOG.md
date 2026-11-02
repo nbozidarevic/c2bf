@@ -85,6 +85,13 @@ below keep the pre-rename names as history.
 - Compound bitwise/shift assignment (`&= |= ^= <<= >>=`); the
   shift forms need three-char lexing so `<<=` is one token.
   Pinned by the `bitassign` oracle fixture.
+- Bitwise/shift optimization: fused divide/modulo-by-two bit
+  extraction (`divmod_two` over a probe-copy pair loop), in-place
+  doubling/halving for shifts, and early fold exit once both
+  quotients are exhausted. Shared divide/modulo/multiply helpers
+  untouched; only the `bitwise`, `bitassign`, and order-probe
+  goldens change. `bitwise` 3,034,532 -> 2,038,802 BF bytes,
+  `bitassign` 1,007,169 -> 621,887; `docs/perf.md` refreshed.
 
 ## Phase 5 — Performance
 
