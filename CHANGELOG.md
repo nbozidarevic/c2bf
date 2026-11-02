@@ -76,6 +76,12 @@ below keep the pre-rename names as history.
   redefinable, self-reference-safe; function-like macros are an
   error). Other `#` lines are still skipped. Pinned by the `define`
   oracle fixture.
+- Bitwise `& | ^` (eight-bit fold) and shifts `<< >>` (repeated
+  double/halve; counts of eight or more give zero), with C
+  precedence from loosest (`|` `^` `&`, then equality, relational,
+  shift, additive) and right-to-left operand evaluation. Pinned
+  by the `bitwise` oracle fixture, including double-side-effect
+  order lines, and by `order_bitwise`/`order_shift` probes.
 
 ## Phase 5 — Performance
 

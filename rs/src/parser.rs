@@ -49,6 +49,10 @@ fn is_qualifier(text: &[u8]) -> bool {
 const ASSIGN_OPS: [&[u8]; 6] = [b"=", b"+=", b"-=", b"*=", b"/=", b"%="];
 const EQUALITY_OPS: [&[u8]; 2] = [b"==", b"!="];
 const RELATIONAL_OPS: [&[u8]; 4] = [b"<", b">", b"<=", b">="];
+const SHIFT_OPS: [&[u8]; 2] = [b"<<", b">>"];
+const BITAND_OPS: [&[u8]; 1] = [b"&"];
+const BITXOR_OPS: [&[u8]; 1] = [b"^"];
+const BITOR_OPS: [&[u8]; 1] = [b"|"];
 const ADDITIVE_OPS: [&[u8]; 2] = [b"+", b"-"];
 const MULTIPLICATIVE_OPS: [&[u8]; 3] = [b"*", b"/", b"%"];
 const UNARY_OPS: [&[u8]; 7] = [b"!", b"&", b"++", b"--", b"-", b"+", b"~"];
@@ -579,8 +583,50 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_logical_and(&mut self) -> Result<Expr, ParseError> {
-        let mut n = self.parse_equality()?;
+        let mut n = self.parse_bitwise_or()?;
         while self.at_punct(b"&&") {
+            let op = self.next_tok().text;
+            let rhs = self.parse_bitwise_or()?;
+            n = Expr::BinOp {
+                op,
+                l: Box::new(n),
+                r: Box::new(rhs),
+            };
+        }
+        Ok(n)
+    }
+
+    fn parse_bitwise_or(&mut self) -> Result<Expr, ParseError> {
+        let mut n = self.parse_bitwise_xor()?;
+        while self.at_punct_op(&BITOR_OPS) {
+            let op = self.next_tok().text;
+            let rhs = self.parse_bitwise_xor()?;
+            n = Expr::BinOp {
+                op,
+                l: Box::new(n),
+                r: Box::new(rhs),
+            };
+        }
+        Ok(n)
+    }
+
+    fn parse_bitwise_xor(&mut self) -> Result<Expr, ParseError> {
+        let mut n = self.parse_bitwise_and()?;
+        while self.at_punct_op(&BITXOR_OPS) {
+            let op = self.next_tok().text;
+            let rhs = self.parse_bitwise_and()?;
+            n = Expr::BinOp {
+                op,
+                l: Box::new(n),
+                r: Box::new(rhs),
+            };
+        }
+        Ok(n)
+    }
+
+    fn parse_bitwise_and(&mut self) -> Result<Expr, ParseError> {
+        let mut n = self.parse_equality()?;
+        while self.at_punct_op(&BITAND_OPS) {
             let op = self.next_tok().text;
             let rhs = self.parse_equality()?;
             n = Expr::BinOp {
@@ -607,8 +653,22 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_relational(&mut self) -> Result<Expr, ParseError> {
-        let mut n = self.parse_additive()?;
+        let mut n = self.parse_shift()?;
         while self.at_punct_op(&RELATIONAL_OPS) {
+            let op = self.next_tok().text;
+            let rhs = self.parse_shift()?;
+            n = Expr::BinOp {
+                op,
+                l: Box::new(n),
+                r: Box::new(rhs),
+            };
+        }
+        Ok(n)
+    }
+
+    fn parse_shift(&mut self) -> Result<Expr, ParseError> {
+        let mut n = self.parse_additive()?;
+        while self.at_punct_op(&SHIFT_OPS) {
             let op = self.next_tok().text;
             let rhs = self.parse_additive()?;
             n = Expr::BinOp {
@@ -1118,6 +1178,34 @@ mod tests {
         assert_sexp(
             "int f() { while (1) { break; continue; } return; }",
             "(tu (funcdef f (compound (while (int 1) (compound (break) (continue))) (return))))",
+        );
+    }
+
+    #[test]
+    fn bitwise_and_shift_precedence() {
+        assert_sexp(
+            "int f() { a = b & c | d; }",
+            "(tu (funcdef f (compound (exprstmt (assign = (ident a) (binop | (binop & (ident b) (ident c)) (ident d)))))))",
+        );
+        assert_sexp(
+            "int f() { a = b ^ c & d; }",
+            "(tu (funcdef f (compound (exprstmt (assign = (ident a) (binop ^ (ident b) (binop & (ident c) (ident d))))))))",
+        );
+        assert_sexp(
+            "int f() { a = b << c + d; }",
+            "(tu (funcdef f (compound (exprstmt (assign = (ident a) (binop << (ident b) (binop + (ident c) (ident d))))))))",
+        );
+        assert_sexp(
+            "int f() { a = b & c == d; }",
+            "(tu (funcdef f (compound (exprstmt (assign = (ident a) (binop & (ident b) (binop == (ident c) (ident d))))))))",
+        );
+        assert_sexp(
+            "int f() { a = b << c << d; }",
+            "(tu (funcdef f (compound (exprstmt (assign = (ident a) (binop << (binop << (ident b) (ident c)) (ident d)))))))",
+        );
+        assert_sexp(
+            "int f() { a = b && c | d; }",
+            "(tu (funcdef f (compound (exprstmt (assign = (ident a) (binop && (ident b) (binop | (ident c) (ident d))))))))",
         );
     }
 

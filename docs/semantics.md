@@ -23,6 +23,13 @@ fix-or-pin work for Phase 1.
   differs from C for `int` (4) and for expressions of `int` type;
   only `char`-typed uses agree with the g++ oracle, as pinned by
   the `sizeof` fixture. The operand is unevaluated, as in C.
+- Bitwise `& | ^` operate on bytes bit by bit. `<<` doubles and
+  `>>` halves (logical, unsigned), once per unit of the count;
+  counts of eight or more give zero. Shift counts at or above the
+  C width are undefined behavior there and are defined here as
+  zero, so oracle fixtures keep counts below eight. Operands
+  evaluate right-to-left, like other non-arithmetic operators;
+  the `bitwise` fixture's double-side-effect lines pin this.
 - Only `char` variables are supported; anything wider needs multi-cell
   representation (deferred to language expansion).
 - Integer literals may be decimal, octal, hex, or binary, with `u`/`l`

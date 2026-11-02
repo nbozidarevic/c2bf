@@ -38,6 +38,16 @@ pub struct CompileError {
     pub msg: String,
 }
 
+/// How [`Emitter::bitwise_fold`] combines one bit from each operand.
+/// An enum (not raw op text) so the fold never has to defend against
+/// an operator it does not implement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BitCombine {
+    And,
+    Or,
+    Xor,
+}
+
 impl std::fmt::Display for CompileError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.msg)
@@ -297,6 +307,114 @@ impl Emitter {
         let prod = self.multiply_values(q, b);
         let diff = self.subtract_values(a, prod);
         self.move_value(diff, result);
+        Ok(result)
+    }
+
+    /// `result = a <op> b` in a fresh cell, for a bitwise `op`.
+    ///
+    /// Walks the eight bits LSB-first, halving duplicated copies of
+    /// both operands, and rebuilds the result one place value at a
+    /// time. The operands are never consumed. The loop always runs
+    /// exactly eight iterations (a counter cell), so termination
+    /// does not depend on the operands reaching zero early, and
+    /// exhausted high bits simply contribute zeros.
+    fn bitwise_fold(&mut self, a: i32, b: i32, mode: BitCombine) -> Result<i32, CompileError> {
+        let result = self.const_value(0);
+        let ac = self.duplicate_value(a);
+        let bc = self.duplicate_value(b);
+        let place = self.const_value(1);
+        let two = self.const_value(2);
+        let counter = self.const_value(8);
+        self.perform_while(
+            |em| Ok(counter),
+            |em| {
+                let one = em.const_value(1);
+                let d = em.subtract_values(counter, one);
+                em.move_value(d, counter);
+                let abit = em.mod_values(ac, two)?;
+                let bbit = em.mod_values(bc, two)?;
+                let bit = match mode {
+                    BitCombine::And => em.multiply_values(abit, bbit),
+                    BitCombine::Or => {
+                        let both = em.multiply_values(abit, bbit);
+                        let sum = em.add_values(abit, bbit);
+                        em.subtract_values(sum, both)
+                    }
+                    BitCombine::Xor => {
+                        let sum = em.add_values(abit, bbit);
+                        em.mod_values(sum, two)?
+                    }
+                };
+                let scaled = em.multiply_values(bit, place);
+                let sum = em.add_values(result, scaled);
+                em.move_value(sum, result);
+                let doubled = em.multiply_values(place, two);
+                em.move_value(doubled, place);
+                let qa = em.divide_values(ac, two)?;
+                em.move_value(qa, ac);
+                let qb = em.divide_values(bc, two)?;
+                em.move_value(qb, bc);
+                Ok(())
+            },
+        )?;
+        Ok(result)
+    }
+
+    /// `result = a & b` in a fresh cell.
+    pub fn bitwise_and_values(&mut self, a: i32, b: i32) -> Result<i32, CompileError> {
+        self.bitwise_fold(a, b, BitCombine::And)
+    }
+
+    /// `result = a | b` in a fresh cell.
+    pub fn bitwise_or_values(&mut self, a: i32, b: i32) -> Result<i32, CompileError> {
+        self.bitwise_fold(a, b, BitCombine::Or)
+    }
+
+    /// `result = a ^ b` in a fresh cell.
+    pub fn bitwise_xor_values(&mut self, a: i32, b: i32) -> Result<i32, CompileError> {
+        self.bitwise_fold(a, b, BitCombine::Xor)
+    }
+
+    /// `result = a << b` in a fresh cell: double `a` once per unit of
+    /// the count (duplicated, never consumed). Counts of eight or
+    /// more wrap the result to zero on their own, one doubling at a
+    /// time mod 256.
+    pub fn shift_left_values(&mut self, a: i32, b: i32) -> Result<i32, CompileError> {
+        let result = self.duplicate_value(a);
+        let counter = self.duplicate_value(b);
+        let two = self.const_value(2);
+        self.perform_while(
+            |em| Ok(counter),
+            |em| {
+                let one = em.const_value(1);
+                let d = em.subtract_values(counter, one);
+                em.move_value(d, counter);
+                let doubled = em.multiply_values(result, two);
+                em.move_value(doubled, result);
+                Ok(())
+            },
+        )?;
+        Ok(result)
+    }
+
+    /// `result = a >> b` in a fresh cell: halve `a` once per unit of
+    /// the count (duplicated, never consumed). Halving is logical —
+    /// bytes are unsigned — so counts of eight or more give zero.
+    pub fn shift_right_values(&mut self, a: i32, b: i32) -> Result<i32, CompileError> {
+        let result = self.duplicate_value(a);
+        let counter = self.duplicate_value(b);
+        let two = self.const_value(2);
+        self.perform_while(
+            |em| Ok(counter),
+            |em| {
+                let one = em.const_value(1);
+                let d = em.subtract_values(counter, one);
+                em.move_value(d, counter);
+                let halved = em.divide_values(result, two)?;
+                em.move_value(halved, result);
+                Ok(())
+            },
+        )?;
         Ok(result)
     }
 
@@ -874,6 +992,83 @@ mod tests {
         let mut em = Emitter::new();
         em.set_value(10, 200);
         assert_eq!(em.output().len(), 10 + 3 + 200);
+    }
+
+    /// Run the emitter's output with the pointer on `cell` and
+    /// return the one byte it prints.
+    fn run_cell(em: &mut Emitter, cell: i32) -> u8 {
+        em.move_pointer(cell);
+        let mut code = bf(em);
+        code.push('.');
+        let mut out = Vec::new();
+        runner::run(code.as_bytes(), &mut std::io::empty(), &mut out).expect("bf runs");
+        out[0]
+    }
+
+    #[test]
+    fn bitwise_and_or_xor_values() {
+        for (a, b, and, or, xor) in [
+            (0b1100u8, 0b1010u8, 0b1000u8, 0b1110u8, 0b0110u8),
+            (0xff, 0x0f, 0x0f, 0xff, 0xf0),
+            (0, 0, 0, 0, 0),
+            (0x55, 0xaa, 0x00, 0xff, 0xff),
+            (0x01, 0x80, 0x00, 0x81, 0x81),
+        ] {
+            let mut em = Emitter::new();
+            let ca = em.const_value(a);
+            let cb = em.const_value(b);
+            assert_eq!(
+                run_cell(&mut em, em.bitwise_and_values(ca, cb).unwrap()),
+                and,
+                "0x{a:02x} & 0x{b:02x}"
+            );
+            let mut em = Emitter::new();
+            let ca = em.const_value(a);
+            let cb = em.const_value(b);
+            assert_eq!(
+                run_cell(&mut em, em.bitwise_or_values(ca, cb).unwrap()),
+                or,
+                "0x{a:02x} | 0x{b:02x}"
+            );
+            let mut em = Emitter::new();
+            let ca = em.const_value(a);
+            let cb = em.const_value(b);
+            assert_eq!(
+                run_cell(&mut em, em.bitwise_xor_values(ca, cb).unwrap()),
+                xor,
+                "0x{a:02x} ^ 0x{b:02x}"
+            );
+        }
+    }
+
+    #[test]
+    fn shift_values() {
+        for (a, n, left, right) in [
+            (1u8, 0u8, 1u8, 1u8),
+            (1, 7, 128, 0),
+            (3, 2, 12, 0),
+            (128, 1, 0, 64),
+            (255, 8, 0, 0),
+            (200, 3, 64, 25),
+            (5, 9, 0, 0),
+        ] {
+            let mut em = Emitter::new();
+            let ca = em.const_value(a);
+            let cb = em.const_value(n);
+            assert_eq!(
+                run_cell(&mut em, em.shift_left_values(ca, cb).unwrap()),
+                left,
+                "{a} << {n}"
+            );
+            let mut em = Emitter::new();
+            let ca = em.const_value(a);
+            let cb = em.const_value(n);
+            assert_eq!(
+                run_cell(&mut em, em.shift_right_values(ca, cb).unwrap()),
+                right,
+                "{a} >> {n}"
+            );
+        }
     }
 
     #[test]

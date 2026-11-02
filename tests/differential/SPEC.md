@@ -56,7 +56,9 @@ source order, e.g.
   middle is a full expression (commas allowed), and the else-branch is
   a conditional.
 - `binop(op)`: `[l, r]`, left-associative. Levels low→high:
-  `||`, `&&`, `== !=`, `< > <= >=`, `+ -`, `* / %`.
+  `||`, `&&`, `|`, `^`, `&`, `== !=`, `< > <= >=`, `<< >>`,
+  `+ -`, `* / %`. Compound bitwise/shift assignment (`&=`, `|=`,
+  `^=`, `<<=`, `>>=`) is not accepted yet.
 - `unary(op)`: `[e]`; `op` is one of `! & ++ -- - + ~` (no
   `sizeof` — accepted subset surface). Unary `-`/`~` wrap mod 256.
 - `cast(spec)`: `[e]` — a cast is a no-op in the byte model;

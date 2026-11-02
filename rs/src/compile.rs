@@ -618,7 +618,9 @@ impl Emitter {
                 // GCC evaluates arithmetic operands left-to-right but every
                 // other binary operator right-to-left (measured per site:
                 // the probe plus cmp.c/logic.c green runs pin comparisons
-                // and logic; addition/div/mul/mod/order_arith pin arithmetic).
+                // and logic; addition/div/mul/mod/order_arith pin arithmetic;
+                // bitwise/shift stay on the default right-to-left arm, and
+                // the bitwise fixture's double-side-effect lines pin it).
                 let (ll, rr) = match op.as_slice() {
                     b"+" | b"-" | b"*" | b"/" | b"%" => {
                         let ll = self.compile_expr(l)?;
@@ -648,6 +650,11 @@ impl Emitter {
                     b"<=" => self.less_than_or_equal(ll, rr),
                     b">" => self.greater_than(ll, rr),
                     b">=" => self.greater_than_or_equal(ll, rr),
+                    b"<<" => self.shift_left_values(ll, rr),
+                    b">>" => self.shift_right_values(ll, rr),
+                    b"&" => self.bitwise_and_values(ll, rr),
+                    b"|" => self.bitwise_or_values(ll, rr),
+                    b"^" => self.bitwise_xor_values(ll, rr),
                     _ => Err(err("Unsupported binary operator")),
                 }
             }
