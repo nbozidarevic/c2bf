@@ -1,0 +1,1 @@
+(tu (decl int (initdecl a (int 1)) (initdecl b (int 2))) (funcdef main (compound (decl int (initdecl x (int 3)) (initdecl y (int 4)) (initdecl z (binop + (ident x) (ident y)))) (decl char (initdecl c (char 'A')) (initdecl d (char 'B'))) (exprstmt (call (ident printf) (string %d %d %d %d %c %c\n) (ident a) (ident b) (ident x) (ident z) (ident c) (ident d))) (return (int 0)))))
