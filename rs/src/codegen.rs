@@ -1017,27 +1017,18 @@ mod tests {
             let mut em = Emitter::new();
             let ca = em.const_value(a);
             let cb = em.const_value(b);
-            assert_eq!(
-                run_cell(&mut em, em.bitwise_and_values(ca, cb).unwrap()),
-                and,
-                "0x{a:02x} & 0x{b:02x}"
-            );
+            let r = em.bitwise_and_values(ca, cb).unwrap();
+            assert_eq!(run_cell(&mut em, r), and, "0x{a:02x} & 0x{b:02x}");
             let mut em = Emitter::new();
             let ca = em.const_value(a);
             let cb = em.const_value(b);
-            assert_eq!(
-                run_cell(&mut em, em.bitwise_or_values(ca, cb).unwrap()),
-                or,
-                "0x{a:02x} | 0x{b:02x}"
-            );
+            let r = em.bitwise_or_values(ca, cb).unwrap();
+            assert_eq!(run_cell(&mut em, r), or, "0x{a:02x} | 0x{b:02x}");
             let mut em = Emitter::new();
             let ca = em.const_value(a);
             let cb = em.const_value(b);
-            assert_eq!(
-                run_cell(&mut em, em.bitwise_xor_values(ca, cb).unwrap()),
-                xor,
-                "0x{a:02x} ^ 0x{b:02x}"
-            );
+            let r = em.bitwise_xor_values(ca, cb).unwrap();
+            assert_eq!(run_cell(&mut em, r), xor, "0x{a:02x} ^ 0x{b:02x}");
         }
     }
 
@@ -1055,19 +1046,13 @@ mod tests {
             let mut em = Emitter::new();
             let ca = em.const_value(a);
             let cb = em.const_value(n);
-            assert_eq!(
-                run_cell(&mut em, em.shift_left_values(ca, cb).unwrap()),
-                left,
-                "{a} << {n}"
-            );
+            let r = em.shift_left_values(ca, cb).unwrap();
+            assert_eq!(run_cell(&mut em, r), left, "{a} << {n}");
             let mut em = Emitter::new();
             let ca = em.const_value(a);
             let cb = em.const_value(n);
-            assert_eq!(
-                run_cell(&mut em, em.shift_right_values(ca, cb).unwrap()),
-                right,
-                "{a} >> {n}"
-            );
+            let r = em.shift_right_values(ca, cb).unwrap();
+            assert_eq!(run_cell(&mut em, r), right, "{a} >> {n}");
         }
     }
 
