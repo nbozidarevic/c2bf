@@ -1122,6 +1122,18 @@ mod tests {
     }
 
     #[test]
+    fn define_expands_before_parsing() {
+        assert_sexp(
+            "#define N 5\nint f() { return N; }",
+            "(tu (funcdef f (compound (return (int 5)))))",
+        );
+        assert_sexp(
+            "#define T int\nT x = 1;",
+            "(tu (decl int (initdecl x (int 1))))",
+        );
+    }
+
+    #[test]
     fn sizeof_forms() {
         assert_sexp(
             "int f() { return sizeof (char); }",

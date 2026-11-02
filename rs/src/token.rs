@@ -4,6 +4,12 @@
 //! boundaries, same 1-based line/col tracking (including the `//` and `#`
 //! "columns go stale until newline" quirk), same cooked string contents,
 //! same error messages.
+//!
+//! One extension beyond the reference: object-like `#define` (and
+//! `#undef`) are expanded at tokenize time. Function-like macros are
+//! an error; every other `#` line is skipped, as before.
+
+use std::collections::{HashMap, HashSet};
 
 /// Token kinds. [`Kind::dump_name`] gives the differential-dump label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,6 +171,10 @@ struct Cursor<'a> {
     i: usize,
     line: usize,
     col: usize,
+    /// Object-like macros defined so far (`#define`).
+    defines: HashMap<Vec<u8>, Vec<Tok>>,
+    /// Macros currently being expanded (self-reference guard).
+    expanding: HashSet<Vec<u8>>,
 }
 
 impl<'a> Cursor<'a> {
@@ -174,11 +184,127 @@ impl<'a> Cursor<'a> {
             i: 0,
             line: 1,
             col: 1,
+            defines: HashMap::new(),
+            expanding: HashSet::new(),
         }
     }
 
     fn err(&self, line: usize, col: usize, msg: String) -> TokenError {
         TokenError { line, col, msg }
+    }
+
+    /// Expand identifier `name` (a defined macro) into `out`, with
+    /// expanded tokens positioned at the use site (`line`, `col`).
+    /// Chained macros expand recursively; a macro expanding to
+    /// itself yields one plain identifier instead of looping.
+    fn expand_into(&mut self, name: &[u8], line: usize, col: usize, out: &mut Vec<Tok>) {
+        if !self.expanding.insert(name.to_vec()) {
+            out.push(Tok {
+                kind: Kind::Ident,
+                text: name.to_vec(),
+                raw: None,
+                line,
+                col,
+            });
+            return;
+        }
+        let repl = self.defines.get(name).cloned().unwrap_or_default();
+        for mut t in repl {
+            t.line = line;
+            t.col = col;
+            if t.kind == Kind::Ident && self.defines.contains_key(&t.text) {
+                let inner = t.text.clone();
+                self.expand_into(&inner, line, col, out);
+            } else {
+                out.push(t);
+            }
+        }
+        self.expanding.remove(name);
+    }
+
+    /// Handle one `#` line (slice includes the `#`; `hash_col` is the
+    /// column of the `#`). `#define NAME ...` registers an object-like
+    /// macro (redefinition replaces it), `#undef NAME` removes one,
+    /// and every other directive is ignored, as before. A `(` right
+    /// after the macro name is a function-like macro: an error.
+    fn handle_directive(
+        &mut self,
+        line: &[u8],
+        line_no: usize,
+        hash_col: usize,
+    ) -> Result<(), TokenError> {
+        let err_at = |col: usize, msg: &str| TokenError {
+            line: line_no,
+            col,
+            msg: msg.to_string(),
+        };
+        let mut j = 1usize;
+        while j < line.len() && (line[j] == b' ' || line[j] == b'\t') {
+            j += 1;
+        }
+        let rest = &line[j..];
+        let directive = |word: &[u8]| -> bool {
+            rest.starts_with(word)
+                && (rest.len() == word.len()
+                    || rest[word.len()] == b' '
+                    || rest[word.len()] == b'\t')
+        };
+        let read_name = |rest: &[u8], mut k: usize| -> Option<(Vec<u8>, usize)> {
+            let start = k;
+            if k < rest.len() && (rest[k].is_ascii_alphabetic() || rest[k] == b'_') {
+                k += 1;
+                while k < rest.len()
+                    && (rest[k].is_ascii_alphanumeric() || rest[k] == b'_')
+                {
+                    k += 1;
+                }
+                Some((rest[start..k].to_vec(), k))
+            } else {
+                None
+            }
+        };
+        if directive(b"define") {
+            let mut k = "define".len();
+            while k < rest.len() && (rest[k] == b' ' || rest[k] == b'\t') {
+                k += 1;
+            }
+            let Some((name, used)) = read_name(rest, k) else {
+                return Err(err_at(hash_col, "expected macro name in #define"));
+            };
+            // `used` is the end index of the name in `rest`, not a length.
+            k = used;
+            if k < rest.len() && rest[k] == b'(' {
+                return Err(err_at(
+                    hash_col + j + k,
+                    "function-like macros are not supported",
+                ));
+            }
+            while k < rest.len() && (rest[k] == b' ' || rest[k] == b'\t') {
+                k += 1;
+            }
+            let repl_start = k;
+            let mut repl = tokenize(&rest[repl_start..]).map_err(|e| TokenError {
+                line: line_no,
+                col: hash_col + j + repl_start + e.col - 1,
+                msg: e.msg,
+            })?;
+            // `tokenize` always appends the End token; drop it.
+            repl.pop();
+            self.defines.insert(name, repl);
+            return Ok(());
+        }
+        if directive(b"undef") {
+            let mut k = "undef".len();
+            while k < rest.len() && (rest[k] == b' ' || rest[k] == b'\t') {
+                k += 1;
+            }
+            let Some((name, _)) = read_name(rest, k) else {
+                return Err(err_at(hash_col, "expected macro name in #undef"));
+            };
+            self.defines.remove(&name);
+            return Ok(());
+        }
+        Ok(())
     }
 
     fn run(mut self) -> Result<Vec<Tok>, TokenError> {
@@ -227,9 +353,15 @@ impl<'a> Cursor<'a> {
                     ));
                 }
             } else if c == b'#' {
-                while self.i < n && self.src[self.i] != b'\n' {
-                    self.i += 1;
+                let mut j = self.i;
+                while j < n && self.src[j] != b'\n' {
+                    j += 1;
                 }
+                // Copy the line: handling it needs `&mut self`.
+                let line: Vec<u8> = self.src[self.i..j].to_vec();
+                let (line_no, hash_col) = (self.line, self.col);
+                self.i = j;
+                self.handle_directive(&line, line_no, hash_col)?;
             } else if c.is_ascii_digit() {
                 let j0 = self.i;
                 // Radix prefixes: `0x`/`0X` hex, `0b`/`0B` binary
@@ -295,20 +427,25 @@ impl<'a> Cursor<'a> {
                 {
                     self.i += 1;
                 }
-                let word = &self.src[j0..self.i];
-                let kind = if is_keyword(word) {
+                let word = self.src[j0..self.i].to_vec();
+                let kind = if is_keyword(&word) {
                     Kind::Kw
                 } else {
                     Kind::Ident
                 };
-                toks.push(Tok {
-                    kind,
-                    text: word.to_vec(),
-                    raw: None,
-                    line: self.line,
-                    col: self.col,
-                });
+                let (line, col) = (self.line, self.col);
                 self.col += self.i - j0;
+                if kind == Kind::Ident && self.defines.contains_key(&word) {
+                    self.expand_into(&word, line, col, &mut toks);
+                } else {
+                    toks.push(Tok {
+                        kind,
+                        text: word,
+                        raw: None,
+                        line,
+                        col,
+                    });
+                }
             } else if c == b'\'' {
                 let mut j = self.i + 1;
                 if j < n && self.src[j] == b'\\' {
@@ -504,6 +641,81 @@ mod tests {
         assert_eq!(t[3].text, b"42");
         assert_eq!((t[3].line, t[3].col), (1, 9));
         assert_eq!((t[5].line, t[5].col), (1, 12));
+    }
+
+    #[test]
+    fn define_object_like_expands_at_use_site() {
+        let t = toks(b"#define N 5\nint x = N;");
+        assert_texts(
+            b"#define N 5\nint x = N;",
+            &["int", "x", "=", "5", ";", ""],
+        );
+        // The expanded `5` carries the position of the use, line 2 col 9.
+        assert_eq!((t[3].line, t[3].col), (2, 9));
+        assert_eq!(t[3].kind, Kind::Int);
+    }
+
+    #[test]
+    fn define_chained_redefined_and_empty() {
+        assert_texts(
+            b"#define A B\n#define B 7\nint x = A;",
+            &["int", "x", "=", "7", ";", ""],
+        );
+        assert_texts(
+            b"#define N 1\n#define N 2\nint x = N;",
+            &["int", "x", "=", "2", ";", ""],
+        );
+        // An empty replacement expands to nothing.
+        assert_texts(b"#define E\nint x = 1;", &["int", "x", "=", "1", ";", ""]);
+        // A macro may stand for a keyword.
+        assert_texts(
+            b"#define T int\nT x = 1;",
+            &["int", "x", "=", "1", ";", ""],
+        );
+        assert_eq!(toks(b"#define T int\nT x = 1;")[0].kind, Kind::Kw);
+    }
+
+    #[test]
+    fn define_self_reference_and_undef() {
+        // Self-reference yields one plain identifier, not a loop.
+        assert_texts(
+            b"#define A A\nint x = A;",
+            &["int", "x", "=", "A", ";", ""],
+        );
+        // After #undef the name stays an identifier.
+        let t = toks(b"#define N 5\n#undef N\nint x = N;");
+        assert_texts(
+            b"#define N 5\n#undef N\nint x = N;",
+            &["int", "x", "=", "N", ";", ""],
+        );
+        assert_eq!(t[3].kind, Kind::Ident);
+        // Uses before the definition do not expand.
+        assert_texts(
+            b"int x = N;\n#define N 5",
+            &["int", "x", "=", "N", ";", ""],
+        );
+    }
+
+    #[test]
+    fn define_function_like_and_bad_name_error() {
+        assert_eq!(
+            tokenize(b"#define F(x) x"),
+            Err(TokenError {
+                line: 1,
+                col: 10,
+                msg: "function-like macros are not supported".to_string(),
+            })
+        );
+        assert_eq!(
+            tokenize(b"#define"),
+            Err(TokenError {
+                line: 1,
+                col: 1,
+                msg: "expected macro name in #define".to_string(),
+            })
+        );
+        // Other directives are still skipped wholesale.
+        assert_texts(b"#include <stdio.h>\nint x = 1;", &["int", "x", "=", "1", ";", ""]);
     }
 
     #[test]

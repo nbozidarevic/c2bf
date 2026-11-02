@@ -72,6 +72,10 @@ below keep the pre-rename names as history.
 - `sizeof` (expression and type forms) as a constant `1`, with the
   operand unevaluated; documents the divergence from C for `int`.
   Pinned by the `sizeof` oracle fixture (char-typed uses only).
+- Object-like `#define`/`#undef` expanded at tokenize time (chained,
+  redefinable, self-reference-safe; function-like macros are an
+  error). Other `#` lines are still skipped. Pinned by the `define`
+  oracle fixture.
 
 ## Phase 5 — Performance
 

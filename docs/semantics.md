@@ -76,3 +76,12 @@ slice 5f; documented, not mirrored):
 
 See `decisions/0001-source-language-identity.md` for what the accepted source
 language is. Only constructs in that definition are in scope for hardening.
+
+## Preprocessor
+
+Object-like `#define` (and `#undef`) are expanded at tokenize time, in
+source order: uses before a definition do not expand, redefinition
+replaces the old value, chained macros expand, and a macro expanding
+to itself yields one plain identifier. Function-like macros are an
+error. Every other `#` line (including `#include`) is skipped, as
+before; there is no conditional compilation or file inclusion.
