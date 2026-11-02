@@ -310,14 +310,91 @@ impl Emitter {
         Ok(result)
     }
 
+    /// Quotient of `a / 2`; `a` is left holding the remainder (`a % 2`).
+    ///
+    /// Fused divide/modulo by two for [`Emitter::bitwise_fold`]: the
+    /// divide loop's leftover cell *is* the remainder, so one loop
+    /// replaces a `divide_values` plus a `mod_values` (which itself
+    /// divides, multiplies, and subtracts). `a` is consumed — it is
+    /// a fold-owned scratch copy, never a caller's operand cell —
+    /// and `two` is the fold's shared constant `2` cell.
+    fn divmod_two(&mut self, a: i32, two: i32) -> Result<i32, CompileError> {
+        let quotient = self.const_value(0);
+        self.perform_while(
+            |em| Ok(em.greater_than_or_equal(a, two)?),
+            |em| {
+                em.move_pointer(quotient);
+                em.emit("+");
+                let diff = em.subtract_values(a, two);
+                em.move_value(diff, a);
+                Ok(())
+            },
+        )?;
+        Ok(quotient)
+    }
+
+    /// Double `cell` in place, wrapping (`cell *= 2`).
+    ///
+    /// Drains `cell` into a fresh zeroed scratch cell, adding two per
+    /// unit, then moves the scratch back. Cheaper than the general
+    /// `multiply_values(cell, 2)`, which duplicates and re-adds per
+    /// unit. `cell` keeps its index; the scratch ends zero.
+    fn double_in_place(&mut self, cell: i32) {
+        let scratch = self.memory.temp_cell();
+        self.set_value(scratch, 0);
+        self.move_pointer(cell);
+        self.emit("[-");
+        self.move_pointer(scratch);
+        self.emit("++");
+        self.move_pointer(cell);
+        self.emit("]");
+        self.move_value(scratch, cell);
+    }
+
+    /// Halve `cell` in place, flooring (`cell /= 2`, logical).
+    ///
+    /// Each outer pass removes one pair: it decrements `cell`, then
+    /// copies the remainder to a probe cell — if the probe is
+    /// nonzero a pair was present, so one more unit is removed and
+    /// the quotient grows by one. The probe copy makes the pair
+    /// test a plain zero test, with no compare helper and no
+    /// wrapping hazard (the second decrement only runs when at
+    /// least two units were present). A leftover single unit is
+    /// discarded by moving the quotient back into `cell`.
+    fn halve_in_place(&mut self, cell: i32) {
+        let quotient = self.memory.temp_cell();
+        self.set_value(quotient, 0);
+        let probe = self.memory.temp_cell();
+        self.move_pointer(cell);
+        self.emit("[");
+        self.move_pointer(cell);
+        self.emit("-");
+        self.copy_value(cell, probe);
+        self.move_pointer(probe);
+        self.emit("[");
+        self.move_pointer(cell);
+        self.emit("-");
+        self.move_pointer(quotient);
+        self.emit("+");
+        self.set_value(probe, 0);
+        self.move_pointer(probe);
+        self.emit("]");
+        self.move_pointer(cell);
+        self.emit("]");
+        self.move_value(quotient, cell);
+    }
+
     /// `result = a <op> b` in a fresh cell, for a bitwise `op`.
     ///
     /// Walks the eight bits LSB-first, halving duplicated copies of
     /// both operands, and rebuilds the result one place value at a
-    /// time. The operands are never consumed. The loop always runs
-    /// exactly eight iterations (a counter cell), so termination
-    /// does not depend on the operands reaching zero early, and
-    /// exhausted high bits simply contribute zeros.
+    /// time. The operands are never consumed. Bit extraction is
+    /// fused: [`Emitter::divmod_two`] yields each bit and the next
+    /// quotient from one divide loop, instead of a `mod_values`
+    /// plus a `divide_values` per operand. The loop runs at most
+    /// eight iterations (a counter cell) and stops early once both
+    /// quotients are exhausted, so exhausted high bits simply
+    /// contribute zeros.
     fn bitwise_fold(&mut self, a: i32, b: i32, mode: BitCombine) -> Result<i32, CompileError> {
         let result = self.const_value(0);
         let ac = self.duplicate_value(a);
@@ -328,11 +405,12 @@ impl Emitter {
         self.perform_while(
             |em| Ok(counter),
             |em| {
-                let one = em.const_value(1);
-                let d = em.subtract_values(counter, one);
-                em.move_value(d, counter);
-                let abit = em.mod_values(ac, two)?;
-                let bbit = em.mod_values(bc, two)?;
+                em.move_pointer(counter);
+                em.emit("-");
+                let qa = em.divmod_two(ac, two)?;
+                let abit = ac;
+                let qb = em.divmod_two(bc, two)?;
+                let bbit = bc;
                 let bit = match mode {
                     BitCombine::And => em.multiply_values(abit, bbit),
                     BitCombine::Or => {
@@ -342,18 +420,27 @@ impl Emitter {
                     }
                     BitCombine::Xor => {
                         let sum = em.add_values(abit, bbit);
-                        em.mod_values(sum, two)?
+                        em.divmod_two(sum, two)?;
+                        sum
                     }
                 };
                 let scaled = em.multiply_values(bit, place);
                 let sum = em.add_values(result, scaled);
                 em.move_value(sum, result);
-                let doubled = em.multiply_values(place, two);
-                em.move_value(doubled, place);
-                let qa = em.divide_values(ac, two)?;
+                em.double_in_place(place);
                 em.move_value(qa, ac);
-                let qb = em.divide_values(bc, two)?;
                 em.move_value(qb, bc);
+                let zero_a = em.negate(ac)?;
+                let zero_b = em.negate(bc)?;
+                let both_zero = em.multiply_values(zero_a, zero_b);
+                em.perform_if_else(
+                    both_zero,
+                    |em| {
+                        em.set_value(counter, 0);
+                        Ok(())
+                    },
+                    |_| Ok(()),
+                )?;
                 Ok(())
             },
         )?;
@@ -382,15 +469,12 @@ impl Emitter {
     pub fn shift_left_values(&mut self, a: i32, b: i32) -> Result<i32, CompileError> {
         let result = self.duplicate_value(a);
         let counter = self.duplicate_value(b);
-        let two = self.const_value(2);
         self.perform_while(
             |em| Ok(counter),
             |em| {
-                let one = em.const_value(1);
-                let d = em.subtract_values(counter, one);
-                em.move_value(d, counter);
-                let doubled = em.multiply_values(result, two);
-                em.move_value(doubled, result);
+                em.move_pointer(counter);
+                em.emit("-");
+                em.double_in_place(result);
                 Ok(())
             },
         )?;
@@ -403,15 +487,12 @@ impl Emitter {
     pub fn shift_right_values(&mut self, a: i32, b: i32) -> Result<i32, CompileError> {
         let result = self.duplicate_value(a);
         let counter = self.duplicate_value(b);
-        let two = self.const_value(2);
         self.perform_while(
             |em| Ok(counter),
             |em| {
-                let one = em.const_value(1);
-                let d = em.subtract_values(counter, one);
-                em.move_value(d, counter);
-                let halved = em.divide_values(result, two)?;
-                em.move_value(halved, result);
+                em.move_pointer(counter);
+                em.emit("-");
+                em.halve_in_place(result);
                 Ok(())
             },
         )?;
@@ -1013,6 +1094,8 @@ mod tests {
             (0, 0, 0, 0, 0),
             (0x55, 0xaa, 0x00, 0xff, 0xff),
             (0x01, 0x80, 0x00, 0x81, 0x81),
+            (0xff, 0xff, 0xff, 0xff, 0x00),
+            (0x00, 0xff, 0x00, 0xff, 0xff),
         ] {
             let mut em = Emitter::new();
             let ca = em.const_value(a);
@@ -1042,6 +1125,8 @@ mod tests {
             (255, 8, 0, 0),
             (200, 3, 64, 25),
             (5, 9, 0, 0),
+            (255, 1, 254, 127),
+            (0, 5, 0, 0),
         ] {
             let mut em = Emitter::new();
             let ca = em.const_value(a);
@@ -1053,6 +1138,38 @@ mod tests {
             let cb = em.const_value(n);
             let r = em.shift_right_values(ca, cb).unwrap();
             assert_eq!(run_cell(&mut em, r), right, "{a} >> {n}");
+        }
+    }
+
+    #[test]
+    fn divmod_two_quotient_and_remainder() {
+        for a in 0..=u8::MAX {
+            // Fresh emitter per check, mirroring run_cell's single-run
+            // use (it appends pointer motion to the output).
+            let mut em = Emitter::new();
+            let ca = em.const_value(a);
+            let two = em.const_value(2);
+            let q = em.divmod_two(ca, two).unwrap();
+            assert_eq!(run_cell(&mut em, q), a / 2, "{a} / 2");
+            let mut em = Emitter::new();
+            let ca = em.const_value(a);
+            let two = em.const_value(2);
+            em.divmod_two(ca, two).unwrap();
+            assert_eq!(run_cell(&mut em, ca), a % 2, "{a} % 2");
+        }
+    }
+
+    #[test]
+    fn double_and_halve_in_place_exhaustive() {
+        for a in 0..=u8::MAX {
+            let mut em = Emitter::new();
+            let ca = em.const_value(a);
+            em.double_in_place(ca);
+            assert_eq!(run_cell(&mut em, ca), a.wrapping_mul(2), "double {a}");
+            let mut em = Emitter::new();
+            let ca = em.const_value(a);
+            em.halve_in_place(ca);
+            assert_eq!(run_cell(&mut em, ca), a / 2, "halve {a}");
         }
     }
 
