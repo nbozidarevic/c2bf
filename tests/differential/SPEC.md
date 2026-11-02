@@ -49,16 +49,15 @@ source order, e.g.
   `default`: `[body]`; `goto-label(name)`: `[body]`.
 - `comma`: `[first, rest...]` (2+; only built when a comma is present).
 - `assign(op)`: `[lhs, rhs]`, right-associative; `op` is one of
-  `= += -= *= /= %=`. Non-lvalue `lhs` (other than parenthesized
-  lvalues) is a parse error.
+  `= += -= *= /= %= &= |= ^= <<= >>=`. Non-lvalue `lhs` (other than
+  parenthesized lvalues) is a parse error.
 - `ternary`: `[cond, then, else]`, right-associative; sits between
   assignment and `||` — the condition is a logical-or expression, the
   middle is a full expression (commas allowed), and the else-branch is
   a conditional.
 - `binop(op)`: `[l, r]`, left-associative. Levels low→high:
   `||`, `&&`, `|`, `^`, `&`, `== !=`, `< > <= >=`, `<< >>`,
-  `+ -`, `* / %`. Compound bitwise/shift assignment (`&=`, `|=`,
-  `^=`, `<<=`, `>>=`) is not accepted yet.
+  `+ -`, `* / %`.
 - `unary(op)`: `[e]`; `op` is one of `! & ++ -- - + ~` (no
   `sizeof` — accepted subset surface). Unary `-`/`~` wrap mod 256.
 - `cast(spec)`: `[e]` — a cast is a no-op in the byte model;

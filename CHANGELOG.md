@@ -82,6 +82,9 @@ below keep the pre-rename names as history.
   shift, additive) and right-to-left operand evaluation. Pinned
   by the `bitwise` oracle fixture, including double-side-effect
   order lines, and by `order_bitwise`/`order_shift` probes.
+- Compound bitwise/shift assignment (`&= |= ^= <<= >>=`); the
+  shift forms need three-char lexing so `<<=` is one token.
+  Pinned by the `bitassign` oracle fixture.
 
 ## Phase 5 — Performance
 

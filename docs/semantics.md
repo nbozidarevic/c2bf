@@ -40,6 +40,9 @@ fix-or-pin work for Phase 1.
   (unlike C, which captures each assigned value). The fixture
   avoids that shape; distinct variables in the operands are
   unaffected.
+- Compound assignment (`op=`) desugars to `x = x op y` with the
+  right-hand side evaluated first, as for the other compound
+  forms; `&= |= ^= <<= >>=` use the bitwise/shift helpers.
 - Only `char` variables are supported; anything wider needs multi-cell
   representation (deferred to language expansion).
 - Integer literals may be decimal, octal, hex, or binary, with `u`/`l`

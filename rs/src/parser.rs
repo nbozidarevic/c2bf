@@ -46,7 +46,9 @@ const QUALIFIER_WORDS: [&[u8]; 4] = [b"long", b"unsigned", b"signed", b"const"];
 fn is_qualifier(text: &[u8]) -> bool {
     is_op_in(text, &QUALIFIER_WORDS)
 }
-const ASSIGN_OPS: [&[u8]; 6] = [b"=", b"+=", b"-=", b"*=", b"/=", b"%="];
+const ASSIGN_OPS: [&[u8]; 11] = [
+    b"=", b"+=", b"-=", b"*=", b"/=", b"%=", b"&=", b"|=", b"^=", b"<<=", b">>=",
+];
 const EQUALITY_OPS: [&[u8]; 2] = [b"==", b"!="];
 const RELATIONAL_OPS: [&[u8]; 4] = [b"<", b">", b"<=", b">="];
 const SHIFT_OPS: [&[u8]; 2] = [b"<<", b">>"];
@@ -1178,6 +1180,18 @@ mod tests {
         assert_sexp(
             "int f() { while (1) { break; continue; } return; }",
             "(tu (funcdef f (compound (while (int 1) (compound (break) (continue))) (return))))",
+        );
+    }
+
+    #[test]
+    fn bitwise_and_shift_assign_ops() {
+        assert_sexp(
+            "int f() { a &= b; a <<= 2; }",
+            "(tu (funcdef f (compound (exprstmt (assign &= (ident a) (ident b))) (exprstmt (assign <<= (ident a) (int 2))))))",
+        );
+        assert_sexp(
+            "int f() { a |= b ^= c; }",
+            "(tu (funcdef f (compound (exprstmt (assign |= (ident a) (assign ^= (ident b) (ident c)))))))",
         );
     }
 

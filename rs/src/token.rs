@@ -134,7 +134,17 @@ fn is_two_char(a: u8, b: u8) -> bool {
             | (b'<', b'<')
             | (b'>', b'>')
             | (b'-', b'>')
+            | (b'&', b'=')
+            | (b'|', b'=')
+            | (b'^', b'=')
     )
+}
+
+/// Three-char punctuators: the shift-assignment operators. Checked
+/// before the two-char table so `<<=` lexes as one token, not `<<`
+/// plus `=`.
+fn is_three_char(a: u8, b: u8, c: u8) -> bool {
+    matches!((a, b, c), (b'<', b'<', b'=') | (b'>', b'>', b'='))
 }
 
 fn is_one_char(c: u8) -> bool {
@@ -544,6 +554,18 @@ impl<'a> Cursor<'a> {
                 });
                 self.col += j - self.i;
                 self.i = j;
+            } else if self.i + 2 < n
+                && is_three_char(self.src[self.i], self.src[self.i + 1], self.src[self.i + 2])
+            {
+                toks.push(Tok {
+                    kind: Kind::Punct,
+                    text: self.src[self.i..self.i + 3].to_vec(),
+                    raw: None,
+                    line: self.line,
+                    col: self.col,
+                });
+                self.i += 3;
+                self.col += 3;
             } else if self.i + 1 < n && is_two_char(self.src[self.i], self.src[self.i + 1]) {
                 toks.push(Tok {
                     kind: Kind::Punct,
@@ -742,6 +764,19 @@ mod tests {
         assert_eq!(t[1].text, b"iffy");
         assert_eq!(t[2].text, b"while3");
         assert_eq!(t[5].text, b"doing");
+    }
+
+    #[test]
+    fn three_and_two_char_assign_operators() {
+        assert_texts(
+            b"a <<= 1; a >>= 2; a &= 3; a |= 4; a ^= 5;",
+            &[
+                "a", "<<=", "1", ";", "a", ">>=", "2", ";", "a", "&=", "3", ";", "a",
+                "|=", "4", ";", "a", "^=", "5", ";", "",
+            ],
+        );
+        // Spaced, `<<` and `=` stay separate tokens.
+        assert_texts(b"a << = 1;", &["a", "<<", "=", "1", ";", ""]);
     }
 
     #[test]

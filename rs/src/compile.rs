@@ -589,6 +589,11 @@ impl Emitter {
                         b"*=" => self.multiply_values(target, r),
                         b"/=" => self.divide_values(target, r)?,
                         b"%=" => self.mod_values(target, r)?,
+                        b"&=" => self.bitwise_and_values(target, r)?,
+                        b"|=" => self.bitwise_or_values(target, r)?,
+                        b"^=" => self.bitwise_xor_values(target, r)?,
+                        b"<<=" => self.shift_left_values(target, r)?,
+                        b">>=" => self.shift_right_values(target, r)?,
                         _ => return Err(err("Unsupported assignment expression")),
                     };
                     Ok(self.copy_value(res, target))
