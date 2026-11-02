@@ -52,7 +52,8 @@ publishes nothing.
 ## Demo site (owner-gated, not deployed by CI)
 
 `demo/` is a static page using the `web` build. Deploying it to
-GitHub Pages is a manual dispatch of `.github/workflows/pages.yml`
-after enabling Pages in the repo settings (Settings → Pages →
-Source: GitHub Actions). The deploy itself is unverified until the
-owner runs it once; the build it uses is the same one CI verifies.
+GitHub Pages happens automatically on pushes touching `demo/`, `rs/`,
+or the workflow itself, or by manual dispatch of
+`.github/workflows/pages.yml`, after enabling Pages in the repo
+settings (Settings → Pages → Source: GitHub Actions). The build it
+uses is the same one CI verifies.

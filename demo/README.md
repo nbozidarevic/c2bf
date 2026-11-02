@@ -6,7 +6,9 @@ committed. The out-dir must be absolute: `wasm-pack` resolves a
 relative one against `rs/wasm/`, so `demo/pkg` alone lands in
 `rs/wasm/demo/pkg` and the page 404s on the bundle. Serve the
 directory over HTTP (plain `file://` will not load the `.wasm`);
-the GitHub Pages workflow builds and deploys it on manual dispatch.
+the GitHub Pages workflow builds and deploys it automatically on
+pushes touching the demo, the Rust sources, or its own workflow file,
+and also on manual dispatch.
 
 ```
 wasm-pack build rs/wasm --target web --out-dir "$PWD/demo/pkg"

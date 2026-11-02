@@ -61,3 +61,14 @@ WASM adapter remains for the demo and local bundler use. CI's
 `npm pack --dry-run` is a shape check only; it contacts no registry
 and publishes nothing. Pages deployment remains a manual,
 owner-gated step.
+
+## Update (2026-11-02): Pages deployment goes automatic
+
+The first Pages deploy shipped a site with no WASM bundle:
+`wasm-pack` resolves a relative `--out-dir` against the crate
+directory, so the bundle landed in `rs/wasm/demo/pkg` instead of
+`demo/pkg`. The fix uses an absolute out-dir and asserts the bundle
+files exist before upload. The Pages workflow now also runs
+automatically on pushes to `master` touching `demo/`, `rs/`, or
+itself (manual dispatch retained); enabling Pages in repo settings
+remains the one owner-gated step.

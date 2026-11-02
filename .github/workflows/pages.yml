@@ -1,12 +1,20 @@
 name: pages-demo
 
-# Manual-only demo deployment (Phase 7b, gated). The owner enables
-# GitHub Pages (Settings -> Pages -> Source: GitHub Actions) and then
-# dispatches this workflow. The build steps mirror the verified `wasm`
-# CI job. wasm-pack resolves a relative --out-dir against the crate
+# Demo deployment (Phase 7b, gated). The owner enables GitHub Pages
+# (Settings -> Pages -> Source: GitHub Actions); this workflow then
+# runs automatically on pushes touching the demo, the Rust sources
+# (the WASM build embeds c2bf-core), or itself, and also on manual
+# dispatch. The build steps mirror the verified `wasm` CI job.
+# wasm-pack resolves a relative --out-dir against the crate
 # directory, so the out-dir below must be absolute or the bundle lands
 # in rs/wasm/demo/pkg and the deployed page 404s on it.
 on:
+  push:
+    branches: [master]
+    paths:
+      - "demo/**"
+      - "rs/**"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
