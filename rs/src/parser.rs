@@ -692,7 +692,42 @@ impl<'a> Parser<'a> {
         Some((words.join(&b' '), (k + 1) as usize))
     }
 
+    /// Parse the operand of `sizeof` (already consumed): the type
+    /// form `sizeof (spec)`, or any unary expression. Either way the
+    /// operand is unevaluated, so side effects in it never compile.
+    fn parse_sizeof(&mut self) -> Result<Expr, ParseError> {
+        if self.at_punct(b"(") {
+            let mut words: Vec<Vec<u8>> = Vec::new();
+            let mut k = 1isize;
+            loop {
+                let t = self.peek_at(k);
+                let is_word = (t.kind == Kind::Kw && is_op_in(&t.text, &TYPE_KWS))
+                    || (t.kind == Kind::Ident && is_qualifier(&t.text));
+                if !is_word {
+                    break;
+                }
+                words.push(t.text.clone());
+                k += 1;
+            }
+            let close = self.peek_at(k);
+            if !words.is_empty()
+                && close.kind == Kind::Punct
+                && close.text == b")"
+            {
+                for _ in 0..=k {
+                    self.next_tok();
+                }
+                return Ok(Expr::SizeofType(words.join(&b' ')));
+            }
+        }
+        Ok(Expr::Sizeof(Box::new(self.parse_unary()?)))
+    }
+
     fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+        if self.at_kw(b"sizeof") {
+            self.next_tok();
+            return self.parse_sizeof();
+        }
         if let Some((spec, n)) = self.cast_prefix() {
             for _ in 0..n {
                 self.next_tok();
@@ -1083,6 +1118,30 @@ mod tests {
         assert_sexp(
             "int f() { while (1) { break; continue; } return; }",
             "(tu (funcdef f (compound (while (int 1) (compound (break) (continue))) (return))))",
+        );
+    }
+
+    #[test]
+    fn sizeof_forms() {
+        assert_sexp(
+            "int f() { return sizeof (char); }",
+            "(tu (funcdef f (compound (return (sizeof-type char)))))",
+        );
+        assert_sexp(
+            "int f() { return sizeof (unsigned int); }",
+            "(tu (funcdef f (compound (return (sizeof-type unsigned int)))))",
+        );
+        assert_sexp(
+            "int f() { return sizeof x; }",
+            "(tu (funcdef f (compound (return (sizeof (ident x))))))",
+        );
+        assert_sexp(
+            "int f() { return sizeof (x + 1); }",
+            "(tu (funcdef f (compound (return (sizeof (paren (binop + (ident x) (int 1))))))))",
+        );
+        assert_sexp(
+            "int f() { return sizeof (char) + 1; }",
+            "(tu (funcdef f (compound (return (binop + (sizeof-type char) (int 1))))))",
         );
     }
 

@@ -69,6 +69,9 @@ below keep the pre-rename names as history.
   a lone parenthesized qualifier (e.g. `(unsigned);`) still parses
   as a parenthesized variable, not a cast. Pinned by the `casts`
   oracle fixture.
+- `sizeof` (expression and type forms) as a constant `1`, with the
+  operand unevaluated; documents the divergence from C for `int`.
+  Pinned by the `sizeof` oracle fixture (char-typed uses only).
 
 ## Phase 5 — Performance
 

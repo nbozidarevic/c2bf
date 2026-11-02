@@ -99,9 +99,10 @@ fn escape_val(c: u8) -> Option<u8> {
     }
 }
 
-const KEYWORDS: [&[u8]; 15] = [
+const KEYWORDS: [&[u8]; 16] = [
     b"int", b"char", b"short", b"void", b"if", b"else", b"switch", b"case",
     b"default", b"while", b"do", b"for", b"break", b"continue", b"return",
+    b"sizeof",
 ];
 
 fn is_keyword(word: &[u8]) -> bool {
@@ -503,6 +504,12 @@ mod tests {
         assert_eq!(t[3].text, b"42");
         assert_eq!((t[3].line, t[3].col), (1, 9));
         assert_eq!((t[5].line, t[5].col), (1, 12));
+    }
+
+    #[test]
+    fn sizeof_is_keyword() {
+        assert_kinds(b"sizeof x", &[Kind::Kw, Kind::Ident, Kind::End]);
+        assert_kinds(b"sizeofx", &[Kind::Ident, Kind::End]);
     }
 
     #[test]

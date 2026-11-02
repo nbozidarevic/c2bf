@@ -19,6 +19,10 @@ fix-or-pin work for Phase 1.
   `(char)` of a value at or above 128 still differs from g++ on
   signed-`char` platforms (`(char)250` prints `-6` there, `250`
   here); see the signedness deviation below.
+- `sizeof` is always `1`, since every type is one byte here. This
+  differs from C for `int` (4) and for expressions of `int` type;
+  only `char`-typed uses agree with the g++ oracle, as pinned by
+  the `sizeof` fixture. The operand is unevaluated, as in C.
 - Only `char` variables are supported; anything wider needs multi-cell
   representation (deferred to language expansion).
 - Integer literals may be decimal, octal, hex, or binary, with `u`/`l`

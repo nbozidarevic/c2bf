@@ -61,6 +61,9 @@ source order, e.g.
   `sizeof` — accepted subset surface). Unary `-`/`~` wrap mod 256.
 - `cast(spec)`: `[e]` — a cast is a no-op in the byte model;
   `spec` may be multi-word (`unsigned int`).
+- `sizeof`: `[e]` (operand unevaluated, value always 1);
+  `sizeof-type(spec)`: the type form, no children, `spec` may be
+  multi-word.
 - `postfix(op)`: `[e]` (`++`/`--`); `call`: `[callee, args...]`
   (callee is any postfix expression).
 - `paren`: `[e]` — parentheses are kept as nodes, not transparent.

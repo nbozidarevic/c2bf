@@ -692,6 +692,9 @@ impl Emitter {
             // Casts are no-ops: every value is already a byte, and
             // literals and operations already truncate.
             Expr::Cast { e, .. } => self.compile_expr(e),
+            // sizeof is always 1: every type is one byte here. The
+            // operand is never compiled (unevaluated, as in C).
+            Expr::Sizeof(_) | Expr::SizeofType(_) => Ok(self.const_value(1)),
             Expr::Postfix { op, e } => {
                 let target = self.compile_expr(e)?;
                 let old = self.duplicate_value(target);
@@ -873,6 +876,19 @@ fn next_format_arg(vals: &[i32], next: &mut usize) -> Result<i32, CompileError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sizeof_is_one_and_unevaluated() {
+        // sizeof(x + 1) is 1 here although C says 4 (int type); the
+        // operand is never compiled, so x++ has no side effect.
+        let bf = compile(
+            b"int main() { int x = 0; printf(\"%d\", sizeof(char) + sizeof x + sizeof(x + 1)); x++; printf(\"%d\", x); printf(\"%d\", sizeof(x++)); printf(\"%d\", x); }",
+        )
+        .expect("sizeof program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"311");
+    }
 
     #[test]
     fn casts_wrap_like_bytes() {

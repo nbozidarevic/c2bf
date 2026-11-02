@@ -127,6 +127,10 @@ pub enum Expr {
         spec: Vec<u8>,
         e: Box<Expr>,
     },
+    /// `sizeof e`; unevaluated, always 1.
+    Sizeof(Box<Expr>),
+    /// `sizeof (spec)`; always 1.
+    SizeofType(Vec<u8>),
     Postfix {
         op: Vec<u8>,
         e: Box<Expr>,
@@ -389,6 +393,16 @@ fn dump_expr(e: &Expr, out: &mut Vec<u8>) {
             open_text(out, "cast", spec);
             out.push(b' ');
             dump_expr(e, out);
+            close(out);
+        }
+        Expr::Sizeof(e) => {
+            open(out, "sizeof");
+            out.push(b' ');
+            dump_expr(e, out);
+            close(out);
+        }
+        Expr::SizeofType(spec) => {
+            open_text(out, "sizeof-type", spec);
             close(out);
         }
         Expr::Postfix { op, e } => {
