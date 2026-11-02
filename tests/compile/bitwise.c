@@ -28,7 +28,7 @@ int main() {
   printf("%d %d\n", (x++) << (x++), x);
   x = 2;
   printf("%d %d\n", (x++) >> (x++), x);
-  x = 2;
-  printf("%d %d\n", (x = 2) << (x = 3), x);
+  int y = 0;
+  printf("%d %d %d\n", (x = 2) << (y = 3), x, y);
   return 0;
 }
