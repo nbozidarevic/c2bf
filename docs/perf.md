@@ -25,36 +25,46 @@ In-process timing on linux-x86_64 (`c2bf-bench`, adaptive iterations: at least 3
 
 | program | BF bytes | compile mean (ms) | run mean (ms) | run min (ms) | iters | out bytes |
 |---|---|---|---|---|---|---|
-| addition | 56339 | 0.080 | 6.262 | 6.197 | 100 | 2 |
-| addsub | 520649 | 1.149 | 99.500 | 98.925 | 21 | 28 |
-| assign | 1787399 | 2.475 | 16.786 | 16.511 | 100 | 32 |
-| branch | 10781 | 0.038 | 0.132 | 0.129 | 100 | 10 |
-| break | 632807 | 0.971 | 13.524 | 13.434 | 100 | 24 |
-| cmp | 938027 | 1.308 | 4.057 | 4.030 | 100 | 32 |
-| complex | 377184 | 0.545 | 39.184 | 38.922 | 52 | 210 |
-| continue | 855741 | 1.312 | 29.996 | 29.759 | 67 | 30 |
-| div | 585138 | 0.817 | 3.521 | 3.500 | 100 | 18 |
-| dowhile | 515169 | 0.744 | 3.734 | 3.467 | 100 | 17 |
-| fordecl | 280864 | 0.402 | 3.563 | 3.530 | 100 | 10 |
-| hello_world | 597 | 0.005 | 0.008 | 0.008 | 100 | 14 |
-| io | 123335 | 0.178 | 8.127 | 8.072 | 100 | 8 |
-| logic | 812538 | 1.138 | 3.044 | 3.020 | 100 | 28 |
-| loop | 236198 | 0.337 | 3.262 | 3.240 | 100 | 8 |
-| mod | 617886 | 0.864 | 3.491 | 3.462 | 100 | 18 |
-| mul | 462570 | 0.649 | 67.309 | 67.023 | 30 | 24 |
-| printnum | 1359034 | 1.893 | 355.648 | 354.902 | 6 | 85 |
-| switch | 105679 | 0.212 | 1.005 | 0.982 | 100 | 21 |
-| ternary | 726950 | 1.059 | 9.165 | 9.089 | 100 | 24 |
+| addition | 56339 | 0.080 | 6.109 | 6.053 | 100 | 2 |
+| addsub | 520649 | 1.158 | 96.773 | 96.173 | 21 | 28 |
+| assign | 1787399 | 2.520 | 17.347 | 17.154 | 100 | 32 |
+| bitassign | 1007169 | 1.419 | 226.053 | 225.633 | 9 | 24 |
+| bitwise | 3034532 | 4.313 | 815.953 | 814.895 | 3 | 73 |
+| branch | 10781 | 0.041 | 0.134 | 0.131 | 100 | 10 |
+| break | 632807 | 0.992 | 15.623 | 13.832 | 100 | 24 |
+| casts | 396460 | 0.567 | 72.545 | 72.208 | 28 | 22 |
+| cmp | 938027 | 1.327 | 4.271 | 4.197 | 100 | 32 |
+| complex | 377184 | 0.551 | 40.592 | 39.391 | 50 | 210 |
+| continue | 855741 | 1.344 | 30.798 | 30.604 | 65 | 30 |
+| define | 226449 | 0.325 | 2.947 | 2.916 | 100 | 12 |
+| div | 585138 | 0.830 | 3.647 | 3.571 | 100 | 18 |
+| dowhile | 515169 | 0.760 | 3.587 | 3.532 | 100 | 17 |
+| fordecl | 280864 | 0.408 | 3.623 | 3.580 | 100 | 10 |
+| hello_world | 597 | 0.006 | 0.008 | 0.008 | 100 | 14 |
+| io | 123335 | 0.179 | 8.189 | 8.130 | 100 | 8 |
+| literals | 509240 | 0.722 | 44.467 | 41.586 | 45 | 25 |
+| logic | 812538 | 1.154 | 3.485 | 3.427 | 100 | 28 |
+| loop | 236198 | 0.342 | 4.023 | 3.996 | 100 | 8 |
+| mod | 617886 | 0.873 | 3.569 | 3.522 | 100 | 18 |
+| mul | 462570 | 0.658 | 68.910 | 68.660 | 30 | 24 |
+| multidecl | 279181 | 0.441 | 2.026 | 2.003 | 100 | 12 |
+| printfmt | 645117 | 0.905 | 135.259 | 135.039 | 15 | 33 |
+| printnum | 1359034 | 2.003 | 354.315 | 354.108 | 6 | 85 |
+| sizeof | 227220 | 0.325 | 1.538 | 1.520 | 100 | 12 |
+| switch | 105679 | 0.241 | 1.014 | 0.999 | 100 | 21 |
+| ternary | 726950 | 1.055 | 9.468 | 9.347 | 100 | 24 |
+| typespec | 361423 | 0.523 | 52.552 | 52.431 | 39 | 21 |
+| unary | 340913 | 0.488 | 2.077 | 2.040 | 100 | 14 |
 
 Runner microbenchmarks:
 
 | name | BF bytes | run mean (ms) | run min (ms) | iters | out bytes |
 |---|---|---|---|---|---|
 | nested-loops | 43 | 0.009 | 0.006 | 100 | 1 |
-| tape-walk | 200002 | 0.816 | 0.763 | 100 | 1 |
-| cell-bump | 100001 | 0.629 | 0.580 | 100 | 1 |
-| skip-scan | 100002 | 0.215 | 0.209 | 100 | 0 |
-| io-echo | 5 | 0.070 | 0.067 | 100 | 4096 |
+| tape-walk | 200002 | 0.804 | 0.672 | 100 | 1 |
+| cell-bump | 100001 | 0.594 | 0.579 | 100 | 1 |
+| skip-scan | 100002 | 0.217 | 0.208 | 100 | 0 |
+| io-echo | 5 | 0.071 | 0.070 | 100 | 4096 |
 <!-- END RESULTS -->
 
 ## Freshness mandate
@@ -90,3 +100,11 @@ results section are incomplete.
   expansion dominates — so the remaining size lever is helper
   code, not constants. Run means moved both ways between runs
   and are not comparable across runs.
+- Bitwise/shift helpers (this phase): each `& | ^` folds eight bits
+  through divide/modulo/multiply expansions, and each shift repeats
+  a multiply/divide; in the table above, the 25-line `bitwise`
+  fixture emits 3,034,532 BF bytes and runs in ~816 ms (3 iters),
+  and `bitassign` 1,007,169 bytes in ~226 ms. Helper expansion,
+  not constants or the runner, is now the dominant cost for
+  programs using these operators; a shared fold loop or cheaper
+  bit extraction is the next structural lever, unmeasured so far.
