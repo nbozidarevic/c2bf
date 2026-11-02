@@ -59,7 +59,10 @@ source order, e.g.
 - `postfix(op)`: `[e]` (`++`/`--`); `call`: `[callee, args...]`
   (callee is any postfix expression).
 - `paren`: `[e]` — parentheses are kept as nodes, not transparent.
-- `int`: raw digits; `char`: raw slice including quotes; `string`:
+- `int`: raw literal text — decimal, octal (`0` prefix; 8/9 there are a
+  tokenizer error), hex (`0x`), binary (`0b`), with optional `u`/`l`
+  suffixes; the value is computed at compile time and truncated to a
+  byte. `char`: raw slice including quotes; `string`:
   concatenated cooked contents of adjacent literals (C string
   pasting); `ident`: the name.
 - Trailing tokens after the translation unit are an error

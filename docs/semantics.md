@@ -15,6 +15,9 @@ fix-or-pin work for Phase 1.
   oracle, as pinned by the `unary` differential fixture.
 - Only `char` variables are supported; anything wider needs multi-cell
   representation (deferred to language expansion).
+- Integer literals may be decimal, octal, hex, or binary, with `u`/`l`
+  suffixes; values truncate mod 256 like all arithmetic, and 8/9 in an
+  octal literal is an error, as in g++.
 - The thesis specifies addressable memory for any integer index (its reference
   interpreter uses `map<int, char>`), i.e. negative indices are legal.
 - The original Brainfuck spec defines a minimum of 30,000 cells; transpiled

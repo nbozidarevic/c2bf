@@ -231,7 +231,52 @@ impl<'a> Cursor<'a> {
                 }
             } else if c.is_ascii_digit() {
                 let j0 = self.i;
-                while self.i < n && self.src[self.i].is_ascii_digit() {
+                // Radix prefixes: `0x`/`0X` hex, `0b`/`0B` binary
+                // (the prefix only applies when a digit of that radix
+                // follows; `0x` alone is `0` plus ident `x`).
+                if self.src[self.i] == b'0'
+                    && self.i + 2 < n
+                    && (self.src[self.i + 1] == b'x' || self.src[self.i + 1] == b'X')
+                    && self.src[self.i + 2].is_ascii_hexdigit()
+                {
+                    self.i += 2;
+                    while self.i < n && self.src[self.i].is_ascii_hexdigit() {
+                        self.i += 1;
+                    }
+                } else if self.src[self.i] == b'0'
+                    && self.i + 2 < n
+                    && (self.src[self.i + 1] == b'b' || self.src[self.i + 1] == b'B')
+                    && (self.src[self.i + 2] == b'0' || self.src[self.i + 2] == b'1')
+                {
+                    self.i += 2;
+                    while self.i < n
+                        && (self.src[self.i] == b'0' || self.src[self.i] == b'1')
+                    {
+                        self.i += 1;
+                    }
+                } else {
+                    while self.i < n && self.src[self.i].is_ascii_digit() {
+                        self.i += 1;
+                    }
+                    // A leading `0` with more digits is octal; 8/9
+                    // there are an error, as in g++.
+                    if self.i - j0 > 1 && self.src[j0] == b'0' {
+                        for &d in &self.src[j0..self.i] {
+                            if d == b'8' || d == b'9' {
+                                return Err(self.err(
+                                    self.line,
+                                    self.col,
+                                    "invalid digit in octal constant".to_string(),
+                                ));
+                            }
+                        }
+                    }
+                }
+                // Optional integer suffixes (`u`/`U`/`l`/`L`, in any
+                // combination); the value ignores them.
+                while self.i < n
+                    && matches!(self.src[self.i], b'u' | b'U' | b'l' | b'L')
+                {
                     self.i += 1;
                 }
                 toks.push(Tok {
@@ -489,6 +534,35 @@ mod tests {
                 "g", "&&", "h", "||", "i", "+=", "j", "-=", "k", "*=", "l",
                 "/=", "m", "%=", "n", "<<", "o", ">>", "p", "->", "q", ";", "",
             ],
+        );
+    }
+
+    #[test]
+    fn int_literal_radixes_and_suffixes() {
+        assert_texts(
+            b"0x1F 0Xff 010 077 0b101 0B11 42U 7l 0 00 123",
+            &[
+                "0x1F", "0Xff", "010", "077", "0b101", "0B11", "42U", "7l", "0",
+                "00", "123", "",
+            ],
+        );
+        assert_kinds(
+            b"0x1F 010 0b101 42U",
+            &[Kind::Int, Kind::Int, Kind::Int, Kind::Int, Kind::End],
+        );
+        // `0x` with no hex digit is `0` plus an identifier, as before.
+        assert_texts(b"0x", &["0", "x", ""]);
+    }
+
+    #[test]
+    fn error_invalid_octal_digit() {
+        assert_eq!(
+            tokenize(b"09"),
+            Err(TokenError {
+                line: 1,
+                col: 1,
+                msg: "invalid digit in octal constant".to_string(),
+            })
         );
     }
 

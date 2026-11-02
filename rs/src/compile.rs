@@ -24,6 +24,38 @@ fn err(msg: impl Into<String>) -> CompileError {
     CompileError { msg: msg.into() }
 }
 
+/// Value of an integer literal token: decimal, octal (`0` prefix),
+/// hex (`0x`/`0X`), or binary (`0b`/`0B`), with `u`/`l` suffixes
+/// stripped. Saturates like the old `strtol` clamp; the caller
+/// narrows to a byte (`as u8`), so oversized literals wrap.
+fn int_literal_value(text: &[u8]) -> i32 {
+    let mut s = text;
+    while matches!(s.last(), Some(b'u' | b'U' | b'l' | b'L')) {
+        s = &s[..s.len() - 1];
+    }
+    let (radix, digits): (i64, &[u8]) = if s.starts_with(b"0x") || s.starts_with(b"0X")
+    {
+        (16, &s[2..])
+    } else if s.starts_with(b"0b") || s.starts_with(b"0B") {
+        (2, &s[2..])
+    } else if s.len() > 1 && s[0] == b'0' {
+        (8, s)
+    } else {
+        (10, s)
+    };
+    let mut v: i64 = 0;
+    for &c in digits {
+        let d = match c {
+            b'0'..=b'9' => (c - b'0') as i64,
+            b'a'..=b'f' => (c - b'a' + 10) as i64,
+            b'A'..=b'F' => (c - b'A' + 10) as i64,
+            _ => 0,
+        };
+        v = v.saturating_mul(radix).saturating_add(d);
+    }
+    v.clamp(i32::MIN as i64, i32::MAX as i64) as i32
+}
+
 /// Parse and compile `src` to Brainfuck plus trailing newline.
 ///
 /// Mirrors `BrainfuckCompiler::run()`: externals compile in source order
@@ -521,11 +553,9 @@ impl Emitter {
     fn compile_expr(&mut self, e: &Expr) -> Result<i32, CompileError> {
         match e {
             Expr::Int(bytes) => {
-                // `atoi` with `strtol` clamping, narrowed to a byte.
-                let text = std::str::from_utf8(bytes).unwrap_or("");
-                let v: i64 = text.parse().unwrap_or(i64::MAX);
-                let clamped = v.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
-                Ok(self.const_value(clamped as u8))
+                // Radix/suffix handling lives in `int_literal_value`;
+                // the byte narrowing matches the old `atoi`+clamp shape.
+                Ok(self.const_value(int_literal_value(bytes) as u8))
             }
             Expr::Char(bytes) => {
                 // Raw slice including quotes; byte 1 is the value — even for
@@ -840,6 +870,27 @@ fn next_format_arg(vals: &[i32], next: &mut usize) -> Result<i32, CompileError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn int_literal_bases() {
+        assert_eq!(int_literal_value(b"42"), 42);
+        assert_eq!(int_literal_value(b"0xFF"), 255);
+        assert_eq!(int_literal_value(b"0xff"), 255);
+        assert_eq!(int_literal_value(b"010"), 8);
+        assert_eq!(int_literal_value(b"077"), 63);
+        assert_eq!(int_literal_value(b"0b101"), 5);
+        assert_eq!(int_literal_value(b"0B11"), 3);
+        assert_eq!(int_literal_value(b"42U"), 42);
+        assert_eq!(int_literal_value(b"7ll"), 7);
+        assert_eq!(int_literal_value(b"0x1FUL"), 31);
+        assert_eq!(int_literal_value(b"0x100"), 256);
+        assert_eq!(int_literal_value(b"99999999999999999999"), i32::MAX);
+        let bf = compile(b"int main() { printf(\"%d %d\", 0xff, 010); }")
+            .expect("literal program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"255 8");
+    }
 
     #[test]
     fn printf_percent_unsigned_hex() {

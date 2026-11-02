@@ -54,6 +54,9 @@ below keep the pre-rename names as history.
   printing like `%d`); the specifier is now checked before consuming
   an argument, so `%%` consumes none. Pinned by the `printfmt`
   oracle fixture.
+- Integer literals in hex (`0x`), binary (`0b`), and octal (`0`
+  prefix, 8/9 rejected as in g++), with `u`/`l` suffixes; values
+  still truncate to a byte. Pinned by the `literals` oracle fixture.
 
 ## Phase 5 — Performance
 
