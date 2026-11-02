@@ -27,9 +27,13 @@ fix-or-pin work for Phase 1.
   `>>` halves (logical, unsigned), once per unit of the count;
   counts of eight or more give zero. Shift counts at or above the
   C width are undefined behavior there and are defined here as
-  zero, so oracle fixtures keep counts below eight. Operands
-  evaluate right-to-left, like other non-arithmetic operators;
-  the `bitwise` fixture's double-side-effect lines pin this.
+  zero, so oracle fixtures keep counts below eight. A shift whose
+  value grows past 255 wraps like all arithmetic, so `%d` of it
+  differs from C `int` arithmetic (`128 << 1` prints `256` there,
+  `0` here); the fixture uses wrap-back forms for those cases.
+  Operands evaluate right-to-left, like other non-arithmetic
+  operators; the `bitwise` fixture's double-side-effect lines
+  pin this against g++.
 - Only `char` variables are supported; anything wider needs multi-cell
   representation (deferred to language expansion).
 - Integer literals may be decimal, octal, hex, or binary, with `u`/`l`

@@ -10,10 +10,10 @@ int main() {
   printf("%d\n", ~0 & 0xFF);
   printf("%d\n", 1 << 7);
   printf("%d\n", 3 << 2);
-  printf("%d\n", 128 << 1);
+  printf("%d\n", (128 << 1) % 256);
   printf("%d\n", 200 >> 3);
   printf("%d\n", 255 >> 8);
-  printf("%d\n", 1 << 8);
+  printf("%d\n", (1 << 8) % 256);
   printf("%d\n", 5 << 0);
   printf("%d\n", 5 >> 0);
   printf("%d\n", 1 + 2 << 1);
