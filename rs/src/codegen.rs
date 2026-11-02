@@ -384,7 +384,7 @@ impl Emitter {
     }
 
     /// Halve `cell` in place, flooring (`cell /= 2`, logical).
-    fn halve_in_place(&mut self, cell: i32) -> Result<i32, CompileError> {
+    fn halve_in_place(&mut self, cell: i32) -> Result<(), CompileError> {
         self.halve_with_remainder(cell)?;
         Ok(())
     }
