@@ -13,6 +13,9 @@ fix-or-pin work for Phase 1.
   `250`. Printed with `%d` these differ from C `int` values (`-5`,
   `-6`); only wrap-back uses (e.g. `-5 + 5`) agree with the g++
   oracle, as pinned by the `unary` differential fixture.
+- Casts are no-ops: `(int)`, `(char)`, and multi-word spellings do
+  not change the value, since every value is already a byte
+  (so `(char)300` is `44`, from the literal's own truncation).
 - Only `char` variables are supported; anything wider needs multi-cell
   representation (deferred to language expansion).
 - Integer literals may be decimal, octal, hex, or binary, with `u`/`l`

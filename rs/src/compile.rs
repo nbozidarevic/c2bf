@@ -689,6 +689,9 @@ impl Emitter {
                 }
                 _ => Err(err("Unsupported unary expression")),
             },
+            // Casts are no-ops: every value is already a byte, and
+            // literals and operations already truncate.
+            Expr::Cast { e, .. } => self.compile_expr(e),
             Expr::Postfix { op, e } => {
                 let target = self.compile_expr(e)?;
                 let old = self.duplicate_value(target);
@@ -870,6 +873,17 @@ fn next_format_arg(vals: &[i32], next: &mut usize) -> Result<i32, CompileError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn casts_wrap_like_bytes() {
+        let bf = compile(
+            b"int main() { printf(\"%d\", (char)300); printf(\"%d\", (int)(200 + 100)); printf(\"%d\", (unsigned int)7); }",
+        )
+        .expect("cast program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"44447");
+    }
 
     #[test]
     fn int_literal_bases() {

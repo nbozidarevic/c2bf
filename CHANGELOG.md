@@ -65,6 +65,10 @@ below keep the pre-rename names as history.
   `signed`, `long long`), including `for` init declarators and
   function parameters; all spellings denote one byte. Pinned by
   the `typespec` oracle fixture.
+- Casts (`(int)`, `(char)`, multi-word spellings) as byte no-ops;
+  a lone parenthesized qualifier (e.g. `(unsigned);`) still parses
+  as a parenthesized variable, not a cast. Pinned by the `casts`
+  oracle fixture.
 
 ## Phase 5 — Performance
 

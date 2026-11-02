@@ -122,6 +122,11 @@ pub enum Expr {
         op: Vec<u8>,
         e: Box<Expr>,
     },
+    /// Cast to `spec` (`(int) x`); a no-op in the byte model.
+    Cast {
+        spec: Vec<u8>,
+        e: Box<Expr>,
+    },
     Postfix {
         op: Vec<u8>,
         e: Box<Expr>,
@@ -376,6 +381,12 @@ fn dump_expr(e: &Expr, out: &mut Vec<u8>) {
         }
         Expr::Unary { op, e } => {
             open_text(out, "unary", op);
+            out.push(b' ');
+            dump_expr(e, out);
+            close(out);
+        }
+        Expr::Cast { spec, e } => {
+            open_text(out, "cast", spec);
             out.push(b' ');
             dump_expr(e, out);
             close(out);

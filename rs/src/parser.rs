@@ -648,7 +648,61 @@ impl<'a> Parser<'a> {
         Ok(n)
     }
 
+    /// If the next tokens are a cast prefix `(spec)`, return the
+    /// space-joined spec plus the number of tokens it spans
+    /// (including both parentheses). A cast needs at least one
+    /// specifier word (type keyword or qualifier) and a unary
+    /// operand after the closing parenthesis, so `(x)` stays a
+    /// parenthesized expression and `(unsigned)` alone stays a
+    /// parenthesized variable.
+    fn cast_prefix(&self) -> Option<(Vec<u8>, usize)> {
+        if !self.at_punct(b"(") {
+            return None;
+        }
+        let mut words: Vec<Vec<u8>> = Vec::new();
+        let mut k = 1isize;
+        loop {
+            let t = self.peek_at(k);
+            let is_word = (t.kind == Kind::Kw && is_op_in(&t.text, &TYPE_KWS))
+                || (t.kind == Kind::Ident && is_qualifier(&t.text));
+            if !is_word {
+                break;
+            }
+            words.push(t.text.clone());
+            k += 1;
+        }
+        if words.is_empty() {
+            return None;
+        }
+        let close = self.peek_at(k);
+        if !(close.kind == Kind::Punct && close.text == b")") {
+            return None;
+        }
+        let after = self.peek_at(k + 1);
+        let starts_unary = matches!(after.kind, Kind::Int | Kind::Char | Kind::String | Kind::Ident)
+            || (after.kind == Kind::Punct
+                && matches!(
+                    after.text.as_slice(),
+                    b"(" | b"!" | b"&" | b"++" | b"--" | b"-" | b"+" | b"~"
+                ))
+            || (after.kind == Kind::Kw && after.text == b"sizeof");
+        if !starts_unary {
+            return None;
+        }
+        Some((words.join(&b' '), (k + 1) as usize))
+    }
+
     fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+        if let Some((spec, n)) = self.cast_prefix() {
+            for _ in 0..n {
+                self.next_tok();
+            }
+            let e = self.parse_unary()?;
+            return Ok(Expr::Cast {
+                spec,
+                e: Box::new(e),
+            });
+        }
         let t = self.peek().clone();
         if t.kind == Kind::Punct && is_op_in(&t.text, &UNARY_OPS) {
             self.next_tok();
@@ -1029,6 +1083,31 @@ mod tests {
         assert_sexp(
             "int f() { while (1) { break; continue; } return; }",
             "(tu (funcdef f (compound (while (int 1) (compound (break) (continue))) (return))))",
+        );
+    }
+
+    #[test]
+    fn casts_are_noop_nodes() {
+        assert_sexp(
+            "int f() { return (int) x; }",
+            "(tu (funcdef f (compound (return (cast int (ident x))))))",
+        );
+        assert_sexp(
+            "int f() { return (unsigned int) (char) x; }",
+            "(tu (funcdef f (compound (return (cast unsigned int (cast char (ident x)))))))",
+        );
+        assert_sexp(
+            "int f() { a = (int) b + 1; }",
+            "(tu (funcdef f (compound (exprstmt (assign = (ident a) (binop + (cast int (ident b)) (int 1)))))))",
+        );
+        assert_sexp(
+            "int f() { a = (int) -b; }",
+            "(tu (funcdef f (compound (exprstmt (assign = (ident a) (cast int (unary - (ident b))))))))",
+        );
+        // A lone parenthesized qualifier stays a variable, not a cast.
+        assert_sexp(
+            "int f() { (unsigned); }",
+            "(tu (funcdef f (compound (exprstmt (paren (ident unsigned))))))",
         );
     }
 
