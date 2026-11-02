@@ -610,7 +610,7 @@ impl Emitter {
                         em.perform_if_else(
                             em.greater_than(digit, nine)?,
                             |em| {
-                                let d = em.subtract_values(digit, ten)?;
+                                let d = em.subtract_values(digit, ten);
                                 let g = em.add_values(d, a_char);
                                 em.move_value(g, glyph);
                                 Ok(())
