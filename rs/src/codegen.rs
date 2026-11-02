@@ -572,6 +572,68 @@ impl Emitter {
         )
     }
 
+    /// Print cell `a` as a lowercase hexadecimal number (`%x`).
+    ///
+    /// Same place-value shape as [`Self::print_as_number`] with base 16.
+    /// Bytes need at most two hex digits, so the place loop runs while
+    /// the digit exceeds 15 (one division): `helper` only ever reaches
+    /// 16, and never wraps through 256 the way a second multiply would.
+    pub fn print_as_hex(&mut self, a: i32) -> Result<(), CompileError> {
+        let a_copy = self.duplicate_value(a);
+        let digit = self.duplicate_value(a);
+        let helper = self.const_value(1);
+        let zero_char = self.const_value(b'0');
+        let nine = self.const_value(9);
+        let ten = self.const_value(10);
+        let fifteen = self.const_value(15);
+        let sixteen = self.const_value(16);
+        let a_char = self.const_value(b'a');
+        self.perform_if_else(
+            a,
+            |em| {
+                em.perform_while(
+                    |em| Ok(em.greater_than(digit, fifteen)?),
+                    |em| {
+                        let q = em.divide_values(digit, sixteen)?;
+                        em.move_value(q, digit);
+                        let h = em.multiply_values(helper, sixteen);
+                        em.move_value(h, helper);
+                        Ok(())
+                    },
+                )?;
+                em.perform_while(
+                    |em| Ok(helper),
+                    |em| {
+                        let q = em.divide_values(a_copy, helper)?;
+                        em.move_value(q, digit);
+                        let glyph = em.add_values(digit, zero_char);
+                        em.perform_if_else(
+                            em.greater_than(digit, nine)?,
+                            |em| {
+                                let d = em.subtract_values(digit, ten)?;
+                                let g = em.add_values(d, a_char);
+                                em.move_value(g, glyph);
+                                Ok(())
+                            },
+                            |_| Ok(()),
+                        )?;
+                        em.print_as_char(glyph);
+                        let scaled = em.multiply_values(digit, helper);
+                        let rest = em.subtract_values(a_copy, scaled);
+                        em.move_value(rest, a_copy);
+                        let q = em.divide_values(helper, sixteen)?;
+                        em.move_value(q, helper);
+                        Ok(())
+                    },
+                )
+            },
+            |em| {
+                em.print_as_char(zero_char);
+                Ok(())
+            },
+        )
+    }
+
     /// Read one character into cell `a` (`readAsChar`).
     pub fn read_as_char(&mut self, a: i32) {
         self.move_pointer(a);

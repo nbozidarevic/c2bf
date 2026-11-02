@@ -50,6 +50,10 @@ below keep the pre-rename names as history.
 - Unary `-`, `+`, `~` (byte-wrapping: `-x` is `0 - x`, `~x` is
   `255 - x`); `%d` of a wrapped negative differs from C `int`
   arithmetic, pinned by the wrap-back `unary` oracle fixture.
+- `printf` formats `%%`, `%u`, and `%x` (lowercase hex, place-value
+  printing like `%d`); the specifier is now checked before consuming
+  an argument, so `%%` consumes none. Pinned by the `printfmt`
+  oracle fixture.
 
 ## Phase 5 — Performance
 

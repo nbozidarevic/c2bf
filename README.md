@@ -55,7 +55,7 @@ review) after intentional changes:
 
 Only a C subset: `int`/`char` variables, arithmetic, comparisons,
 logic, `if`/`else`, `while`/`for`/`do...while`, `switch`, `break`/`continue`,
-`printf`/`scanf` with `%d`/`%c`, and more — see `docs/semantics.md`
+`printf` with `%d`/`%c`/`%u`/`%x`/`%%`, `scanf` with `%d`/`%c`, and more — see `docs/semantics.md`
 for the ground-truth
 behavior and `tests/compile/` for examples. The original C++/ANTLR
 implementation was retired after the Rust port matched it byte-for-byte

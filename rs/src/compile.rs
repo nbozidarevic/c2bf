@@ -738,10 +738,21 @@ impl Emitter {
                     }
                     b'%' => {
                         i += 1;
-                        let cell = next_format_arg(&vals, &mut next_var)?;
+                        // The specifier is checked before consuming an
+                        // argument, so `%%` prints a literal `%` without
+                        // consuming one. `%u` prints the same digits
+                        // as `%d` (values are bytes, never negative);
+                        // `%x` prints lowercase hex.
                         match format.get(i).copied() {
-                            Some(b'c') => self.print_as_char(cell),
-                            Some(b'd') => self.print_as_number(cell)?,
+                            Some(b'%') => self.print_char(b'%'),
+                            Some(spec @ (b'c' | b'd' | b'u' | b'x')) => {
+                                let cell = next_format_arg(&vals, &mut next_var)?;
+                                match spec {
+                                    b'c' => self.print_as_char(cell),
+                                    b'x' => self.print_as_hex(cell)?,
+                                    _ => self.print_as_number(cell)?,
+                                }
+                            }
                             _ => return Err(err("Unexpected printf format")),
                         }
                     }
@@ -829,6 +840,17 @@ fn next_format_arg(vals: &[i32], next: &mut usize) -> Result<i32, CompileError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn printf_percent_unsigned_hex() {
+        let bf = compile(
+            b"int main() { printf(\"%% %u %x %d\", 250, 255, 5); printf(\"%x\", 0); printf(\"%x\", 16); printf(\"%x\", 171); }",
+        )
+        .expect("printf program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"% 250 ff 5010ab");
+    }
 
     #[test]
     fn unary_minus_plus_tilde_wrap() {
