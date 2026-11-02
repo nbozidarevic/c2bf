@@ -92,6 +92,11 @@ below keep the pre-rename names as history.
   untouched; only the `bitwise`, `bitassign`, and order-probe
   goldens change. `bitwise` 3,034,532 -> 2,038,802 BF bytes,
   `bitassign` 1,007,169 -> 621,887; `docs/perf.md` refreshed.
+- Follow-up: raw bit-combine loops and conditional place
+  accumulation in the fold (`combine_and`/`or`/`xor`,
+  `accumulate_bit`), replacing the general multiply/add/scale
+  steps. `bitwise` 2,038,802 -> 2,013,207 BF bytes, `bitassign`
+  621,887 -> 610,311; runtime flat in the sampled runs.
 
 ## Phase 5 — Performance
 
