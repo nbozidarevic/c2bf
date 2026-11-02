@@ -310,27 +310,16 @@ impl Emitter {
         Ok(result)
     }
 
-    /// Quotient of `a / 2`; `a` is left holding the remainder (`a % 2`).
+    /// Remainder of `a % 2`; `a` is left holding the quotient (`a / 2`).
     ///
     /// Fused divide/modulo by two for [`Emitter::bitwise_fold`]: the
-    /// divide loop's leftover cell *is* the remainder, so one loop
-    /// replaces a `divide_values` plus a `mod_values` (which itself
-    /// divides, multiplies, and subtracts). `a` is consumed — it is
-    /// a fold-owned scratch copy, never a caller's operand cell —
-    /// and `two` is the fold's shared constant `2` cell.
-    fn divmod_two(&mut self, a: i32, two: i32) -> Result<i32, CompileError> {
-        let quotient = self.const_value(0);
-        self.perform_while(
-            |em| Ok(em.greater_than_or_equal(a, two)?),
-            |em| {
-                em.move_pointer(quotient);
-                em.emit("+");
-                let diff = em.subtract_values(a, two);
-                em.move_value(diff, a);
-                Ok(())
-            },
-        )?;
-        Ok(quotient)
+    /// pair-removal loop in [`Emitter::halve_with_remainder`] yields
+    /// both halves with plain zero tests, instead of a
+    /// `divide_values` plus a `mod_values` per operand (each paying
+    /// a full compare chain per check). `a` is a fold-owned scratch
+    /// copy, never a caller's operand cell.
+    fn divmod_two(&mut self, a: i32) -> i32 {
+        self.halve_with_remainder(a)
     }
 
     /// Double `cell` in place, wrapping (`cell *= 2`).
@@ -351,7 +340,8 @@ impl Emitter {
         self.move_value(scratch, cell);
     }
 
-    /// Halve `cell` in place, flooring (`cell /= 2`, logical).
+    /// Halve `cell` in place, flooring (`cell /= 2`, logical),
+    /// returning the discarded remainder (`0` or `1`) in a fresh cell.
     ///
     /// Each outer pass removes one pair: it decrements `cell`, then
     /// copies the remainder to a probe cell — if the probe is
@@ -360,8 +350,8 @@ impl Emitter {
     /// test a plain zero test, with no compare helper and no
     /// wrapping hazard (the second decrement only runs when at
     /// least two units were present). A leftover single unit is
-    /// discarded by moving the quotient back into `cell`.
-    fn halve_in_place(&mut self, cell: i32) {
+    /// the remainder; the quotient moves back into `cell`.
+    fn halve_with_remainder(&mut self, cell: i32) -> i32 {
         let quotient = self.memory.temp_cell();
         self.set_value(quotient, 0);
         let probe = self.memory.temp_cell();
@@ -381,7 +371,14 @@ impl Emitter {
         self.emit("]");
         self.move_pointer(cell);
         self.emit("]");
+        let remainder = self.duplicate_value(cell);
         self.move_value(quotient, cell);
+        remainder
+    }
+
+    /// Halve `cell` in place, flooring (`cell /= 2`, logical).
+    fn halve_in_place(&mut self, cell: i32) {
+        self.halve_with_remainder(cell);
     }
 
     /// `result = a <op> b` in a fresh cell, for a bitwise `op`.
@@ -389,8 +386,8 @@ impl Emitter {
     /// Walks the eight bits LSB-first, halving duplicated copies of
     /// both operands, and rebuilds the result one place value at a
     /// time. The operands are never consumed. Bit extraction is
-    /// fused: [`Emitter::divmod_two`] yields each bit and the next
-    /// quotient from one divide loop, instead of a `mod_values`
+    /// fused: [`Emitter::divmod_two`] leaves each quotient in its
+    /// operand copy and returns the bit, instead of a `mod_values`
     /// plus a `divide_values` per operand. The loop runs at most
     /// eight iterations (a counter cell) and stops early once both
     /// quotients are exhausted, so exhausted high bits simply
@@ -400,17 +397,14 @@ impl Emitter {
         let ac = self.duplicate_value(a);
         let bc = self.duplicate_value(b);
         let place = self.const_value(1);
-        let two = self.const_value(2);
         let counter = self.const_value(8);
         self.perform_while(
             |em| Ok(counter),
             |em| {
                 em.move_pointer(counter);
                 em.emit("-");
-                let qa = em.divmod_two(ac, two)?;
-                let abit = ac;
-                let qb = em.divmod_two(bc, two)?;
-                let bbit = bc;
+                let abit = em.divmod_two(ac);
+                let bbit = em.divmod_two(bc);
                 let bit = match mode {
                     BitCombine::And => em.multiply_values(abit, bbit),
                     BitCombine::Or => {
@@ -420,16 +414,13 @@ impl Emitter {
                     }
                     BitCombine::Xor => {
                         let sum = em.add_values(abit, bbit);
-                        em.divmod_two(sum, two)?;
-                        sum
+                        em.divmod_two(sum)
                     }
                 };
                 let scaled = em.multiply_values(bit, place);
                 let sum = em.add_values(result, scaled);
                 em.move_value(sum, result);
                 em.double_in_place(place);
-                em.move_value(qa, ac);
-                em.move_value(qb, bc);
                 let zero_a = em.negate(ac)?;
                 let zero_b = em.negate(bc)?;
                 let both_zero = em.multiply_values(zero_a, zero_b);
@@ -1148,14 +1139,12 @@ mod tests {
             // use (it appends pointer motion to the output).
             let mut em = Emitter::new();
             let ca = em.const_value(a);
-            let two = em.const_value(2);
-            let q = em.divmod_two(ca, two).unwrap();
-            assert_eq!(run_cell(&mut em, q), a / 2, "{a} / 2");
+            let r = em.divmod_two(ca);
+            assert_eq!(run_cell(&mut em, r), a % 2, "{a} % 2");
             let mut em = Emitter::new();
             let ca = em.const_value(a);
-            let two = em.const_value(2);
-            em.divmod_two(ca, two).unwrap();
-            assert_eq!(run_cell(&mut em, ca), a % 2, "{a} % 2");
+            em.divmod_two(ca);
+            assert_eq!(run_cell(&mut em, ca), a / 2, "{a} / 2");
         }
     }
 
