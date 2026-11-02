@@ -317,7 +317,10 @@ jobs:
         run: cargo test --manifest-path rs/wasm/Cargo.toml
 
       - name: Build web bundle for the demo
-        run: wasm-pack build rs/wasm --target web --out-dir demo/pkg
+        run: wasm-pack build rs/wasm --target web --out-dir "$GITHUB_WORKSPACE/demo/pkg"
+
+      - name: Check web bundle landed in demo/pkg
+        run: test -f demo/pkg/c2bf_wasm.js && test -f demo/pkg/c2bf_wasm_bg.wasm
 
       - name: Build Node bundle and smoke-test
         run: |

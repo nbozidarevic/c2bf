@@ -3,7 +3,9 @@ name: pages-demo
 # Manual-only demo deployment (Phase 7b, gated). The owner enables
 # GitHub Pages (Settings -> Pages -> Source: GitHub Actions) and then
 # dispatches this workflow. The build steps mirror the verified `wasm`
-# CI job; the deploy itself is unverified until the first manual run.
+# CI job. wasm-pack resolves a relative --out-dir against the crate
+# directory, so the out-dir below must be absolute or the bundle lands
+# in rs/wasm/demo/pkg and the deployed page 404s on it.
 on:
   workflow_dispatch:
 
@@ -32,7 +34,10 @@ jobs:
         uses: jetli/wasm-pack-action@v0.4.0
 
       - name: Build demo bundle
-        run: wasm-pack build rs/wasm --target web --out-dir demo/pkg
+        run: wasm-pack build rs/wasm --target web --out-dir "$GITHUB_WORKSPACE/demo/pkg"
+
+      - name: Check demo bundle landed where the page expects it
+        run: test -f demo/pkg/c2bf_wasm.js && test -f demo/pkg/c2bf_wasm_bg.wasm
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v3

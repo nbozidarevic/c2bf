@@ -9,10 +9,13 @@ and local bundler builds. The adapter adds no behavior.
 ## Build
 
 `wasm-pack` builds the crate for a chosen target. `demo/pkg/` is the
-`web` build output directory (gitignored build artifact):
+`web` build output directory (gitignored build artifact). Run this
+from the repo root with an absolute out-dir: `wasm-pack` resolves a
+relative one against the crate directory, so `demo/pkg` alone lands
+in `rs/wasm/demo/pkg` and the demo page 404s on the bundle.
 
 ```
-wasm-pack build rs/wasm --target web --out-dir demo/pkg
+wasm-pack build rs/wasm --target web --out-dir "$PWD/demo/pkg"
 ```
 
 For Node (smoke tests, bundlers):
