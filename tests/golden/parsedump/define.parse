@@ -1,0 +1,1 @@
+(tu (funcdef main (compound (exprstmt (call (ident printf) (string %d\n) (int 5))) (exprstmt (call (ident printf) (string %d\n) (binop + (int 10) (int 5)))) (exprstmt (call (ident printf) (string %d\n) (int 3))) (exprstmt (call (ident printf) (string hi\n))) (exprstmt (call (ident printf) (string %d\n) (int 6))) (return (int 0)))))
