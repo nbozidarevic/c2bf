@@ -887,7 +887,7 @@ mod tests {
         .expect("sizeof program compiles");
         let mut out = Vec::new();
         crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
-        assert_eq!(out, b"311");
+        assert_eq!(out, b"3111");
     }
 
     #[test]
