@@ -1,0 +1,114 @@
+name: redecl-probe
+
+# TEMPORARY: probe GNU g++/gcc behavior for same-scope redeclarations
+# (scalar/pointer/array, globals, controls). Probe only: always
+# exits 0, prints evidence. Removed once read.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe redeclarations
+        run: |
+          set +e
+          g++ --version | head -1
+          gcc --version | head -1
+          mkdir -p /tmp/redecl
+          cat > /tmp/redecl/r1.c <<'EOF'
+          #include <stdio.h>
+          int f() { int x = 1; int x = 2; return x; }
+          int main() { printf("%d\n", f()); return 0; }
+          EOF
+          cat > /tmp/redecl/r2.c <<'EOF'
+          #include <stdio.h>
+          int f() { char *p = 0; char *p = 0; return 0; }
+          int main() { printf("%d\n", f()); return 0; }
+          EOF
+          cat > /tmp/redecl/r3.c <<'EOF'
+          #include <stdio.h>
+          int f() { int x = 1; char *x = 0; return 0; }
+          int main() { printf("%d\n", f()); return 0; }
+          EOF
+          cat > /tmp/redecl/r4.c <<'EOF'
+          #include <stdio.h>
+          int f() { char *p = 0; int p = 1; return 0; }
+          int main() { printf("%d\n", f()); return 0; }
+          EOF
+          cat > /tmp/redecl/r5.c <<'EOF'
+          #include <stdio.h>
+          int f() { char *p = 0; char p[2]; return 0; }
+          int main() { printf("%d\n", f()); return 0; }
+          EOF
+          cat > /tmp/redecl/r6.c <<'EOF'
+          #include <stdio.h>
+          int f() { char a[2]; char *a = 0; return 0; }
+          int main() { printf("%d\n", f()); return 0; }
+          EOF
+          cat > /tmp/redecl/r7.c <<'EOF'
+          #include <stdio.h>
+          int f() { char a[2]; a[0] = 9; char a[2]; return a[0]; }
+          int main() { printf("%d\n", f()); return 0; }
+          EOF
+          cat > /tmp/redecl/r8.c <<'EOF'
+          #include <stdio.h>
+          int f() { int x = 1, x = 2; return x; }
+          int main() { printf("%d\n", f()); return 0; }
+          EOF
+          cat > /tmp/redecl/r9.c <<'EOF'
+          #include <stdio.h>
+          int f() { int x = 1; { int x = 2; } return x; }
+          int main() { printf("%d\n", f()); return 0; }
+          EOF
+          cat > /tmp/redecl/r10.c <<'EOF'
+          #include <stdio.h>
+          int f() { int x = 1; for (int x = 0; x < 1; x++) {} return x; }
+          int main() { printf("%d\n", f()); return 0; }
+          EOF
+          cat > /tmp/redecl/r11.c <<'EOF'
+          #include <stdio.h>
+          int f() { int x = 1; switch (1) { case 1: int x = 2; } return x; }
+          int main() { printf("%d\n", f()); return 0; }
+          EOF
+          cat > /tmp/redecl/g1.c <<'EOF'
+          #include <stdio.h>
+          int x = 1;
+          int x = 2;
+          int main() { printf("%d\n", x); return 0; }
+          EOF
+          cat > /tmp/redecl/g2.c <<'EOF'
+          #include <stdio.h>
+          int x;
+          int x = 1;
+          int main() { printf("%d\n", x); return 0; }
+          EOF
+          cat > /tmp/redecl/g3.c <<'EOF'
+          #include <stdio.h>
+          int x = 1;
+          int x;
+          int main() { printf("%d\n", x); return 0; }
+          EOF
+          cat > /tmp/redecl/g4.c <<'EOF'
+          #include <stdio.h>
+          int x;
+          int x;
+          int main() { printf("%d\n", x); return 0; }
+          EOF
+          for p in r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 g1 g2 g3 g4; do
+            for cc in "g++ -w" "gcc -std=c11 -w"; do
+              echo "=== $p with $cc ==="
+              $cc /tmp/redecl/$p.c -o /tmp/redecl/$p.bin > /tmp/redecl/$p.log 2>&1
+              echo "compile exit=$?"
+              cat /tmp/redecl/$p.log
+              if [ -x /tmp/redecl/$p.bin ]; then
+                echo "--- run ---"
+                /tmp/redecl/$p.bin
+                echo "run exit=$?"
+                rm -f /tmp/redecl/$p.bin
+              fi
+            done
+          done
