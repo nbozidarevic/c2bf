@@ -146,6 +146,14 @@ MILESTONES = [
         "dispatch (one arm per cell). Pointers add ~2.95M BF bytes; "
         "static code is unchanged.",
     ),
+    (
+        "6486d4566aac92e03d0b8fea046ef4f2ca20ba8b",
+        "Strings",
+        "String-literal array initializers, value decay to "
+        "anonymous storage, and printf %s over the dispatch. "
+        "Strings add ~3.04M BF bytes (eight %s sites); static "
+        "code is unchanged.",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
