@@ -166,6 +166,10 @@ below keep the pre-rename names as history.
   `a / 0` is `0`, `a % 0` is `a`. `scanf` `%d` honors a leading
   `-` (wrapping negation); `+` is ignored, as before. Pinned by
   unit tests and the `io` oracle fixture (wrap-back form).
+- `printf %s` pays the 256-arm dispatch once per site instead of
+  twice (hand-rolled do-while loop; see decision 0007): the
+  `strings` fixture drops from 3,036,947 to 1,639,379 BF bytes
+  (-46%), with all other goldens byte-identical.
 - Strings: string-literal array initializers (sized and unsized
   `char a[] = "…"`, bytes plus zero fill), string literals in
   value position decaying to anonymous NUL-terminated storage,
