@@ -149,12 +149,26 @@ impl<'a> Renamer<'a> {
             // Each declarator is fresh-named and bound in the current
             // scope *before* its initializer is walked, matching the
             // parser's order: a later declarator in the same list
-            // sees an earlier one.
-            let fresh = self.fresh(&init.name);
-            self.scopes
-                .last_mut()
-                .expect("rename_decl runs inside a scope")
-                .insert(init.name.clone(), fresh.clone());
+            // sees an earlier one. Redeclaring a name already bound
+            // in the *same* scope reuses its fresh name, so the
+            // emitter's redeclaration diagnostics still fire; a name
+            // bound only in an outer scope gets a fresh name (it is
+            // shadowed, not redeclared).
+            let existing = self
+                .scopes
+                .last()
+                .and_then(|scope| scope.get(&init.name).cloned());
+            let fresh = match existing {
+                Some(existing) => existing,
+                None => {
+                    let fresh = self.fresh(&init.name);
+                    self.scopes
+                        .last_mut()
+                        .expect("rename_decl runs inside a scope")
+                        .insert(init.name.clone(), fresh.clone());
+                    fresh
+                }
+            };
             inits.push(InitDecl {
                 name: fresh,
                 pointer: init.pointer,

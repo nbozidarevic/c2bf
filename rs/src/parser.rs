@@ -1193,10 +1193,11 @@ mod tests {
             "int f() { int long = 1; }",
             "(tu (funcdef f (compound (decl int (initdecl long (int 1))))))",
         );
-        // Multi-word parameter types parse (parameters are discarded).
+        // Multi-word parameter types parse (parameters are kept,
+        // the type is not).
         assert_sexp(
             "int f(unsigned int x) { return 0; }",
-            "(tu (funcdef f (compound (return (int 0)))))",
+            "(tu (funcdef f (params (param x)) (compound (return (int 0)))))",
         );
     }
 
