@@ -1296,7 +1296,10 @@ mod tests {
         let counter = em.const_value(0);
         let before = em.allocated_cells();
         em.perform_while(
-            |em| Ok(em.greater_than_or_equal(counter, em.const_value(1))?),
+            |em| {
+                let one = em.const_value(1);
+                Ok(em.greater_than_or_equal(counter, one)?)
+            },
             |em| {
                 em.const_value(9);
                 Ok(())
