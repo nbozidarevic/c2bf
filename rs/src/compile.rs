@@ -210,30 +210,28 @@ impl<'a> Renamer<'a> {
                 self.scopes.push(HashMap::new());
                 let init = match init {
                     ForInit::Decl(d) => {
-                        let fresh = self.fresh(&d.decl.name);
-                        self.scopes
-                            .last_mut()
-                            .expect("for scope is open")
-                            .insert(d.decl.name.clone(), fresh.clone());
+                        // Bind the declared name before walking its
+                        // initializer, as for block declarations;
+                        // a bare specifier has no name to bind.
+                        let name = match &d.name {
+                            Some(n) => {
+                                let fresh = self.fresh(n);
+                                self.scopes
+                                    .last_mut()
+                                    .expect("for scope is open")
+                                    .insert(n.clone(), fresh.clone());
+                                Some(fresh)
+                            }
+                            None => None,
+                        };
                         ForInit::Decl(ForDecl {
                             spec: d.spec.clone(),
-                            decl: InitDecl {
-                                name: fresh,
-                                pointer: d.decl.pointer,
-                                array_len: d
-                                    .decl
-                                    .array_len
-                                    .as_ref()
-                                    .map(|e| self.rename_expr(e))
-                                    .transpose()?,
-                                array_unsized: d.decl.array_unsized,
-                                init: d
-                                    .decl
-                                    .init
-                                    .as_ref()
-                                    .map(|e| self.rename_expr(e))
-                                    .transpose()?,
-                            },
+                            name,
+                            init: d
+                                .init
+                                .as_ref()
+                                .map(|e| self.rename_expr(e))
+                                .transpose()?,
                         })
                     }
                     ForInit::Empty => ForInit::Empty,
