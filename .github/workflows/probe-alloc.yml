@@ -24,10 +24,10 @@ jobs:
       - name: Write probes and bench them
         run: |
           set -euo pipefail
-          mkdir -p /tmp/probes
+          mkdir -p /tmp/probe-root/tests/compile
           write_probe() {
-            printf '#include <stdio.h>\nint main() { %s }\n' "$2" > "/tmp/probes/$1.c"
-            : > "/tmp/probes/$1.in"
+            printf '#include <stdio.h>\nint main() { %s }\n' "$2" > "/tmp/probe-root/tests/compile/$1.c"
+            : > "/tmp/probe-root/tests/compile/$1.in"
           }
           write_probe baseline 'printf("%d\n", 1);'
           write_probe div_zero_iter 'printf("%d\n", 3/7);'
@@ -49,7 +49,7 @@ jobs:
           write_probe bitwise_zero 'printf("%d\n", 0 & 0);'
           write_probe bitwise_full 'printf("%d\n", 255 ^ 255);'
           write_probe shift_zero 'printf("%d\n", 5 << 0);'
-          ./rs/target/release/c2bf-bench --quick --json /tmp/probes > probes.json
+          ./rs/target/release/c2bf-bench --quick --json /tmp/probe-root > probes.json
 
       - name: Upload probe results
         uses: actions/upload-artifact@v4
