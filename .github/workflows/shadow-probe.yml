@@ -15,6 +15,7 @@ jobs:
     steps:
       - name: Probe parameter shadowing
         run: |
+          set +e
           g++ --version | head -1
           gcc --version | head -1
           mkdir -p /tmp/shadow
