@@ -161,6 +161,15 @@ MILESTONES = [
         "guards and expansion reclaim. The functions fixture adds "
         "~0.82M BF bytes on 275 cells; static code is unchanged.",
     ),
+    (
+        "f3d007ec94218bc9f5cae2902b1dcfa7b7b27c85",
+        "Division and scanf sign",
+        "Division by zero defined (guarded quotient, remainder "
+        "keeps the dividend) and scanf honoring a leading sign, "
+        "with the print helpers on unchecked division. The eight "
+        "affected fixtures grow by ~69K BF bytes in total; static "
+        "code is unchanged.",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"

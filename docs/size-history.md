@@ -44,6 +44,7 @@ How the emitted Brainfuck size (bytes) for each golden fixture changed across no
 | Arrays and pointers | `412a09b` | 41 | 7599287 | +0 | Constant-index arrays resolve to static cells; variable indices and dereference load/store through a subtractive dispatch (one arm per cell). Pointers add ~2.95M BF bytes; static code is unchanged. |
 | Strings | `6486d45` | 42 | 10636234 | +0 | String-literal array initializers, value decay to anonymous storage, and printf %s over the dispatch. Strings add ~3.04M BF bytes (eight %s sites); static code is unchanged. |
 | Functions | `634c3f4` | 43 | 11460456 | +0 | User-defined functions by inline expansion, with return guards and expansion reclaim. The functions fixture adds ~0.82M BF bytes on 275 cells; static code is unchanged. |
+| Division and scanf sign | `f3d007e` | 43 | 11529619 | +69163 | Division by zero defined (guarded quotient, remainder keeps the dividend) and scanf honoring a leading sign, with the print helpers on unchecked division. The eight affected fixtures grow by ~69K BF bytes in total; static code is unchanged. |
 
 ## Sizes by fixture
 
@@ -915,6 +916,56 @@ User-defined functions by inline expansion, with return guards and expansion rec
 | `typespec` | 86826 | +0 |
 | `unary` | 93455 | +0 |
 
+### Division and scanf sign (`f3d007e`)
+
+Division by zero defined (guarded quotient, remainder keeps the dividend) and scanf honoring a leading sign, with the print helpers on unchecked division. The eight affected fixtures grow by ~69K BF bytes in total; static code is unchanged.
+
+| Fixture | Bytes | Change vs previous |
+|---|---|---|
+| `addition` | 15493 | +0 |
+| `addsub` | 139838 | +0 |
+| `arrays` | 121233 | +0 |
+| `assign` | 278222 | +410 |
+| `bitassign` | 138613 | +0 |
+| `bitwise` | 508390 | +0 |
+| `branch` | 6242 | +0 |
+| `break` | 173494 | +0 |
+| `casts` | 107759 | +0 |
+| `cmp` | 261219 | +0 |
+| `complex` | 81926 | +2469 |
+| `continue` | 233382 | +208 |
+| `define` | 61477 | +0 |
+| `div` | 163254 | +1998 |
+| `dowhile` | 142908 | +0 |
+| `fordecl` | 69726 | +0 |
+| `functions` | 824222 | +0 |
+| `hello_world` | 597 | +0 |
+| `io` | 67913 | +35839 |
+| `literals` | 138053 | +0 |
+| `logic` | 216689 | +0 |
+| `loop` | 54968 | +0 |
+| `micro_order_arith` | 500 | +0 |
+| `micro_order_assign` | 32 | +0 |
+| `micro_order_bitwise` | 5877 | +0 |
+| `micro_order_case` | 38 | +0 |
+| `micro_order_deref` | 351123 | +0 |
+| `micro_order_eq` | 507 | +0 |
+| `micro_order_index` | 423 | +0 |
+| `micro_order_le` | 1662 | +0 |
+| `micro_order_shift` | 363 | +0 |
+| `mod` | 171942 | +2220 |
+| `mul` | 125408 | +0 |
+| `multidecl` | 64485 | +0 |
+| `pointers` | 2978087 | +25805 |
+| `printfmt` | 162174 | +0 |
+| `printnum` | 369202 | +0 |
+| `sizeof` | 62091 | +0 |
+| `strings` | 3036947 | +0 |
+| `switch` | 39825 | +0 |
+| `ternary` | 172820 | +0 |
+| `typespec` | 87040 | +214 |
+| `unary` | 93455 | +0 |
+
 ## Cells allocated (compiler)
 
 Tape cells the compiler's bump allocator reserved for each program (`Memory::allocated_cells` after compilation). Allocation never reuses cells, so this is the static tape footprint: fewer allocated cells means less tape reserved, whether or not execution ever visits them all.
@@ -1094,6 +1145,45 @@ Tape cells the compiler's bump allocator reserved for each program (`Memory::all
 | `mul` | 207 |
 | `multidecl` | 115 |
 | `pointers` | 432 |
+| `printfmt` | 189 |
+| `printnum` | 328 |
+| `sizeof` | 102 |
+| `strings` | 215 |
+| `switch` | 281 |
+| `ternary` | 237 |
+| `typespec` | 163 |
+| `unary` | 174 |
+
+### Division and scanf sign (`f3d007e`)
+
+| Fixture | Cells alloc |
+|---|---|
+| `addition` | 69 |
+| `addsub` | 207 |
+| `arrays` | 194 |
+| `assign` | 302 |
+| `bitassign` | 196 |
+| `bitwise` | 632 |
+| `branch` | 64 |
+| `break` | 183 |
+| `casts` | 141 |
+| `cmp` | 378 |
+| `complex` | 136 |
+| `continue` | 231 |
+| `define` | 103 |
+| `div` | 180 |
+| `dowhile` | 183 |
+| `fordecl` | 107 |
+| `functions` | 275 |
+| `hello_world` | 24 |
+| `io` | 106 |
+| `literals` | 144 |
+| `logic` | 215 |
+| `loop` | 90 |
+| `mod` | 306 |
+| `mul` | 207 |
+| `multidecl` | 115 |
+| `pointers` | 438 |
 | `printfmt` | 189 |
 | `printnum` | 328 |
 | `sizeof` | 102 |
@@ -1922,6 +2012,54 @@ Tape cells actually used when each milestone's committed golden program runs wit
 | `mul` | 207 | 206 | 0 |
 | `multidecl` | 102 | 101 | 0 |
 | `pointers` | 432 | 431 | 0 |
+| `printfmt` | 189 | 188 | 0 |
+| `printnum` | 328 | 327 | 0 |
+| `sizeof` | 89 | 88 | 0 |
+| `strings` | 215 | 214 | 0 |
+| `switch` | 268 | 267 | 0 |
+| `ternary` | 224 | 223 | 0 |
+| `typespec` | 150 | 149 | 0 |
+| `unary` | 137 | 136 | 0 |
+
+### Division and scanf sign (`f3d007e`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 69 | 68 | 0 |
+| `addsub` | 207 | 206 | 0 |
+| `arrays` | 181 | 180 | 0 |
+| `assign` | 289 | 288 | 0 |
+| `bitassign` | 196 | 195 | 0 |
+| `bitwise` | 619 | 618 | 0 |
+| `branch` | 61 | 61 | 0 |
+| `break` | 170 | 169 | 0 |
+| `casts` | 141 | 140 | 0 |
+| `cmp` | 349 | 348 | 0 |
+| `complex` | 136 | 135 | 0 |
+| `continue` | 218 | 217 | 0 |
+| `define` | 90 | 89 | 0 |
+| `div` | 167 | 166 | 0 |
+| `dowhile` | 170 | 169 | 0 |
+| `fordecl` | 94 | 93 | 0 |
+| `functions` | 275 | 274 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 104 | 103 | 0 |
+| `literals` | 124 | 123 | 0 |
+| `logic` | 202 | 201 | 0 |
+| `loop` | 90 | 89 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_bitwise` | 52 | 51 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_deref` | 16 | 15 | 0 |
+| `micro_order_eq` | 16 | 15 | 0 |
+| `micro_order_index` | 12 | 11 | 0 |
+| `micro_order_le` | 22 | 21 | 0 |
+| `micro_order_shift` | 14 | 13 | 0 |
+| `mod` | 293 | 292 | 0 |
+| `mul` | 207 | 206 | 0 |
+| `multidecl` | 102 | 101 | 0 |
+| `pointers` | 438 | 437 | 0 |
 | `printfmt` | 189 | 188 | 0 |
 | `printnum` | 328 | 327 | 0 |
 | `sizeof` | 89 | 88 | 0 |
