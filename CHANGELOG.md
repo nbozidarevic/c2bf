@@ -154,8 +154,14 @@ below keep the pre-rename names as history.
   the renamer previously overwrote silently. Array-involved
   redeclarations are unchanged (same-size re-clear, size-mismatch
   and variable/array errors still come from the emitter). Pinned
-  by the `redeclare_scalar` error fixture. File-scope
-  redefinition is unchanged.
+  by the `redeclare_scalar` error fixture.
+- File-scope redefinition: a duplicate initialized definition at
+  file scope is now a compile error ("redefinition") in every
+  scalar/pointer combination, with array-involved duplicates still
+  left to the emitter. A bare declarator without an initializer
+  is not counted as a definition, so its existing unsupported
+  error is preserved, and the tentative-definition question does
+  not arise. Pinned by the `redeclare_global` error fixture.
 - Strings: string-literal array initializers (sized and unsized
   `char a[] = "…"`, bytes plus zero fill), string literals in
   value position decaying to anonymous NUL-terminated storage,

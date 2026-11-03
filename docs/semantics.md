@@ -186,7 +186,11 @@ call site.
   against the same compilers). Array redeclarations are the
   exception: they keep the emitter's behavior — same-size
   redeclaration re-clears the elements, a size mismatch is an
-  error, and variable/array confusion is an error. File-scope
-  redefinition is unchanged: it still overwrites silently, and
-  the tentative-definition policy (which differs between C and
-  C++) is undecided.
+  error, and variable/array confusion is an error. The same
+  rule applies at file scope: a duplicate initialized definition
+  is a redefinition, unless an array is involved (then the
+  emitter decides). A bare declarator without an initializer is
+  not a definition here — it is rejected as unsupported — so the
+  tentative-definition question (legal in C, an error in C++) does
+  not arise: every duplicate this compiler can express is
+  initialized, and both compilers reject those.

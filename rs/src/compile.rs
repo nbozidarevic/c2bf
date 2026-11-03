@@ -448,16 +448,45 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
     // calls may refer to functions defined later in the file and
     // duplicate definitions are rejected before any code is emitted.
     // Non-`main` definitions are never emitted directly; they expand
-    // inline at their call sites.
+    // inline at their call sites. File-scope definitions are
+    // checked in the same pass: a duplicate initialized definition
+    // is a redefinition (both compilers reject it), unless an array
+    // is involved, in which case the emitter decides during the
+    // second pass. A bare declarator without an initializer is not
+    // a definition here — it is rejected as unsupported during
+    // emission — so it is neither checked nor recorded, which is
+    // also why the tentative-definition question does not arise:
+    // every duplicate this pass can express is initialized, and
+    // both compilers reject those.
+    let mut globals: HashMap<Vec<u8>, bool> = HashMap::new();
     for item in &tu.0 {
-        if let External::FuncDef(f) = item {
-            let expanded = rename_function(f)?;
-            if em
-                .functions
-                .insert(f.name.clone(), Rc::new(expanded))
-                .is_some()
-            {
-                return Err(err("duplicate function definition"));
+        match item {
+            External::FuncDef(f) => {
+                let expanded = rename_function(f)?;
+                if em
+                    .functions
+                    .insert(f.name.clone(), Rc::new(expanded))
+                    .is_some()
+                {
+                    return Err(err("duplicate function definition"));
+                }
+            }
+            External::Decl(d) => {
+                for init in &d.inits {
+                    let is_array = init.array_len.is_some() || init.array_unsized;
+                    if init.init.is_none() && !is_array {
+                        continue;
+                    }
+                    if let Some(&old_is_array) = globals.get(&init.name) {
+                        if !is_array && !old_is_array {
+                            return Err(err(format!(
+                                "redefinition of '{}'",
+                                String::from_utf8_lossy(&init.name)
+                            )));
+                        }
+                    }
+                    globals.insert(init.name.clone(), is_array);
+                }
             }
         }
     }
@@ -2355,6 +2384,66 @@ mod tests {
             ),
             (
                 b"int main() { char a[2]; char *a = 0; }".as_slice(),
+                "cannot redeclare an array as a variable",
+            ),
+        ] {
+            assert_eq!(compile(src).unwrap_err().msg, want, "for {:?}", src);
+        }
+    }
+
+    #[test]
+    fn global_redefinition_rejected() {
+        // Duplicate initialized definitions at file scope are
+        // redefinitions: both compilers reject them (the probe
+        // cases g1–g4). A bare declarator without an initializer is
+        // not a definition here and is skipped by the check, so its
+        // existing "Unsupported init declarator" error is preserved.
+        for (src, want) in [
+            (
+                b"int x = 1; int x = 2; int main() { printf(\"%d\", x); }".as_slice(),
+                "redefinition of 'x'",
+            ),
+            (
+                b"int x = 1, x = 2; int main() { printf(\"%d\", x); }".as_slice(),
+                "redefinition of 'x'",
+            ),
+            (
+                b"char *p = 0; char *p = 0; int main() { printf(\"%d\", *p); }".as_slice(),
+                "redefinition of 'p'",
+            ),
+            (
+                b"int x = 1; char *x = 0; int main() { return 0; }".as_slice(),
+                "redefinition of 'x'",
+            ),
+            (
+                b"char *p = 0; int p = 1; int main() { return 0; }".as_slice(),
+                "redefinition of 'p'",
+            ),
+            (
+                b"int x; int x = 1; int main() { printf(\"%d\", x); }".as_slice(),
+                "Unsupported init declarator",
+            ),
+        ] {
+            assert_eq!(compile(src).unwrap_err().msg, want, "for {:?}", src);
+        }
+        // Array-involved file-scope redeclarations keep the
+        // emitter's behavior.
+        let bf = compile(b"char g[2]; char g[2]; int main() { printf(\"%d\", g[0]); }")
+            .expect("same-size global array redeclares");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"0");
+        for (src, want) in [
+            (
+                b"char g[2]; char g[3]; int main() { return 0; }".as_slice(),
+                "array size mismatch on redeclaration",
+            ),
+            (
+                b"int x = 1; char x[2]; int main() { return 0; }".as_slice(),
+                "cannot redeclare a variable as an array",
+            ),
+            (
+                b"char a[2]; int a = 1; int main() { return 0; }".as_slice(),
                 "cannot redeclare an array as a variable",
             ),
         ] {
