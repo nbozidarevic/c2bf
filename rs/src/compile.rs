@@ -99,8 +99,11 @@ enum ScanfTarget {
 /// library calls) pass through unchanged.
 ///
 /// The parameter frame is the outermost scope: parameters are bound
-/// before the body is walked, so a local declaration with a
-/// parameter's name shadows it inside its own block.
+/// before the body is walked, so a declaration nested inside the
+/// body shadows a parameter of the same name within its own block.
+/// A declaration at the top level of the body is in the same scope
+/// as the parameters and may not reuse one of their names; that
+/// check lives in [`rename_function`].
 struct Renamer<'a> {
     fn_name: &'a [u8],
     counter: usize,
@@ -349,8 +352,29 @@ impl<'a> Renamer<'a> {
 
 /// Scope-rename one function definition: bind fresh names for its
 /// parameters, then rename its body. A duplicate parameter name is a
-/// compile error.
+/// compile error, as is a declaration at the top level of the body
+/// that reuses a parameter's name: parameters share the body's
+/// outermost scope, so both compilers reject it (g++: "shadows a
+/// parameter"; gcc: "redeclared as different kind of symbol").
+/// Shadowing a parameter inside a nested block or a `for`
+/// initializer stays legal and keeps its own cells.
 fn rename_function(f: &FuncDef) -> Result<ExpandedFunction, CompileError> {
+    // Snapshot the parameter names before the body is walked: a
+    // later top-level declaration may reuse an earlier one's name
+    // (same-scope redeclaration), but never a parameter's.
+    let param_names: Vec<Vec<u8>> = f.params.iter().map(|p| p.name.clone()).collect();
+    for item in &f.body.0 {
+        if let BlockItem::Decl(d) = item {
+            for init in &d.inits {
+                if param_names.iter().any(|n| n == &init.name) {
+                    return Err(err(format!(
+                        "redefinition of parameter '{}'",
+                        String::from_utf8_lossy(&init.name)
+                    )));
+                }
+            }
+        }
+    }
     let mut renamer = Renamer {
         fn_name: &f.name,
         counter: 0,
@@ -2230,16 +2254,59 @@ mod tests {
     }
 
     #[test]
-    fn body_local_shadows_parameter() {
-        // A declaration at the top of the body shadows the parameter
-        // of the same name inside its block.
+    fn body_top_level_may_not_redefine_parameter() {
+        // Parameters share the body's outermost scope: a top-level
+        // declaration reusing a parameter's name is rejected, matching
+        // g++ ("shadows a parameter") and gcc ("redeclared as
+        // different kind of symbol", both 15.2, probed via CI). The
+        // check scans every top-level declaration, so using the
+        // parameter first does not save the later redefinition, and
+        // it fires whether or not the function is called.
+        for src in [
+            b"int f(int x) { int x = 5; return x; } int main() { int y = f(9); }".as_slice(),
+            b"int f(int x) { int x; return x; } int main() { int y = f(9); }".as_slice(),
+            b"int f(int x) { int x = 5, y = 1; return x + y; } int main() { int y = f(9); }".as_slice(),
+            b"int f(int x) { int y = x; int x = 2; return y; } int main() { int y = f(9); }".as_slice(),
+            b"int f(int x) { char x[2]; return 0; } int main() { int y = f(9); }".as_slice(),
+            b"int main(int x) { int x = 5; }".as_slice(),
+            b"int f(int x) { int x = 5; return x; } int main() {}".as_slice(),
+        ] {
+            assert_eq!(
+                compile(src).unwrap_err().msg,
+                "redefinition of parameter 'x'",
+                "for {:?}",
+                src
+            );
+        }
+    }
+
+    #[test]
+    fn nested_shadowing_of_parameters_is_legal() {
+        // A parameter may still be shadowed inside a nested block or
+        // a `for` initializer, and a global may be shadowed at the
+        // top level: only the parameter's own outermost scope is
+        // closed to redeclaration.
         let bf = compile(
-            b"int f(int x) { int x = 5; return x; } int main() { printf(\"%d\", f(9)); }",
+            b"int f(int x) { int y = 0; { int x = 5; y = x; } return y + x; } int main() { printf(\"%d\", f(9)); }",
         )
-        .expect("shadowing-param program compiles");
+        .expect("nested-shadow program compiles");
         let mut out = Vec::new();
         crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
-        assert_eq!(out, b"5");
+        assert_eq!(out, b"14");
+        let bf = compile(
+            b"int f(int x) { for (int x = 0; x < 2; x++) {} return x; } int main() { printf(\"%d\", f(9)); }",
+        )
+        .expect("for-shadow program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"9");
+        let bf = compile(
+            b"int x = 7; int f() { int x = 5; return x; } int main() { printf(\"%d,%d\", f(), x); }",
+        )
+        .expect("global-shadow program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"5,7");
     }
 
     #[test]

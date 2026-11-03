@@ -176,5 +176,10 @@ call site.
   block shadows an outer one (each gets its own cells), while a
   redeclaration in the same block is the same declaration the
   emitter always diagnosed (for example, array size mismatch).
-  A body-top-level declaration shadows a parameter of the same
-  name; whether GCC agrees is unverified.
+  A declaration at the top level of a function body may not reuse
+  a parameter's name: parameters share the body's outermost scope,
+  and both compilers reject it (verified against g++ and gcc
+  15.2 on Ubuntu, and Apple Clang 21: g++ reports "shadows a
+  parameter"). Shadowing a parameter inside a nested block or a
+  `for` initializer is legal, as is shadowing a global at the top
+  level.

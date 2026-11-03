@@ -141,6 +141,13 @@ below keep the pre-rename names as history.
   `for` update, and later `switch` cases). Recursion and wrong
   argument counts are compile errors. Pinned by the `functions`
   oracle fixture and `function_*` compile-error fixtures.
+- Functions, parameter scope correction: a declaration at the top
+  level of a function body reusing a parameter's name is now a
+  compile error ("redefinition of parameter"), verified against
+  g++ and gcc 15.2 (Ubuntu CI probe) and Apple Clang 21, which all
+  reject it; the renamer previously shadowed it silently. Nested
+  shadowing and `for`-initializer shadowing stay legal. Pinned by
+  the `function_param_shadow` error fixture.
 - Strings: string-literal array initializers (sized and unsized
   `char a[] = "…"`, bytes plus zero fill), string literals in
   value position decaying to anonymous NUL-terminated storage,
