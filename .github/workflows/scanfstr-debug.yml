@@ -1,0 +1,28 @@
+name: scanfstr-debug
+
+# TEMPORARY: show both sides of the scanfstr oracle divergence.
+# Removed after diagnosis.
+on:
+  push:
+    branches: [master]
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release --manifest-path rs/Cargo.toml
+
+      - name: Show divergence
+        run: |
+          ./rs/target/release/bfcompile tests/compile/scanfstr.c > /tmp/e.bf
+          timeout 300 ./rs/target/release/c2bf run -c /tmp/e.bf -i tests/compile/scanfstr.in > /tmp/e.rs
+          g++ -w tests/compile/scanfstr.c -o /tmp/e.o
+          /tmp/e.o < tests/compile/scanfstr.in > /tmp/e.gcc
+          echo "=== c2bf ==="; cat -A /tmp/e.rs; echo "=== g++ ==="; cat -A /tmp/e.gcc; echo "=== diff ==="; diff /tmp/e.rs /tmp/e.gcc || true
