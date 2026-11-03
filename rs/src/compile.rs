@@ -193,6 +193,9 @@ impl Emitter {
         // it fits); any other initializer is rejected, as before.
         let string_init = match &init.init {
             Some(Expr::StringLit { cooked, .. }) => Some(cooked.clone()),
+            Some(_) if init.array_unsized => {
+                return Err(err("unsized array requires a string initializer"));
+            }
             Some(_) => return Err(err("array initializers are not supported")),
             None => None,
         };
