@@ -15,8 +15,19 @@ pub enum External {
 }
 
 #[derive(Debug)]
+pub struct FnParam {
+    pub name: Vec<u8>,
+    /// `true` for a single-`*` pointer parameter.
+    pub pointer: bool,
+    /// `true` for an array parameter (`name[]` or `name[N]`); array
+    /// parameters decay to pointers, and the size is discarded.
+    pub array: bool,
+}
+
+#[derive(Debug)]
 pub struct FuncDef {
     pub name: Vec<u8>,
+    pub params: Vec<FnParam>,
     pub body: Block,
 }
 
@@ -194,6 +205,26 @@ fn dump_external(e: &External, out: &mut Vec<u8>) {
     match e {
         External::FuncDef(f) => {
             open_text(out, "funcdef", &f.name);
+            if !f.params.is_empty() {
+                out.push(b' ');
+                open(out, "params");
+                for p in &f.params {
+                    out.push(b' ');
+                    open_text(out, "param", &p.name);
+                    if p.pointer {
+                        out.push(b' ');
+                        open(out, "pointer");
+                        close(out);
+                    }
+                    if p.array {
+                        out.push(b' ');
+                        open(out, "array");
+                        close(out);
+                    }
+                    close(out);
+                }
+                close(out);
+            }
             out.push(b' ');
             dump_block(&f.body, out);
             close(out);

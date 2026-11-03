@@ -260,6 +260,7 @@ impl<'a> Parser<'a> {
 
     fn parse_funcdef(&mut self, _spec: Vec<u8>, name: Vec<u8>) -> Result<FuncDef, ParseError> {
         self.expect_punct(b"(", "'('")?;
+        let mut params = Vec::new();
         if !self.at_punct(b")") {
             if self.at_kw(b"void") {
                 self.next_tok();
@@ -269,7 +270,31 @@ impl<'a> Parser<'a> {
                         return self.fail("expected parameter type".to_string());
                     }
                     self.parse_spec();
-                    self.expect_ident("parameter name")?;
+                    // One `*` makes a pointer parameter; a second
+                    // `*` fails at the name.
+                    let pointer = if self.at_punct(b"*") {
+                        self.next_tok();
+                        true
+                    } else {
+                        false
+                    };
+                    let name = self.expect_ident("parameter name")?.text;
+                    // An array parameter decays to a pointer; the
+                    // size, when present, is parsed and discarded.
+                    let mut array = false;
+                    if self.at_punct(b"[") {
+                        self.next_tok();
+                        if !self.at_punct(b"]") {
+                            let _ = self.parse_assignment()?;
+                        }
+                        self.expect_punct(b"]", "']'")?;
+                        array = true;
+                    }
+                    params.push(FnParam {
+                        name,
+                        pointer,
+                        array,
+                    });
                     if !self.at_punct(b",") {
                         break;
                     }
@@ -279,7 +304,7 @@ impl<'a> Parser<'a> {
         }
         self.expect_punct(b")", "')'")?;
         let body = self.parse_compound()?;
-        Ok(FuncDef { name, body })
+        Ok(FuncDef { name, params, body })
     }
 
     fn parse_declaration(&mut self) -> Result<Decl, ParseError> {
@@ -1261,15 +1286,39 @@ mod tests {
     }
 
     #[test]
-    fn params_consumed_not_kept() {
+    fn params_are_kept() {
         assert_sexp(
             "int add(int a, int b) { return a; }",
-            "(tu (funcdef add (compound (return (ident a)))))",
+            "(tu (funcdef add (params (param a) (param b)) (compound (return (ident a)))))",
         );
         assert_sexp(
             "int f(void) { return 0; }",
             "(tu (funcdef f (compound (return (int 0)))))",
         );
+        assert_sexp(
+            "int f(int a, char *p, char s[], int t[4]) { }",
+            "(tu (funcdef f (params (param a) (param p (pointer)) (param s (array)) (param t (array))) (compound)))",
+        );
+    }
+
+    #[test]
+    fn param_requires_name() {
+        match parse(b"int f(int) { }") {
+            Err(e) => assert!(
+                e.msg.contains("parameter name"),
+                "unexpected error: {}",
+                e.msg
+            ),
+            Ok(_) => panic!("unnamed parameter accepted"),
+        }
+        match parse(b"int f(int **p) { }") {
+            Err(e) => assert!(
+                e.msg.contains("parameter name"),
+                "unexpected error: {}",
+                e.msg
+            ),
+            Ok(_) => panic!("double-pointer parameter accepted"),
+        }
     }
 
     #[test]

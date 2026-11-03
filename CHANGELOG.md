@@ -124,6 +124,15 @@ below keep the pre-rename names as history.
   nowhere. Pinned by the `pointers` oracle fixture,
   `order_index`/`order_deref` emission probes, and
   `pointer_*` compile-error fixtures.
+- Functions, groundwork: parameters are parsed and kept
+  (`params`/`param` in the parsedump, with `pointer`/`array`
+  markers; array parameters decay to pointers), every function
+  definition is scope-renamed before emission so shadowed
+  declarations get distinct cells (previously all same-named
+  declarations shared one cell), duplicate definitions and
+  duplicate parameter names are rejected, and a lone definition
+  without `main` is valid but emits nothing. Calls do not expand
+  yet. The `non_main.c` error fixture is retired.
 - Strings: string-literal array initializers (sized and unsized
   `char a[] = "…"`, bytes plus zero fill), string literals in
   value position decaying to anonymous NUL-terminated storage,

@@ -30,8 +30,11 @@ source order, e.g.
 `(dowhile (compound ...) (binop < (ident i) (int 3)))`.
 
 - `tu`: top-level `decl`/`funcdef` nodes in order (stray `;` skipped).
-- `funcdef(name)`: `[compound body]`. Parameters and return type are
-  consumed, not kept.
+- `funcdef(name)`: `[params?, compound body]`. The return type is
+  consumed, not kept; `params` is `[param]*`, present only when the
+  parameter list is non-empty (`()` and `(void)` both give no child).
+  `param(name)`: `[pointer?, array?]` — `pointer` for one `*`,
+  `array` for `name[]` or `name[N]` (the size is discarded).
 - `decl(spec)`: `[initdecl]*` (`int;` has no children; declarators
   are comma-separated, in order). `spec` is one or more words
   (`unsigned int`, `const char`, `long long`), space-joined.

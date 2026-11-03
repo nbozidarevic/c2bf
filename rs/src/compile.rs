@@ -16,8 +16,10 @@
 //!   C++ crashes with `bad_cast`).
 //! - Too few format arguments are rejected (the C++ reads out of bounds).
 
-use crate::ast::{Block, BlockItem, Decl, Expr, External, ForDecl, ForInit, InitDecl, Stmt};
-use crate::codegen::{CompileError, Emitter};
+use crate::ast::{Block, BlockItem, Decl, Expr, External, FnParam, ForDecl, ForInit, FuncDef, InitDecl, Stmt};
+use crate::codegen::{CompileError, Emitter, ExpandedFunction};
+use std::collections::HashMap;
+use std::rc::Rc;
 use crate::parser;
 
 fn err(msg: impl Into<String>) -> CompileError {
@@ -82,6 +84,288 @@ enum ScanfTarget {
     Through(i32),
 }
 
+/// Scoped renaming: rebuilds one function definition with every
+/// declared name replaced by a fresh name, so that a declaration
+/// shadowing an outer one gets its own cells and each expansion of
+/// the function starts from a clean set of names.
+///
+/// Names are fresh strings that cannot collide with user code: they
+/// start with the byte `0x01`, followed by the function name, `#`,
+/// a counter, and the original name. The renaming is purely lexical
+/// — it follows the parser's block structure, so a declaration is
+/// visible from its own block to the end of that block, including
+/// nested blocks, and goes out of scope when the block closes.
+/// Names that are never declared inside the function (globals,
+/// library calls) pass through unchanged.
+///
+/// The parameter frame is the outermost scope: parameters are bound
+/// before the body is walked, so a local declaration with a
+/// parameter's name shadows it inside its own block.
+struct Renamer<'a> {
+    fn_name: &'a [u8],
+    counter: usize,
+    scopes: Vec<HashMap<Vec<u8>, Vec<u8>>>,
+}
+
+impl<'a> Renamer<'a> {
+    fn fresh(&mut self, name: &[u8]) -> Vec<u8> {
+        self.counter += 1;
+        let mut fresh = vec![0x01];
+        fresh.extend_from_slice(self.fn_name);
+        fresh.push(b'#');
+        fresh.extend_from_slice(self.counter.to_string().as_bytes());
+        fresh.extend_from_slice(b"::");
+        fresh.extend_from_slice(name);
+        fresh
+    }
+
+    fn resolve(&self, name: &[u8]) -> Option<Vec<u8>> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).cloned())
+    }
+
+    fn rename_block(&mut self, block: &Block) -> Result<Block, CompileError> {
+        self.scopes.push(HashMap::new());
+        let mut items = Vec::with_capacity(block.0.len());
+        for item in &block.0 {
+            items.push(self.rename_item(item)?);
+        }
+        self.scopes.pop();
+        Ok(Block(items))
+    }
+
+    fn rename_item(&mut self, item: &BlockItem) -> Result<BlockItem, CompileError> {
+        match item {
+            BlockItem::Decl(d) => Ok(BlockItem::Decl(self.rename_decl(d)?)),
+            BlockItem::Stmt(s) => Ok(BlockItem::Stmt(self.rename_stmt(s)?)),
+        }
+    }
+
+    fn rename_decl(&mut self, decl: &Decl) -> Result<Decl, CompileError> {
+        let mut inits = Vec::with_capacity(decl.inits.len());
+        for init in &decl.inits {
+            // Each declarator is fresh-named and bound in the current
+            // scope *before* its initializer is walked, matching the
+            // parser's order: a later declarator in the same list
+            // sees an earlier one.
+            let fresh = self.fresh(&init.name);
+            self.scopes
+                .last_mut()
+                .expect("rename_decl runs inside a scope")
+                .insert(init.name.clone(), fresh.clone());
+            inits.push(InitDecl {
+                name: fresh,
+                pointer: init.pointer,
+                array_len: init
+                    .array_len
+                    .as_ref()
+                    .map(|e| self.rename_expr(e))
+                    .transpose()?,
+                array_unsized: init.array_unsized,
+                init: init.init.as_ref().map(|e| self.rename_expr(e)).transpose()?,
+            });
+        }
+        Ok(Decl {
+            spec: decl.spec.clone(),
+            inits,
+        })
+    }
+
+    fn rename_stmt(&mut self, stmt: &Stmt) -> Result<Stmt, CompileError> {
+        match stmt {
+            Stmt::Compound(block) => Ok(Stmt::Compound(self.rename_block(block)?)),
+            Stmt::Expr(e) => Ok(Stmt::Expr(self.rename_expr(e)?)),
+            Stmt::Empty => Ok(Stmt::Empty),
+            Stmt::If { cond, then, els } => Ok(Stmt::If {
+                cond: self.rename_expr(cond)?,
+                then: Box::new(self.rename_stmt(then)?),
+                els: els
+                    .as_ref()
+                    .map(|s| self.rename_stmt(s))
+                    .transpose()?
+                    .map(Box::new),
+            }),
+            Stmt::Switch { expr, body } => Ok(Stmt::Switch {
+                expr: self.rename_expr(expr)?,
+                body: Box::new(self.rename_stmt(body)?),
+            }),
+            Stmt::While { cond, body } => Ok(Stmt::While {
+                cond: self.rename_expr(cond)?,
+                body: Box::new(self.rename_stmt(body)?),
+            }),
+            Stmt::DoWhile { body, cond } => Ok(Stmt::DoWhile {
+                body: Box::new(self.rename_stmt(body)?),
+                cond: self.rename_expr(cond)?,
+            }),
+            Stmt::For {
+                init,
+                cond,
+                incr,
+                body,
+            } => {
+                // The `for` initializer's scope covers the condition,
+                // the increment, and the body.
+                self.scopes.push(HashMap::new());
+                let init = match init {
+                    ForInit::Decl(d) => {
+                        let fresh = self.fresh(&d.decl.name);
+                        self.scopes
+                            .last_mut()
+                            .expect("for scope is open")
+                            .insert(d.decl.name.clone(), fresh.clone());
+                        ForInit::Decl(ForDecl {
+                            spec: d.spec.clone(),
+                            decl: InitDecl {
+                                name: fresh,
+                                pointer: d.decl.pointer,
+                                array_len: d
+                                    .decl
+                                    .array_len
+                                    .as_ref()
+                                    .map(|e| self.rename_expr(e))
+                                    .transpose()?,
+                                array_unsized: d.decl.array_unsized,
+                                init: d
+                                    .decl
+                                    .init
+                                    .as_ref()
+                                    .map(|e| self.rename_expr(e))
+                                    .transpose()?,
+                            },
+                        })
+                    }
+                    ForInit::Empty => ForInit::Empty,
+                    ForInit::Expr(e) => ForInit::Expr(self.rename_expr(e)?),
+                };
+                let cond = cond.as_ref().map(|e| self.rename_expr(e)).transpose()?;
+                let incr = incr.as_ref().map(|e| self.rename_expr(e)).transpose()?;
+                let body = Box::new(self.rename_stmt(body)?);
+                self.scopes.pop();
+                Ok(Stmt::For {
+                    init,
+                    cond,
+                    incr,
+                    body,
+                })
+            }
+            Stmt::Return(e) => Ok(Stmt::Return(
+                e.as_ref().map(|e| self.rename_expr(e)).transpose()?,
+            )),
+            Stmt::Break => Ok(Stmt::Break),
+            Stmt::Continue => Ok(Stmt::Continue),
+            Stmt::Case { label, body } => Ok(Stmt::Case {
+                label: self.rename_expr(label)?,
+                body: Box::new(self.rename_stmt(body)?),
+            }),
+            Stmt::Default { body } => Ok(Stmt::Default {
+                body: Box::new(self.rename_stmt(body)?),
+            }),
+            Stmt::GotoLabel { name, body } => Ok(Stmt::GotoLabel {
+                name: name.clone(),
+                body: Box::new(self.rename_stmt(body)?),
+            }),
+        }
+    }
+
+    fn rename_expr(&mut self, expr: &Expr) -> Result<Expr, CompileError> {
+        match expr {
+            Expr::Comma(es) => {
+                let mut out = Vec::with_capacity(es.len());
+                for e in es {
+                    out.push(self.rename_expr(e)?);
+                }
+                Ok(Expr::Comma(out))
+            }
+            Expr::Assign { op, lhs, rhs } => Ok(Expr::Assign {
+                op: op.clone(),
+                lhs: Box::new(self.rename_expr(lhs)?),
+                rhs: Box::new(self.rename_expr(rhs)?),
+            }),
+            Expr::Ternary { cond, then, els } => Ok(Expr::Ternary {
+                cond: Box::new(self.rename_expr(cond)?),
+                then: Box::new(self.rename_expr(then)?),
+                els: Box::new(self.rename_expr(els)?),
+            }),
+            Expr::BinOp { op, l, r } => Ok(Expr::BinOp {
+                op: op.clone(),
+                l: Box::new(self.rename_expr(l)?),
+                r: Box::new(self.rename_expr(r)?),
+            }),
+            Expr::Unary { op, e } => Ok(Expr::Unary {
+                op: op.clone(),
+                e: Box::new(self.rename_expr(e)?),
+            }),
+            Expr::Cast { spec, e } => Ok(Expr::Cast {
+                spec: spec.clone(),
+                e: Box::new(self.rename_expr(e)?),
+            }),
+            Expr::Sizeof(e) => Ok(Expr::Sizeof(Box::new(self.rename_expr(e)?))),
+            Expr::SizeofType(spec) => Ok(Expr::SizeofType(spec.clone())),
+            Expr::Postfix { op, e } => Ok(Expr::Postfix {
+                op: op.clone(),
+                e: Box::new(self.rename_expr(e)?),
+            }),
+            Expr::Call { callee, args } => {
+                let mut out = Vec::with_capacity(args.len());
+                for arg in args {
+                    out.push(self.rename_expr(arg)?);
+                }
+                Ok(Expr::Call {
+                    callee: Box::new(self.rename_expr(callee)?),
+                    args: out,
+                })
+            }
+            Expr::Index { base, index } => Ok(Expr::Index {
+                base: Box::new(self.rename_expr(base)?),
+                index: Box::new(self.rename_expr(index)?),
+            }),
+            Expr::Paren(e) => Ok(Expr::Paren(Box::new(self.rename_expr(e)?))),
+            Expr::Int(s) => Ok(Expr::Int(s.clone())),
+            Expr::Char(s) => Ok(Expr::Char(s.clone())),
+            Expr::StringLit { cooked, raw } => Ok(Expr::StringLit {
+                cooked: cooked.clone(),
+                raw: raw.clone(),
+            }),
+            Expr::Ident(name) => Ok(Expr::Ident(
+                self.resolve(name).unwrap_or_else(|| name.clone()),
+            )),
+        }
+    }
+}
+
+/// Scope-rename one function definition: bind fresh names for its
+/// parameters, then rename its body. A duplicate parameter name is a
+/// compile error.
+fn rename_function(f: &FuncDef) -> Result<ExpandedFunction, CompileError> {
+    let mut renamer = Renamer {
+        fn_name: &f.name,
+        counter: 0,
+        scopes: vec![HashMap::new()],
+    };
+    let mut params = Vec::with_capacity(f.params.len());
+    for p in &f.params {
+        let fresh = renamer.fresh(&p.name);
+        if renamer.scopes[0]
+            .insert(p.name.clone(), fresh.clone())
+            .is_some()
+        {
+            return Err(err(format!(
+                "duplicate parameter name '{}'",
+                String::from_utf8_lossy(&p.name)
+            )));
+        }
+        params.push(FnParam {
+            name: fresh,
+            pointer: p.pointer,
+            array: p.array,
+        });
+    }
+    let body = renamer.rename_block(&f.body)?;
+    Ok(ExpandedFunction { params, body })
+}
+
 /// A compiled program: Brainfuck code plus the number of tape cells
 /// the compiler allocated for it. Allocation never reuses cells, so
 /// `cells` is the static tape footprint of the program.
@@ -101,13 +385,34 @@ pub struct CompiledProgram {
 pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
     let tu = parser::parse(src).map_err(|e| err(e.to_string()))?;
     let mut em = Emitter::new();
+    // Scope-rename and register every function definition first, so
+    // calls may refer to functions defined later in the file and
+    // duplicate definitions are rejected before any code is emitted.
+    // Non-`main` definitions are never emitted directly; they expand
+    // inline at their call sites.
+    for item in &tu.0 {
+        if let External::FuncDef(f) = item {
+            let expanded = rename_function(f)?;
+            if em
+                .functions
+                .insert(f.name.clone(), Rc::new(expanded))
+                .is_some()
+            {
+                return Err(err("duplicate function definition"));
+            }
+        }
+    }
     for item in &tu.0 {
         match item {
             External::FuncDef(f) => {
-                if f.name.as_slice() != b"main" {
-                    return Err(err("Unsupported function definition"));
+                if f.name.as_slice() == b"main" {
+                    let main_def = Rc::clone(
+                        em.functions
+                            .get(&f.name)
+                            .expect("main is registered above"),
+                    );
+                    em.compile_block(&main_def.body)?;
                 }
-                em.compile_block(&f.body)?;
             }
             External::Decl(d) => {
                 em.compile_decl(d)?;
@@ -1482,6 +1787,76 @@ mod tests {
             compile_program(b"int main() {}").unwrap().cells,
             empty.cells,
             "allocation is deterministic"
+        );
+    }
+
+    #[test]
+    fn shadowing_uses_distinct_cells() {
+        // A shadowed declaration gets its own cells: the nested `x`
+        // does not overwrite the outer one, and the global `x` is a
+        // third, untouched cell.
+        let bf = compile(
+            b"int x = 7; int main() { int x = 1; printf(\"%d,\", x); { int x = 2; printf(\"%d,\", x); } printf(\"%d\", x); }",
+        )
+        .expect("shadowing program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"1,2,1");
+        let bf = compile(
+            b"int main() { int a = 1; int b = 2; { int a = 3; printf(\"%d,\", a); } printf(\"%d,%d\", a, b); }",
+        )
+        .expect("shadowing program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"3,1,2");
+    }
+
+    #[test]
+    fn for_decl_is_scope_renamed() {
+        let bf = compile(
+            b"int main() { int s = 0; for (int i = 0; i < 3; i++) { s = s + i; } printf(\"%d\", s); }",
+        )
+        .expect("for-decl program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"3");
+    }
+
+    #[test]
+    fn uncalled_function_is_registered_not_emitted() {
+        // The retired `non_main.c` fixture: a lone definition is
+        // valid and emits nothing without `main`.
+        let program =
+            compile_program(b"int f() { return 0; }").expect("lone definition compiles");
+        assert_eq!(program.code, b"\n");
+        // With `main`, the uncalled body contributes no output.
+        let bf = compile(
+            b"int f() { printf(\"x\"); } int main() { printf(\"ok\"); }",
+        )
+        .expect("uncalled-function program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"ok");
+    }
+
+    #[test]
+    fn duplicate_function_definition_rejected() {
+        let err = compile(b"int f() {} int f() {} int main() {}").expect_err("duplicate def");
+        assert!(
+            err.msg.contains("duplicate function definition"),
+            "unexpected error: {}",
+            err.msg
+        );
+    }
+
+    #[test]
+    fn duplicate_parameter_name_rejected() {
+        let err = compile(b"int f(int x, int x) { return x; } int main() { return 0; }")
+            .expect_err("duplicate param");
+        assert!(
+            err.msg.contains("duplicate parameter name"),
+            "unexpected error: {}",
+            err.msg
         );
     }
 

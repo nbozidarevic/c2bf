@@ -18,7 +18,20 @@
 //!   output is platform-dependent; the byte differential is therefore
 //!   Ubuntu-only (macOS CI stays behavioral).
 
+use crate::ast::{Block, Expr, FnParam};
 use crate::memory::Memory;
+use std::collections::HashMap;
+use std::rc::Rc;
+
+/// A function definition with its body scope-renamed (see
+/// [`rename_function`]): every declared name is replaced by a fresh
+/// per-declaration name, so nested scopes no longer share cells and
+/// two expansions of the same function never interfere.
+#[derive(Debug)]
+pub struct ExpandedFunction {
+    pub params: Vec<FnParam>,
+    pub body: Block,
+}
 
 /// Code emitter: cell allocator, output bytes, tracked data pointer.
 #[derive(Debug, Default)]
@@ -28,6 +41,16 @@ pub struct Emitter {
     pointer: i32,
     pub(crate) break_stack: Vec<i32>,
     pub(crate) continue_stack: Vec<i32>,
+    /// Scope-renamed definitions, keyed by function name, built by
+    /// `compile_program` before any code is emitted; a call expands
+    /// the shared definition inline.
+    pub(crate) functions: HashMap<Vec<u8>, Rc<ExpandedFunction>>,
+    /// Names of functions whose expansion is in progress; a cycle
+    /// here is a recursive call, which inline expansion cannot do.
+    pub(crate) expanding: Vec<Vec<u8>>,
+    /// `(returned_cell, result_cell)` of the innermost function being
+    /// expanded, or `None` while compiling `main`.
+    pub(crate) return_context: Option<(i32, i32)>,
 }
 
 /// Compile failure: mirrors a C++ `throw "..."` site.
