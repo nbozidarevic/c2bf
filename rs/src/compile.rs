@@ -76,12 +76,15 @@ enum StoreTarget {
     Any { addr: i32 },
 }
 
-/// A `scanf` destination: a static cell, or a runtime address to
-/// store through.
+/// A `scanf` destination: a static cell, a runtime address to
+/// store through, or — for `scanf %s` — a static array range
+/// with a known bound, so over-long input truncates instead of
+/// writing past the array.
 #[derive(Clone, Copy)]
 enum ScanfTarget {
     Cell(i32),
     Through(i32),
+    Bounded { base: i32, len: usize },
 }
 
 /// Scoped renaming: rebuilds one function definition with every
@@ -1721,15 +1724,37 @@ impl Emitter {
         }
     }
 
+    /// Static array range (base, remaining length) for an
+    /// address-of operand naming an array or a constant-index
+    /// element of one, through parentheses. `None` when the bound
+    /// is not statically known.
+    fn string_bound(&self, e: &Expr) -> Option<(i32, usize)> {
+        match e {
+            Expr::Paren(inner) => self.string_bound(inner),
+            Expr::Ident(name) => self.memory.array_info(name),
+            Expr::Index { base, index } => match self.subscript_base(base).ok()? {
+                SubBase::Array(cell_base, len) => {
+                    let k = Self::const_index(index)?;
+                    if k < 0 || k as usize >= len {
+                        return None;
+                    }
+                    Some((cell_base + k, len - k as usize))
+                }
+                SubBase::Pointer(_) => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Compile a `scanf` destination: a static cell for a variable,
-    /// an array base, or a statically known element; otherwise a
-    /// runtime address to store through. A bare pointer variable
-    /// holds its address, so it stores through its own cell.
+    /// a bounded array range, or a statically known element;
+    /// otherwise a runtime address to store through. A bare pointer
+    /// variable holds its address, so it stores through its own cell.
     fn compile_scanf_target(&mut self, a: &Expr) -> Result<ScanfTarget, CompileError> {
         match a {
             Expr::Ident(name) => {
-                if let Some((base, _)) = self.memory.array_info(name) {
-                    Ok(ScanfTarget::Cell(base))
+                if let Some((base, len)) = self.memory.array_info(name) {
+                    Ok(ScanfTarget::Bounded { base, len })
                 } else if self.memory.is_pointer(name) {
                     Ok(ScanfTarget::Through(self.memory.var_cell(name)))
                 } else {
@@ -1738,7 +1763,9 @@ impl Emitter {
             }
             Expr::Paren(inner) => self.compile_scanf_target(inner),
             Expr::Unary { op, e: inner } if op.as_slice() == b"&" => {
-                if let Some(cell) = self.static_address_cell(inner) {
+                if let Some((base, len)) = self.string_bound(inner) {
+                    Ok(ScanfTarget::Bounded { base, len })
+                } else if let Some(cell) = self.static_address_cell(inner) {
                     Ok(ScanfTarget::Cell(cell))
                 } else {
                     Ok(ScanfTarget::Through(self.address_value(inner)?))
@@ -1749,11 +1776,12 @@ impl Emitter {
     }
 
     /// Read one `scanf` value (`%c` or `%d`) into a destination:
-    /// directly for a static cell, through dispatch for a runtime
+    /// directly for a static cell (a bounded range writes its
+    /// first cell, as before), through dispatch for a runtime
     /// address.
     fn read_into_target(&mut self, target: ScanfTarget, is_char: bool) -> Result<(), CompileError> {
         match target {
-            ScanfTarget::Cell(cell) => {
+            ScanfTarget::Cell(cell) | ScanfTarget::Bounded { base: cell, .. } => {
                 if is_char {
                     self.read_as_char(cell);
                 } else {
@@ -1865,6 +1893,18 @@ impl Emitter {
                         match format.get(i).copied() {
                             Some(b'c') => self.read_into_target(target, true)?,
                             Some(b'd') => self.read_into_target(target, false)?,
+                            Some(b's') => match target {
+                                ScanfTarget::Bounded { base, len } => {
+                                    self.read_as_string_bounded(base, len)?
+                                }
+                                ScanfTarget::Cell(cell) => {
+                                    let addr = self.address_const(cell)?;
+                                    self.read_as_string_through(addr)?;
+                                }
+                                ScanfTarget::Through(addr) => {
+                                    self.read_as_string_through(addr)?
+                                }
+                            },
                             _ => return Err(err("Unexpected scanf format")),
                         }
                     }
@@ -2728,6 +2768,86 @@ mod tests {
         let mut input = std::io::Cursor::new(b"-7\n");
         crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
         assert_eq!(out, b"249");
+    }
+
+    #[test]
+    fn scanf_string_truncates_and_keeps_eof_contents() {
+        // Over-long input truncates to len-1 characters plus NUL,
+        // the rest of the token is discarded, and end of input
+        // before any token character leaves the array untouched.
+        let bf = compile(
+            b"int main() { char s[4]; scanf(\"%s\", s); printf(\"[%s]\", s); scanf(\"%s\", s); printf(\"[%s]\", s); char u[6] = \"keep\"; scanf(\"%s\", u); printf(\"[%s]\", u); }",
+        )
+        .expect("scanf string program compiles");
+        let mut out = Vec::new();
+        let mut input = std::io::Cursor::new(b"hello\nbye\n");
+        crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+        assert_eq!(out, b"[hel][bye][keep]");
+        // A one-cell array holds only the NUL.
+        let bf = compile(
+            b"int main() { char w[1]; scanf(\"%s\", w); printf(\"[%s]\", w); }",
+        )
+        .expect("one-cell scanf string program compiles");
+        let mut out = Vec::new();
+        let mut input = std::io::Cursor::new(b"xyz\n");
+        crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+        assert_eq!(out, b"[]");
+    }
+
+    #[test]
+    fn scanf_string_through_pointers_and_element_addresses() {
+        // Through a pointer, through a constant element address
+        // (bounded by the remaining length), and through a
+        // variable element address (unbounded, like a pointer).
+        let bf = compile(
+            b"int main() { char a[8]; char *p = 0; int i = 0; p = &a[0]; scanf(\"%s\", p); scanf(\"%s\", &a[2]); i = 1; scanf(\"%s\", &a[i]); printf(\"[%s|%s]\", a, &a[2]); }",
+        )
+        .expect("scanf string pointer program compiles");
+        let mut out = Vec::new();
+        let mut input = std::io::Cursor::new(b"hi\nworld\nyo\n");
+        crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+        assert_eq!(out, b"[hyo|o]");
+    }
+
+    #[test]
+    fn scanf_string_consumes_its_delimiter() {
+        // Defined deviation from C (like `%d` here, whose
+        // terminating character is also consumed, not pushed
+        // back): `%c` after `%s` reads the character after the
+        // delimiter, where C would read the delimiter itself.
+        let bf = compile(
+            b"int main() { char s[8]; char c = 0; scanf(\"%s%c\", s, &c); printf(\"[%s]%c\", s, c); }",
+        )
+        .expect("scanf string/char program compiles");
+        let mut out = Vec::new();
+        let mut input = std::io::Cursor::new(b"ab cd");
+        crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+        assert_eq!(out, b"[ab]c");
+    }
+
+    #[test]
+    fn scanf_string_errors() {
+        let cases: &[(&[u8], &str)] = &[
+            (
+                b"int main() { scanf(\"%s\", 5); }",
+                "scanf argument must be an address",
+            ),
+            (
+                b"int main() { char a[3]; scanf(\"%s\", &a[9]); }",
+                "array index out of bounds",
+            ),
+            (
+                b"int main() { int x = 0; scanf(\"%y\", &x); }",
+                "Unexpected scanf format",
+            ),
+            (
+                b"int main() { char s[4]; scanf(\"%s\"); }",
+                "Too few arguments for format string",
+            ),
+        ];
+        for (src, want) in cases {
+            assert_eq!(compile(src).unwrap_err().msg, *want, "for {:?}", src);
+        }
     }
 
     #[test]

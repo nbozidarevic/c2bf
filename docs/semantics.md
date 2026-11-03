@@ -55,7 +55,9 @@ fix-or-pin work for Phase 1.
   NUL-terminated storage. `printf` `%s` prints the
   NUL-terminated string at the argument's address; it must be
   NUL-terminated (an unterminated array reads on into following
-  cells, as in C). `scanf` `%s` is not supported. Only
+  cells, as in C). `scanf` `%s` reads a whitespace-delimited
+  string; into an array it truncates (see below), through a
+  pointer it writes unbounded, as in C. Only
   constant indices are supported so far; a constant index outside
   `0..N-1` is a compile error, and a variable index is rejected.
   `sizeof` an array is its element count (unlike the always-`1`
@@ -99,6 +101,26 @@ fix-or-pin work for Phase 1.
   other skipped characters before the digits are ignored, as
   before. Pinned by the `io` oracle fixture (wrap-back form) and
   unit tests.
+- `scanf` `%s` skips leading whitespace (bytes 9–13 and 32),
+  then stores the longest run of non-whitespace bytes plus a NUL
+  terminator. Into an array (including a constant element
+  address `&a[i]`, bounded by the remaining length) at most
+  `len - 1` characters are stored and the rest of the token is
+  read and discarded, so over-long input cannot write past the
+  array; arrays longer than 256 cells keep only their first
+  256 reachable, as for variable-index stores. Through a pointer
+  or a variable element address the bound is not known at
+  compile time, so the write is unbounded like C and the caller
+  must provide room; writing stops at the end of the
+  addressable tape (cell 255), and a string filling the tape is
+  left unterminated. End of input before any token character
+  stores nothing (the destination keeps its contents, with no
+  NUL written); end of input after token characters still
+  terminates the string. A NUL byte in the input reads as end of
+  input (the reader detects EOF by a zero sentinel). The
+  terminating whitespace is consumed, not pushed back: `%c`
+  after `%s` reads the character after the delimiter, unlike
+  C. Pinned by the `scanfstr` oracle fixture and unit tests.
 - The thesis specifies addressable memory for any integer index (its reference
   interpreter uses `map<int, char>`), i.e. negative indices are legal.
 - The original Brainfuck spec defines a minimum of 30,000 cells; transpiled

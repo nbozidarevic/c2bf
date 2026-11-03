@@ -182,7 +182,15 @@ below keep the pre-rename names as history.
   value position decaying to anonymous NUL-terminated storage,
   `printf` `%s` over the dispatch, and `sizeof` of a literal.
   Pinned by the `strings` oracle fixture and `strings_*`
-  compile-error fixtures; `scanf` `%s` is out of scope.
+  compile-error fixtures.
+- `scanf %s`: whitespace-delimited string input, truncating to
+  `len - 1` characters plus NUL into arrays (and constant
+  element addresses), unbounded through pointers and variable
+  element addresses; end of input before a token stores
+  nothing. The terminating whitespace is consumed, not pushed
+  back (a defined deviation; `%c` after `%s` reads the next
+  character). Pinned by the `scanfstr` oracle fixture and the
+  `scanf_string_not_address` error fixture.
 
 ## Phase 5 — Performance
 

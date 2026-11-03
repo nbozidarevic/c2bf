@@ -1340,6 +1340,193 @@ impl Emitter {
         Ok(())
     }
 
+    /// Whether `cell` holds a C whitespace byte: 9..13 or 32.
+    fn is_space(&mut self, cell: i32) -> Result<i32, CompileError> {
+        let nine = self.const_value(9);
+        let thirteen = self.const_value(13);
+        let space = self.const_value(32);
+        let ge = self.greater_than_or_equal(cell, nine)?;
+        let le = self.less_than_or_equal(cell, thirteen)?;
+        let in_range = self.logical_and(ge, le)?;
+        let is_sp = self.is_equal(cell, space)?;
+        self.logical_or(in_range, is_sp)
+    }
+
+    /// Read one input byte into `cell`, first resetting it to zero.
+    /// The runner leaves the cell unchanged at EOF, so a zero here
+    /// means end of input (a NUL byte in the input reads the same
+    /// way; `scanf %s` is a text-input conversion).
+    fn read_char_into(&mut self, cell: i32) {
+        self.set_value(cell, 0);
+        self.move_pointer(cell);
+        self.emit(",");
+    }
+
+    /// Read a whitespace-delimited string (`scanf %s`) into the
+    /// array at `base` with `len` elements, truncating the token to
+    /// `len - 1` characters so a NUL terminator always fits (at
+    /// most 256 cells are addressed, as for variable-index stores;
+    /// a longer array keeps only its first 256 cells reachable
+    /// here). Leading whitespace is skipped, as in C. The token
+    /// ends at whitespace or end of input, and the terminating
+    /// whitespace is consumed, like the terminating character of
+    /// `%d` here — it is not pushed back, unlike C. If end of
+    /// input arrives before any token character, nothing is
+    /// written: the array keeps its previous contents and no NUL
+    /// is stored. The rest of an over-long token is read and
+    /// discarded, so a following conversion sees the next token.
+    pub fn read_as_string_bounded(
+        &mut self,
+        base: i32,
+        len: usize,
+    ) -> Result<(), CompileError> {
+        let eff = len.min(256);
+        let cells: Vec<i32> = (base..base + eff as i32).collect();
+        let reader = self.const_value(0);
+        let going = self.const_value(1);
+        let seen = self.const_value(0);
+        let zero = self.const_value(0);
+        let one = self.const_value(1);
+        let offset = self.const_value(0);
+        // Characters still writable, counting the NUL slot: a zero
+        // byte here means 256 (only when `eff` is 256). The token
+        // stops storing when one slot is left.
+        let remaining = self.const_value(eff as u8);
+        self.read_char_into(reader);
+        self.perform_while(
+            |em| em.is_space(reader),
+            |em| {
+                em.read_char_into(reader);
+                Ok(())
+            },
+        )?;
+        self.perform_while(
+            |_| Ok(going),
+            |em| {
+                let is_zero = em.is_equal(reader, zero)?;
+                let space = em.is_space(reader)?;
+                let end = em.logical_or(is_zero, space)?;
+                em.perform_if_else(
+                    end,
+                    |em| {
+                        em.set_value(going, 0);
+                        Ok(())
+                    },
+                    |em| {
+                        em.set_value(seen, 1);
+                        let at_limit = em.is_equal(remaining, one)?;
+                        em.perform_if_else(
+                            at_limit,
+                            |_| Ok(()),
+                            |em| {
+                                em.store_to_cells(offset, &cells, reader)?;
+                                let next = em.add_values(offset, one);
+                                em.move_value(next, offset);
+                                let left = em.subtract_values(remaining, one);
+                                em.move_value(left, remaining);
+                                Ok(())
+                            },
+                        )?;
+                        em.read_char_into(reader);
+                        Ok(())
+                    },
+                )
+            },
+        )?;
+        self.perform_if_else(
+            seen,
+            |em| {
+                em.store_to_cells(offset, &cells, zero)?;
+                Ok(())
+            },
+            |_| Ok(()),
+        )
+    }
+
+    /// Read a whitespace-delimited string (`scanf %s`) through the
+    /// runtime address held in `addr`, writing characters until
+    /// whitespace, end of input, or the end of the addressable
+    /// tape (cell 255). Unlike the bounded form, there is no known
+    /// size here, so the write is unbounded like C: the caller
+    /// must provide room. A string that fills the tape to cell 255
+    /// is left unterminated, as there is nowhere to put the NUL.
+    /// Leading-whitespace skipping, end-of-input, and delimiter
+    /// handling are as in [`Emitter::read_as_string_bounded`].
+    pub fn read_as_string_through(&mut self, addr: i32) -> Result<(), CompileError> {
+        let reader = self.const_value(0);
+        let going = self.const_value(1);
+        let seen = self.const_value(0);
+        let zero = self.const_value(0);
+        let one = self.const_value(1);
+        let max = self.const_value(255);
+        let cur = self.duplicate_value(addr);
+        let full = self.const_value(0);
+        self.read_char_into(reader);
+        self.perform_while(
+            |em| em.is_space(reader),
+            |em| {
+                em.read_char_into(reader);
+                Ok(())
+            },
+        )?;
+        self.perform_while(
+            |_| Ok(going),
+            |em| {
+                let is_zero = em.is_equal(reader, zero)?;
+                let space = em.is_space(reader)?;
+                let end = em.logical_or(is_zero, space)?;
+                em.perform_if_else(
+                    end,
+                    |em| {
+                        em.set_value(going, 0);
+                        Ok(())
+                    },
+                    |em| {
+                        em.set_value(seen, 1);
+                        em.perform_if_else(
+                            full,
+                            |_| Ok(()),
+                            |em| {
+                                em.store_through(cur, reader)?;
+                                let at_end = em.is_equal(cur, max)?;
+                                em.perform_if_else(
+                                    at_end,
+                                    |em| {
+                                        em.set_value(full, 1);
+                                        Ok(())
+                                    },
+                                    |em| {
+                                        let next = em.add_values(cur, one);
+                                        em.move_value(next, cur);
+                                        Ok(())
+                                    },
+                                )?;
+                                Ok(())
+                            },
+                        )?;
+                        em.read_char_into(reader);
+                        Ok(())
+                    },
+                )
+            },
+        )?;
+        self.perform_if_else(
+            seen,
+            |em| {
+                em.perform_if_else(
+                    full,
+                    |_| Ok(()),
+                    |em| {
+                        em.store_through(cur, zero)?;
+                        Ok(())
+                    },
+                )?;
+                Ok(())
+            },
+            |_| Ok(()),
+        )
+    }
+
     /// Print the constant byte `c` (`printChar`).
     pub fn print_char(&mut self, c: u8) {
         let a = self.const_value(c);
