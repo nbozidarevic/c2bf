@@ -158,7 +158,7 @@ impl Emitter {
     fn compile_decl(&mut self, d: &Decl) -> Result<(), CompileError> {
         // `int;` — no declarators, the base visitor emits nothing.
         for init in &d.inits {
-            if init.array_len.is_some() {
+            if init.array_len.is_some() || init.array_unsized {
                 self.compile_array_decl(init)?;
                 continue;
             }
