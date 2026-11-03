@@ -49,7 +49,7 @@ output is for local bundler use only. CI validates that output's
 shape with `npm pack --dry-run`, which contacts no registry and
 publishes nothing.
 
-## Demo site (owner-gated, not deployed by CI)
+## Demo site (GitHub Pages, deploys automatically)
 
 `demo/` is a static page using the `web` build. Deploying it to
 GitHub Pages happens automatically on pushes touching `demo/`, `rs/`,
