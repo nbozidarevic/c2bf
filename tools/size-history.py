@@ -170,6 +170,15 @@ MILESTONES = [
         "affected fixtures grow by ~69K BF bytes in total; static "
         "code is unchanged.",
     ),
+    (
+        "bd5e7b9ef0d39d4118222ac4400470b8f8ad9ad5",
+        "Single-dispatch printf %s",
+        "print_as_string pays the 256-arm dispatch once per site "
+        "via a hand-rolled do-while loop instead of once per "
+        "character. strings shrinks 3,036,947 -> 1,639,379 BF "
+        "bytes (-1,397,568); every other fixture is byte-identical, "
+        "and allocated cells and runtime footprint are unchanged.",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
