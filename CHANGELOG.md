@@ -162,6 +162,10 @@ below keep the pre-rename names as history.
   is not counted as a definition, so its existing unsupported
   error is preserved, and the tentative-definition question does
   not arise. Pinned by the `redeclare_global` error fixture.
+- Division by zero is now defined instead of spinning forever:
+  `a / 0` is `0`, `a % 0` is `a`. `scanf` `%d` honors a leading
+  `-` (wrapping negation); `+` is ignored, as before. Pinned by
+  unit tests and the `io` oracle fixture (wrap-back form).
 - Strings: string-literal array initializers (sized and unsized
   `char a[] = "…"`, bytes plus zero fill), string literals in
   value position decaying to anonymous NUL-terminated storage,

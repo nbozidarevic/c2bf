@@ -90,6 +90,15 @@ fix-or-pin work for Phase 1.
   `long`, `signed`, `long long`); every spelling denotes one byte.
   Qualifier words stay identifiers outside specifier position, so a
   variable may still be named `long`.
+- Division and modulo by zero are defined: `a / 0` is `0` and
+  `a % 0` is `a`, keeping `a == (a / b) * b + (a % b)`. C leaves
+  both undefined and the g++ oracle traps, so the behavior is
+  pinned by unit tests. (Previously `a / 0` spun forever.)
+- `scanf` `%d` honors a leading `-`: the value is negated with
+  wrapping (`-5` reads as 251, and `-5 + 5` prints `0`); `+` and
+  other skipped characters before the digits are ignored, as
+  before. Pinned by the `io` oracle fixture (wrap-back form) and
+  unit tests.
 - The thesis specifies addressable memory for any integer index (its reference
   interpreter uses `map<int, char>`), i.e. negative indices are legal.
 - The original Brainfuck spec defines a minimum of 30,000 cells; transpiled

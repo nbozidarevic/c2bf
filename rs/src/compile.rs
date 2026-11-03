@@ -2686,6 +2686,51 @@ mod tests {
     }
 
     #[test]
+    fn division_by_zero_is_defined() {
+        // Previously `x / 0` spun forever: the loop tested `a >= 0`.
+        // Now the quotient is 0 and the remainder keeps `a == q*b+r`,
+        // i.e. `a % 0 == a`. C leaves both undefined and g++ traps,
+        // so these are pinned by unit tests, not by the oracle.
+        let bf = compile(
+            b"int main() { printf(\"%d,%d,%d,%d,%d,%d\", 7 / 0, 7 % 0, 0 / 0, 0 % 0, 200 / 0, 200 % 0); }",
+        )
+        .expect("div-zero program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"0,7,0,0,0,200");
+        let bf = compile(
+            b"int main() { int d = 0; int a = 17; printf(\"%d,%d,\", a / d, a % d); d = 3; printf(\"%d,%d,\", a / d, a % d); a /= d; printf(\"%d\", a); }",
+        )
+        .expect("variable-divisor program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"0,17,5,2,5");
+    }
+
+    #[test]
+    fn scanf_leading_sign_is_honored() {
+        // A '-' before the first digit negates (wrapping, so "-5"
+        // reads as 251); '+' and leading whitespace are ignored, as
+        // before; the wrap-back value agrees with C int arithmetic.
+        let bf = compile(
+            b"int main() { int x = 0; scanf(\"%d\", &x); printf(\"%d,\", x); scanf(\"%d\", &x); printf(\"%d,\", x); scanf(\"%d\", &x); printf(\"%d,\", x + 5); scanf(\"%d\", &x); printf(\"%d\", x); }",
+        )
+        .expect("signed scanf program compiles");
+        let mut out = Vec::new();
+        let mut input = std::io::Cursor::new(b"-5 +7   -12 -0\n");
+        crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+        assert_eq!(out, b"251,7,249,0");
+        let bf = compile(
+            b"int main() { int x = 0; char *p = 0; p = &x; scanf(\"%d\", p); printf(\"%d\", x); }",
+        )
+        .expect("signed scanf through pointer compiles");
+        let mut out = Vec::new();
+        let mut input = std::io::Cursor::new(b"-7\n");
+        crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+        assert_eq!(out, b"249");
+    }
+
+    #[test]
     fn variable_index_works_beyond_addressable_range() {
         // Array dispatch counts the offset itself down and never
         // materializes an address, so a high array (past cell 255)

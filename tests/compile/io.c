@@ -8,4 +8,6 @@ int main() {
   printf("%d %c\n", a, c);
   printf("%c", 'X');
   printf("%c\n", '!');
+  scanf("%d", &a);
+  printf(",%d\n", a + 5);
 }

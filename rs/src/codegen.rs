@@ -344,18 +344,36 @@ impl Emitter {
     }
 
     /// `result = a / b` in a fresh cell (`divideValues`).
+    ///
+    /// Division by zero is defined here, not a hang: when `b` is
+    /// zero the loop is skipped and the quotient is zero, so
+    /// `a % 0` (see [`Emitter::mod_values`]) keeps the identity
+    /// `a == q * b + r` with `r == a`. C leaves both undefined
+    /// and the g++ oracle traps, so the behavior is pinned by unit
+    /// tests, not by an oracle fixture.
     pub fn divide_values(&mut self, a: i32, b: i32) -> Result<i32, CompileError> {
         let a_copy = self.duplicate_value(a);
         let result = self.const_value(0);
-        self.perform_while(
-            |em| Ok(em.greater_than_or_equal(a_copy, b)?),
+        // `b` itself is the branch condition: a zero divisor
+        // skips the loop entirely. The previous shape tested
+        // `a >= 0`, which is always true, and subtracted zero
+        // forever. `b` is preserved by the branch, so
+        // `mod_values` can still read it afterwards.
+        self.perform_if_else(
+            b,
             |em| {
-                em.move_pointer(result);
-                em.emit("+");
-                let diff = em.subtract_values(a_copy, b);
-                em.move_value(diff, a_copy);
-                Ok(())
+                em.perform_while(
+                    |em| Ok(em.greater_than_or_equal(a_copy, b)?),
+                    |em| {
+                        em.move_pointer(result);
+                        em.emit("+");
+                        let diff = em.subtract_values(a_copy, b);
+                        em.move_value(diff, a_copy);
+                        Ok(())
+                    },
+                )
             },
+            |_| Ok(()),
         )?;
         Ok(result)
     }
@@ -1100,12 +1118,20 @@ impl Emitter {
     }
 
     /// Read a decimal number into cell `a` (`readAsNumber`).
+    ///
+    /// A `-` before the first digit negates the value (wrapping, so
+    /// `-5` reads as 251); a `+` is ignored, as is anything else
+    /// skipped before the digits, as before. The sign only applies
+    /// to characters skipped before the first digit: a `-` after
+    /// digits start terminates the number, unchanged.
     pub fn read_as_number(&mut self, a: i32) -> Result<(), CompileError> {
         let reader = self.const_value(0);
         let result = self.const_value(0);
         let zero = self.const_value(b'0');
         let nine = self.const_value(b'9');
         let ten = self.const_value(10);
+        let minus = self.const_value(b'-');
+        let negative = self.const_value(0);
         self.move_pointer(reader);
         self.emit(",");
         self.perform_while(
@@ -1117,6 +1143,15 @@ impl Emitter {
                 em.logical_or(below, above)
             },
             |em| {
+                let is_minus = em.is_equal(reader, minus)?;
+                em.perform_if_else(
+                    is_minus,
+                    |em| {
+                        em.set_value(negative, 1);
+                        Ok(())
+                    },
+                    |_| Ok(()),
+                )?;
                 em.move_pointer(reader);
                 em.emit(",");
                 Ok(())
@@ -1141,6 +1176,17 @@ impl Emitter {
                 em.emit(",");
                 Ok(())
             },
+        )?;
+        // Apply the sign, if one was seen: 0 - result, wrapping.
+        self.perform_if_else(
+            negative,
+            |em| {
+                let zero_value = em.const_value(0);
+                let negated = em.subtract_values(zero_value, result);
+                em.move_value(negated, result);
+                Ok(())
+            },
+            |_| Ok(()),
         )?;
         self.move_value(result, a);
         Ok(())
