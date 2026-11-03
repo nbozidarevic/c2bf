@@ -173,13 +173,20 @@ call site.
 - No prototypes or forward declarations, no function pointers, no
   arrays or pointers returned by value beyond the byte model.
 - Declarations are lexically scoped: a declaration in a nested
-  block shadows an outer one (each gets its own cells), while a
-  redeclaration in the same block is the same declaration the
-  emitter always diagnosed (for example, array size mismatch).
-  A declaration at the top level of a function body may not reuse
+  block shadows an outer one (each gets its own cells). A
+  declaration at the top level of a function body may not reuse
   a parameter's name: parameters share the body's outermost scope,
   and both compilers reject it (verified against g++ and gcc
   15.2 on Ubuntu, and Apple Clang 21: g++ reports "shadows a
   parameter"). Shadowing a parameter inside a nested block or a
   `for` initializer is legal, as is shadowing a global at the top
   level.
+- Redeclaring a name in the same block is a compile error
+  ("redefinition"), in every scalar/pointer combination (verified
+  against the same compilers). Array redeclarations are the
+  exception: they keep the emitter's behavior — same-size
+  redeclaration re-clears the elements, a size mismatch is an
+  error, and variable/array confusion is an error. File-scope
+  redefinition is unchanged: it still overwrites silently, and
+  the tentative-definition policy (which differs between C and
+  C++) is undecided.

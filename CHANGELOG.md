@@ -148,6 +148,14 @@ below keep the pre-rename names as history.
   reject it; the renamer previously shadowed it silently. Nested
   shadowing and `for`-initializer shadowing stay legal. Pinned by
   the `function_param_shadow` error fixture.
+- Same-scope redeclaration correction: redeclaring a name in the
+  same block is now a compile error ("redefinition") in every
+  scalar/pointer combination, verified against the same compilers;
+  the renamer previously overwrote silently. Array-involved
+  redeclarations are unchanged (same-size re-clear, size-mismatch
+  and variable/array errors still come from the emitter). Pinned
+  by the `redeclare_scalar` error fixture. File-scope
+  redefinition is unchanged.
 - Strings: string-literal array initializers (sized and unsized
   `char a[] = "…"`, bytes plus zero fill), string literals in
   value position decaying to anonymous NUL-terminated storage,

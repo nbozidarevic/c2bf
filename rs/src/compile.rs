@@ -18,7 +18,7 @@
 
 use crate::ast::{Block, BlockItem, Decl, Expr, External, FnParam, ForDecl, ForInit, FuncDef, InitDecl, Stmt};
 use crate::codegen::{CompileError, Emitter, ExpandedFunction};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use crate::parser;
 
@@ -108,6 +108,9 @@ struct Renamer<'a> {
     fn_name: &'a [u8],
     counter: usize,
     scopes: Vec<HashMap<Vec<u8>, Vec<u8>>>,
+    /// Fresh names bound as arrays (by declarator, not by scope):
+    /// redeclaration of such a name stays the emitter's business.
+    array_names: HashSet<Vec<u8>>,
 }
 
 impl<'a> Renamer<'a> {
@@ -152,19 +155,34 @@ impl<'a> Renamer<'a> {
             // Each declarator is fresh-named and bound in the current
             // scope *before* its initializer is walked, matching the
             // parser's order: a later declarator in the same list
-            // sees an earlier one. Redeclaring a name already bound
-            // in the *same* scope reuses its fresh name, so the
-            // emitter's redeclaration diagnostics still fire; a name
-            // bound only in an outer scope gets a fresh name (it is
-            // shadowed, not redeclared).
+            // sees an earlier one. A name bound only in an outer
+            // scope gets a fresh name (it is shadowed, not
+            // redeclared). A name already bound in the *same* scope
+            // is a redefinition and is rejected, unless an array is
+            // involved on either side: array redeclarations reuse
+            // the fresh name so the emitter's diagnostics still
+            // decide (same-size re-clear, size mismatch, and
+            // variable/array confusion).
+            let new_is_array = init.array_len.is_some() || init.array_unsized;
             let existing = self
                 .scopes
                 .last()
                 .and_then(|scope| scope.get(&init.name).cloned());
             let fresh = match existing {
-                Some(existing) => existing,
+                Some(existing) => {
+                    if !new_is_array && !self.array_names.contains(&existing) {
+                        return Err(err(format!(
+                            "redefinition of '{}'",
+                            String::from_utf8_lossy(&init.name)
+                        )));
+                    }
+                    existing
+                }
                 None => {
                     let fresh = self.fresh(&init.name);
+                    if new_is_array {
+                        self.array_names.insert(fresh.clone());
+                    }
                     self.scopes
                         .last_mut()
                         .expect("rename_decl runs inside a scope")
@@ -379,6 +397,7 @@ fn rename_function(f: &FuncDef) -> Result<ExpandedFunction, CompileError> {
         fn_name: &f.name,
         counter: 0,
         scopes: vec![HashMap::new()],
+        array_names: HashSet::new(),
     };
     let mut params = Vec::with_capacity(f.params.len());
     for p in &f.params {
@@ -2278,6 +2297,89 @@ mod tests {
                 src
             );
         }
+    }
+
+    #[test]
+    fn same_scope_redeclaration_rejected() {
+        // Redeclaring a name in the same block is an error, matching
+        // g++ ("redeclaration"/"conflicting declaration") and gcc
+        // ("redefinition"/"conflicting types", both 15.2, probed via
+        // CI) in every non-array combination, including within one
+        // declarator list and in a function that is never called
+        // (renaming runs for every definition).
+        for (src, want) in [
+            (
+                b"int f() { int x = 1; int x = 2; return x; } int main() { printf(\"%d\", f()); }".as_slice(),
+                "redefinition of 'x'",
+            ),
+            (
+                b"int f() { int x = 1, x = 2; return x; } int main() { printf(\"%d\", f()); }".as_slice(),
+                "redefinition of 'x'",
+            ),
+            (
+                b"int f() { char *p = 0; char *p = 0; return 0; } int main() { printf(\"%d\", f()); }".as_slice(),
+                "redefinition of 'p'",
+            ),
+            (
+                b"int f() { int x = 1; char *x = 0; return 0; } int main() { printf(\"%d\", f()); }".as_slice(),
+                "redefinition of 'x'",
+            ),
+            (
+                b"int f() { char *p = 0; int p = 1; return 0; } int main() { printf(\"%d\", f()); }".as_slice(),
+                "redefinition of 'p'",
+            ),
+            (
+                b"int f() { int x = 1; int x = 2; return x; } int main() {}".as_slice(),
+                "redefinition of 'x'",
+            ),
+        ] {
+            assert_eq!(compile(src).unwrap_err().msg, want, "for {:?}", src);
+        }
+        // Array-involved redeclarations keep the emitter's messages.
+        for (src, want) in [
+            (
+                b"int main() { char a[2]; char a[3]; }".as_slice(),
+                "array size mismatch on redeclaration",
+            ),
+            (
+                b"int main() { char x = 1; char x[2]; }".as_slice(),
+                "cannot redeclare a variable as an array",
+            ),
+            (
+                b"int main() { char a[2]; char a = 1; }".as_slice(),
+                "cannot redeclare an array as a variable",
+            ),
+            (
+                b"int main() { char *p = 0; char p[2]; }".as_slice(),
+                "cannot redeclare a variable as an array",
+            ),
+            (
+                b"int main() { char a[2]; char *a = 0; }".as_slice(),
+                "cannot redeclare an array as a variable",
+            ),
+        ] {
+            assert_eq!(compile(src).unwrap_err().msg, want, "for {:?}", src);
+        }
+    }
+
+    #[test]
+    fn nested_blocks_may_shadow() {
+        // Shadowing in a nested block or a `for` initializer stays
+        // legal: only the same block is closed to redeclaration.
+        let bf = compile(
+            b"int f() { int x = 1; { int x = 2; } return x; } int main() { printf(\"%d\", f()); }",
+        )
+        .expect("nested-shadow program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"1");
+        let bf = compile(
+            b"int f() { int x = 1; for (int x = 0; x < 1; x++) {} return x; } int main() { printf(\"%d\", f()); }",
+        )
+        .expect("for-shadow program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"1");
     }
 
     #[test]
