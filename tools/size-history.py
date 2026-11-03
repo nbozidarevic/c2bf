@@ -191,6 +191,16 @@ MILESTONES = [
         "runtime footprint shrinks by one cell on the two order "
         "probes only.",
     ),
+    (
+        "91f916129d04281e712c9c84daeae4c14c16dfba",
+        "scanf %s",
+        "Whitespace-delimited string input, truncating into arrays "
+        "and unbounded through pointers. Adds the scanfstr fixture "
+        "(1,386,140 BF bytes on 219 cells, each input character "
+        "paying a dispatch store); every other fixture is "
+        "byte-identical, and allocated cells and runtime footprint "
+        "are unchanged.",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
