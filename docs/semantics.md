@@ -66,8 +66,11 @@ fix-or-pin work for Phase 1.
   above is a compile error, while static-index array access
   works anywhere. The null pointer is address `0` (cell `0`).
   `scanf` destinations may be variables, `&`-expressions, or
-  bare pointers, and store through the address. For `=`, a
-  subscript's index expression is evaluated before the
+  bare pointers, and store through the address. `scanf` `%d`
+  writes one byte here; in C it writes `sizeof(int)` bytes, so
+  `%d` into a `char` or an array element may clobber neighbors
+  there — fixtures keep `%d` targets from overlapping. For `=`,
+  a subscript's index expression is evaluated before the
   right-hand side; for compound assignment it is evaluated
   after it, as for the other compound forms.
 - Only `char` variables are supported; anything wider needs multi-cell

@@ -66,8 +66,9 @@ enum SubBase {
 enum StoreTarget {
     /// Static cell: write directly.
     Cell(i32),
-    /// Runtime address, searching `cells` in order (array range).
-    Range { addr: i32, cells: Vec<i32> },
+    /// Array range: `counter` holds the element offset (the index
+    /// value itself, not an address), searching `cells` in order.
+    Range { counter: i32, cells: Vec<i32> },
     /// Runtime address, searching every byte address (dereference
     /// or pointer subscript).
     Any { addr: i32 },
@@ -403,10 +404,14 @@ impl Emitter {
                     if Self::const_index(index).is_some() {
                         Ok(StoreTarget::Cell(self.static_index_cell(base, index)?))
                     } else {
-                        let addr = self.index_address(base, index)?;
+                        // The dispatch counts the offset down, so the
+                        // counter is the index value itself; no
+                        // address is materialized, and the array may
+                        // live anywhere on the tape.
+                        let counter = self.compile_expr(index)?;
                         let n = len.min(256) as i32;
                         Ok(StoreTarget::Range {
-                            addr,
+                            counter,
                             cells: (cell_base..cell_base + n).collect(),
                         })
                     }
@@ -428,8 +433,8 @@ impl Emitter {
     fn store_value(&mut self, target: &StoreTarget, value: i32) -> Result<i32, CompileError> {
         match target {
             StoreTarget::Cell(cell) => Ok(self.copy_value(value, *cell)),
-            StoreTarget::Range { addr, cells } => {
-                self.store_to_cells(*addr, cells, value)?;
+            StoreTarget::Range { counter, cells } => {
+                self.store_to_cells(*counter, cells, value)?;
                 Ok(value)
             }
             StoreTarget::Any { addr } => {
@@ -446,7 +451,9 @@ impl Emitter {
         let target = self.store_target(e)?;
         let value = match &target {
             StoreTarget::Cell(cell) => *cell,
-            StoreTarget::Range { addr, cells } => self.load_from_cells(*addr, cells)?,
+            StoreTarget::Range { counter, cells } => {
+                self.load_from_cells(*counter, cells)?
+            }
             StoreTarget::Any { addr } => self.load_through(*addr)?,
         };
         Ok((value, target))
@@ -1184,10 +1191,12 @@ impl Emitter {
                     if Self::const_index(index).is_some() {
                         self.static_index_cell(base, index)
                     } else {
-                        let addr = self.index_address(base, index)?;
+                        // As in `store_target`: the dispatch counts
+                        // the offset itself down.
+                        let counter = self.compile_expr(index)?;
                         let n = len.min(256) as i32;
                         let cells: Vec<i32> = (cell_base..cell_base + n).collect();
-                        self.load_from_cells(addr, &cells)
+                        self.load_from_cells(counter, &cells)
                     }
                 }
                 SubBase::Pointer(_) => {
@@ -1606,6 +1615,23 @@ mod tests {
     }
 
     #[test]
+    fn variable_index_works_beyond_addressable_range() {
+        // Array dispatch counts the offset itself down and never
+        // materializes an address, so a high array (past cell 255)
+        // supports variable indices even though its elements have
+        // no addressable `&` form. The unit test pins both the
+        // load and the store; the old base-0-only behavior hid
+        // behind arrays allocated first.
+        let bf = compile(
+            b"int main() { char f[260]; char a[3]; int i = 0; a[0] = 5; a[1] = 6; a[2] = 7; i = 2; printf(\"%d,\", a[i]); a[i] = 9; printf(\"%d\", a[2]); }",
+        )
+        .expect("high array program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"7,9");
+    }
+
+    #[test]
     fn variable_index_out_of_range_is_noop() {
         // Out-of-range variable indices load zero and store
         // nowhere (defined fallback; C leaves it undefined, so
@@ -1651,7 +1677,7 @@ mod tests {
                 "address is outside the addressable range",
             ),
             (
-                b"int main() { char f[260]; char a[3]; int i = 0; printf(\"%d\", a[i]); }",
+                b"int main() { char f[260]; char a[3]; char *p = 0; p = &a[0]; }",
                 "address is outside the addressable range",
             ),
         ];
