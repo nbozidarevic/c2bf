@@ -131,25 +131,7 @@ impl Emitter {
             return dest;
         }
         let helper = self.memory.temp_cell();
-        self.move_pointer(helper);
-        self.emit("[-]");
-        self.move_pointer(dest);
-        self.emit("[-]");
-        self.move_pointer(source);
-        self.emit("[-");
-        self.move_pointer(dest);
-        self.emit("+");
-        self.move_pointer(helper);
-        self.emit("+");
-        self.move_pointer(source);
-        self.emit("]");
-        self.move_pointer(helper);
-        self.emit("[-");
-        self.move_pointer(source);
-        self.emit("+");
-        self.move_pointer(helper);
-        self.emit("]");
-        dest
+        self.copy_value_with_helper(source, dest, helper)
     }
 
     /// Move `source` to `destination`, zeroing `source` (`moveValue`).
@@ -899,18 +881,95 @@ impl Emitter {
         self.emit("-");
     }
 
+    /// Copy `source` to `destination` with a caller-provided
+    /// helper cell, preserving `source` (see [`Emitter::copy_value`]).
+    /// The helper must differ from both cells; it ends at zero.
+    fn copy_value_with_helper(
+        &mut self,
+        source: i32,
+        dest: i32,
+        helper: i32,
+    ) -> i32 {
+        if source == dest {
+            return dest;
+        }
+        self.move_pointer(helper);
+        self.emit("[-]");
+        self.move_pointer(dest);
+        self.emit("[-]");
+        self.move_pointer(source);
+        self.emit("[-");
+        self.move_pointer(dest);
+        self.emit("+");
+        self.move_pointer(helper);
+        self.emit("+");
+        self.move_pointer(source);
+        self.emit("]");
+        self.move_pointer(helper);
+        self.emit("[-");
+        self.move_pointer(source);
+        self.emit("+");
+        self.move_pointer(helper);
+        self.emit("]");
+        dest
+    }
+
+    /// One arm of a subtractive dispatch over `counter` (SPIKE:
+    /// hand-rolled replacement for the per-arm `perform_if_else`
+    /// guard the dispatch used before).
+    ///
+    /// The guard keeps `perform_if_else`'s branch shape — copy the
+    /// counter into `if_value`, run the empty if-branch when it is
+    /// nonzero, run `body` in the else-branch when it is zero — but
+    /// `if_value`, `else_value`, and the copy's `helper` are
+    /// allocated once per dispatch and shared by every arm,
+    /// instead of being duplicated and reclaimed per arm. `body`
+    /// must not touch `counter`, `if_value`, or `else_value` (it
+    /// may use `helper`, which the guard copy leaves at zero).
+    /// Afterwards the counter is decremented in place, so after a
+    /// match it wraps (0 to 255, downward) and cannot reach zero
+    /// again within the remaining arms (at most 255 follow a match
+    /// when a dispatch holds at most 256 arms), so exactly one arm
+    /// fires. All pointer motion is static, so the tracked pointer
+    /// stays exact throughout.
+    fn dispatch_arm(
+        &mut self,
+        counter: i32,
+        if_value: i32,
+        else_value: i32,
+        helper: i32,
+        mut body: impl FnMut(&mut Self) -> Result<(), CompileError>,
+    ) -> Result<(), CompileError> {
+        self.copy_value_with_helper(counter, if_value, helper);
+        self.set_value(else_value, 1);
+        self.move_pointer(if_value);
+        self.emit("[");
+        self.set_value(if_value, 0);
+        self.set_value(else_value, 0);
+        self.move_pointer(if_value);
+        self.emit("]");
+        self.move_pointer(else_value);
+        self.emit("[");
+        self.set_value(else_value, 0);
+        body(self)?;
+        self.move_pointer(else_value);
+        self.emit("]");
+        self.decrement_in_place(counter);
+        Ok(())
+    }
+
     /// Load the cell at the tape index held in `addr`, searching
     /// `cells` in order, into a fresh cell: a subtractive dispatch.
-    /// A copy of the address counts down; each arm runs when the
-    /// counter is zero, then the counter is decremented in place.
-    /// After a match the counter wraps (0 to 255, downward) and
-    /// cannot reach zero again within the remaining arms (at most
-    /// 255 follow a match when `cells` holds at most 256 entries),
-    /// so exactly one arm fires. An address with no arm leaves the
+    ///
+    /// (SPIKE.) Each arm is hand-rolled instead of a
+    /// `perform_if_else` guard plus `copy_value`: the guard cells
+    /// are shared by every arm (see [`Emitter::dispatch_arm`]),
+    /// the result is zeroed once, and one helper cell serves every
+    /// arm (the fired arm clears it before its copy; non-firing
+    /// arms never touch it). An address with no arm leaves the
     /// result zero. The address cell and every target cell are
-    /// preserved; only the result and the counter scratch are
-    /// written. All pointer motion is static, so the tracked
-    /// pointer stays exact throughout.
+    /// preserved; only the result and the dispatch scratch
+    /// (`counter`, guard cells, `helper`) are written.
     pub fn load_from_cells(
         &mut self,
         addr: i32,
@@ -923,24 +982,57 @@ impl Emitter {
         debug_assert!(cells.len() <= 256);
         let result = self.const_value(0);
         let counter = self.duplicate_value(addr);
+        // SPIKE v2: the shared guard cells are scratch, reclaimed
+        // after the dispatch — without this, every dispatch site
+        // leaves three cells allocated and shifts all later code
+        // (v1: pointers +53 cells, +344K bytes). The result was
+        // allocated before the checkpoint, so it survives.
+        let checkpoint = self.checkpoint();
+        let if_value = self.memory.temp_cell();
+        let else_value = self.memory.temp_cell();
+        let helper = self.memory.temp_cell();
         for &cell in cells {
-            self.perform_if_else(
-                counter,
-                |_| Ok(()),
-                |em| {
+            self.dispatch_arm(counter, if_value, else_value, helper, |em| {
+                if cell == result {
+                    // `copy_value` no-op: the value already sits in
+                    // the result cell.
+                    return Ok(());
+                }
+                if cell == helper {
+                    // The copy loop below would spin forever with
+                    // the helper sharing the source cell; fall back
+                    // to `copy_value`, whose own helper is fresh.
                     em.copy_value(cell, result);
-                    Ok(())
-                },
-            )?;
-            self.decrement_in_place(counter);
+                    return Ok(());
+                }
+                em.move_pointer(helper);
+                em.emit("[-]");
+                em.move_pointer(cell);
+                em.emit("[-");
+                em.move_pointer(result);
+                em.emit("+");
+                em.move_pointer(helper);
+                em.emit("+");
+                em.move_pointer(cell);
+                em.emit("]");
+                em.move_pointer(helper);
+                em.emit("[-");
+                em.move_pointer(cell);
+                em.emit("+");
+                em.move_pointer(helper);
+                em.emit("]");
+                Ok(())
+            })?;
         }
+        self.release_temps(checkpoint);
         Ok(result)
     }
 
     /// Store `value` into the cell at the tape index held in `addr`,
-    /// searching `cells` in order, with the same dispatch as
-    /// [`Emitter::load_from_cells`]. An address with no arm stores
-    /// nowhere. The address and value cells are preserved.
+    /// searching `cells` in order, with the same hand-rolled
+    /// dispatch as [`Emitter::load_from_cells`]. An address with no
+    /// arm stores nowhere. The address and value cells are
+    /// preserved.
     pub fn store_to_cells(
         &mut self,
         addr: i32,
@@ -949,17 +1041,46 @@ impl Emitter {
     ) -> Result<(), CompileError> {
         debug_assert!(cells.len() <= 256);
         let counter = self.duplicate_value(addr);
+        // As in `load_from_cells` (SPIKE v2): reclaim the shared
+        // guard cells so later code keeps its layout.
+        let checkpoint = self.checkpoint();
+        let if_value = self.memory.temp_cell();
+        let else_value = self.memory.temp_cell();
+        let helper = self.memory.temp_cell();
         for &cell in cells {
-            self.perform_if_else(
-                counter,
-                |_| Ok(()),
-                |em| {
+            self.dispatch_arm(counter, if_value, else_value, helper, |em| {
+                if value == cell {
+                    // `copy_value` no-op.
+                    return Ok(());
+                }
+                if cell == helper || value == helper {
+                    // As in `load_from_cells`: avoid a copy loop
+                    // whose helper shares the source or target.
                     em.copy_value(value, cell);
-                    Ok(())
-                },
-            )?;
-            self.decrement_in_place(counter);
+                    return Ok(());
+                }
+                em.move_pointer(helper);
+                em.emit("[-]");
+                em.move_pointer(cell);
+                em.emit("[-]");
+                em.move_pointer(value);
+                em.emit("[-");
+                em.move_pointer(cell);
+                em.emit("+");
+                em.move_pointer(helper);
+                em.emit("+");
+                em.move_pointer(value);
+                em.emit("]");
+                em.move_pointer(helper);
+                em.emit("[-");
+                em.move_pointer(value);
+                em.emit("+");
+                em.move_pointer(helper);
+                em.emit("]");
+                Ok(())
+            })?;
         }
+        self.release_temps(checkpoint);
         Ok(())
     }
 
@@ -1793,5 +1914,17 @@ mod tests {
         let value = em.const_value(9);
         em.store_to_cells(addr_cell, &[], value).unwrap();
         assert_eq!(run_cell(&mut em, value), 9);
+    }
+
+    #[test]
+    fn dispatch_store_with_value_as_target_is_noop() {
+        // A store whose value cell is the target is a no-op, as in
+        // `copy_value`: the hand-rolled copy would zero the cell
+        // before reading it.
+        let mut em = Emitter::new();
+        em.set_value(10, 99);
+        em.set_value(50, 0);
+        em.store_to_cells(50, &[10, 20], 10).unwrap();
+        assert_eq!(run_cell(&mut em, 10), 99);
     }
 }
