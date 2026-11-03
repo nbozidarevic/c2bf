@@ -179,6 +179,18 @@ MILESTONES = [
         "bytes (-1,397,568); every other fixture is byte-identical, "
         "and allocated cells and runtime footprint are unchanged.",
     ),
+    (
+        "5e92b4d4d9c4d8e56a04f39eb97e5b0a25651c9d",
+        "Hand-rolled dispatch arms",
+        "Dispatch arms keep the perform_if_else branch shape but "
+        "share one set of guard cells per dispatch (reclaimed "
+        "afterwards) and emit the copy loop directly. pointers, "
+        "strings, functions, and the two order probes shrink by "
+        "54,643 BF bytes in total; every other fixture is "
+        "byte-identical, allocated cells are unchanged, and the "
+        "runtime footprint shrinks by one cell on the two order "
+        "probes only.",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
