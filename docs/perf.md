@@ -107,7 +107,9 @@ results section are incomplete.
   and `bitassign` 1,007,169 bytes in ~226 ms. Helper expansion,
   not constants or the runner, is now the dominant cost for
   programs using these operators; a shared fold loop or cheaper
-  bit extraction is the next structural lever, unmeasured so far.
+  bit extraction is the next structural lever, unmeasured at the
+  time; the fused-divmod and raw combine/scale entries below
+  address it.
 - Fused divmod + in-place double/halve (this phase): bit extraction
   now uses one pair-removal loop per operand (`divmod_two`, via
   `halve_with_remainder`) instead of a divide plus a modulo per
