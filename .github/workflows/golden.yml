@@ -1,0 +1,35 @@
+name: functions-goldens
+
+# TEMPORARY: emit tokdump/parsedump/bf goldens for the new functions
+# fixture from the CI-built binaries. Removed once the goldens land.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release --manifest-path rs/Cargo.toml
+
+      - name: Emit functions goldens
+        run: |
+          mkdir -p goldens-out
+          ./rs/target/release/tokdump tests/compile/functions.c > goldens-out/functions.tok
+          ./rs/target/release/parsedump tests/compile/functions.c > goldens-out/functions.parse
+          ./rs/target/release/bfcompile tests/compile/functions.c > goldens-out/functions.bf
+
+      - name: Upload goldens
+        uses: actions/upload-artifact@v4
+        with:
+          name: functions-goldens
+          path: goldens-out
+          if-no-files-found: error
