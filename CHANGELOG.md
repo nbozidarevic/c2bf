@@ -170,6 +170,13 @@ below keep the pre-rename names as history.
   twice (hand-rolled do-while loop; see decision 0007): the
   `strings` fixture drops from 3,036,947 to 1,639,379 BF bytes
   (-46%), with all other goldens byte-identical.
+- Dispatch arms hand-rolled with shared, reclaimed guard cells
+  (see decision 0008): `pointers` 2,978,087 -> 2,955,444,
+  `strings` 1,639,379 -> 1,615,153, `functions` 824,222 ->
+  817,764 BF bytes, with allocated cells unchanged and all other
+  goldens byte-identical. A spike without the reclaim grew
+  `pointers` by 344K bytes; the dispatch lever is now exhausted
+  short of a structural change.
 - Strings: string-literal array initializers (sized and unsized
   `char a[] = "…"`, bytes plus zero fill), string literals in
   value position decaying to anonymous NUL-terminated storage,
