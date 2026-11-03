@@ -35,7 +35,10 @@ source order, e.g.
 - `decl(spec)`: `[initdecl]*` (`int;` has no children; declarators
   are comma-separated, in order). `spec` is one or more words
   (`unsigned int`, `const char`, `long long`), space-joined.
-- `initdecl(name)`: `[init]?`.
+- `initdecl(name)`: `[pointer?, size?, init?]` — `pointer` (no children)
+  when the declarator has one `*`, `size` for an array declarator
+  (`name[N]`, the size expression), then the initializer. A second `*`
+  is a parse error, as is an array initializer (`= {…}`).
 - `compound`: block items in order. `exprstmt`: `[expr]`. `empty`: none.
 - `if`: `[cond, then]`; `ifelse`: `[cond, then, else]`.
 - `switch`: `[expr, body]`; `while`: `[cond, body]`.
@@ -58,8 +61,10 @@ source order, e.g.
 - `binop(op)`: `[l, r]`, left-associative. Levels low→high:
   `||`, `&&`, `|`, `^`, `&`, `== !=`, `< > <= >=`, `<< >>`,
   `+ -`, `* / %`.
-- `unary(op)`: `[e]`; `op` is one of `! & ++ -- - + ~` (no
-  `sizeof` — accepted subset surface). Unary `-`/`~` wrap mod 256.
+- `unary(op)`: `[e]`; `op` is one of `! & * ++ -- - + ~` (no
+  `sizeof` — accepted subset surface). Unary `-`/`~` wrap mod 256;
+  `*` is dereference and `&` is address-of (see `docs/semantics.md`).
+  Subscript and dereference forms are lvalues for assignment.
 - `cast(spec)`: `[e]` — a cast is a no-op in the byte model;
   `spec` may be multi-word (`unsigned int`).
 - `sizeof`: `[e]` (operand unevaluated, value always 1);
@@ -67,6 +72,9 @@ source order, e.g.
   multi-word.
 - `postfix(op)`: `[e]` (`++`/`--`); `call`: `[callee, args...]`
   (callee is any postfix expression).
+- `index`: `[base, index]` — subscript; `base` must name an array or a
+  pointer. Repeated subscripts nest (`a[0][1]` parses and is rejected
+  in code generation, as multi-dimensional arrays are not supported).
 - `paren`: `[e]` — parentheses are kept as nodes, not transparent.
 - `int`: raw literal text — decimal, octal (`0` prefix; 8/9 there are a
   tokenizer error), hex (`0x`), binary (`0b`), with optional `u`/`l`

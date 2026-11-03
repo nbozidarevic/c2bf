@@ -30,6 +30,10 @@ pub struct Decl {
 #[derive(Debug)]
 pub struct InitDecl {
     pub name: Vec<u8>,
+    /// `true` for a single-`*` pointer declarator (`char *p`).
+    pub pointer: bool,
+    /// Array size expression for `name[N]`; `None` for scalars.
+    pub array_len: Option<Expr>,
     pub init: Option<Expr>,
 }
 
@@ -139,6 +143,13 @@ pub enum Expr {
         callee: Box<Expr>,
         args: Vec<Expr>,
     },
+    /// Subscript `base[index]`; the base must name an array or a
+    /// pointer, and multi-dimensional subscripts are rejected in
+    /// code generation.
+    Index {
+        base: Box<Expr>,
+        index: Box<Expr>,
+    },
     Paren(Box<Expr>),
     Int(Vec<u8>),
     Char(Vec<u8>),
@@ -193,6 +204,15 @@ fn dump_decl(d: &Decl, out: &mut Vec<u8>) {
     for init in &d.inits {
         out.push(b' ');
         open_text(out, "initdecl", &init.name);
+        if init.pointer {
+            out.push(b' ');
+            open(out, "pointer");
+            close(out);
+        }
+        if let Some(len) = &init.array_len {
+            out.push(b' ');
+            dump_expr(len, out);
+        }
         if let Some(e) = &init.init {
             out.push(b' ');
             dump_expr(e, out);
@@ -441,6 +461,14 @@ fn dump_expr(e: &Expr, out: &mut Vec<u8>) {
         }
         Expr::Ident(t) => {
             open_text(out, "ident", t);
+            close(out);
+        }
+        Expr::Index { base, index } => {
+            open(out, "index");
+            out.push(b' ');
+            dump_expr(base, out);
+            out.push(b' ');
+            dump_expr(index, out);
             close(out);
         }
     }

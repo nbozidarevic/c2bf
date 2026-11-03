@@ -742,6 +742,10 @@ impl Emitter {
                 Ok(old)
             }
             Expr::Call { callee, args } => self.compile_call(callee, args),
+            // Subscripts and dereference need the array/pointer
+            // code generation that follows the frontend; until then
+            // they are rejected here rather than silently miscompiled.
+            Expr::Index { .. } => Err(err("Unsupported subscript expression")),
         }
     }
 

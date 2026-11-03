@@ -57,7 +57,7 @@ const BITXOR_OPS: [&[u8]; 1] = [b"^"];
 const BITOR_OPS: [&[u8]; 1] = [b"|"];
 const ADDITIVE_OPS: [&[u8]; 2] = [b"+", b"-"];
 const MULTIPLICATIVE_OPS: [&[u8]; 3] = [b"*", b"/", b"%"];
-const UNARY_OPS: [&[u8]; 7] = [b"!", b"&", b"++", b"--", b"-", b"+", b"~"];
+const UNARY_OPS: [&[u8]; 8] = [b"!", b"&", b"*", b"++", b"--", b"-", b"+", b"~"];
 
 fn is_op_in(text: &[u8], ops: &[&[u8]]) -> bool {
     ops.iter().any(|op| *op == text)
@@ -74,6 +74,8 @@ fn desc(t: &Tok) -> String {
 fn is_lvalue(e: &Expr) -> bool {
     match e {
         Expr::Ident(_) => true,
+        Expr::Index { .. } => true,
+        Expr::Unary { op, .. } => op.as_slice() == b"*",
         Expr::Paren(inner) => is_lvalue(inner),
         _ => false,
     }
@@ -299,14 +301,38 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_init_declarator(&mut self) -> Result<InitDecl, ParseError> {
+        // One `*` makes a pointer declarator (`char *p`); a second
+        // `*` fails at the name, so `char **p` is rejected.
+        let pointer = if self.at_punct(b"*") {
+            self.next_tok();
+            true
+        } else {
+            false
+        };
         let name = self.expect_ident("declarator name")?.text;
+        let array_len = if self.at_punct(b"[") {
+            self.next_tok();
+            let len = self.parse_assignment()?;
+            self.expect_punct(b"]", "']'")?;
+            Some(len)
+        } else {
+            None
+        };
         let init = if self.at_punct(b"=") {
             self.next_tok();
+            if array_len.is_some() && self.at_punct(b"{") {
+                return self.fail("array initializers are not supported".to_string());
+            }
             Some(self.parse_assignment()?)
         } else {
             None
         };
-        Ok(InitDecl { name, init })
+        Ok(InitDecl {
+            name,
+            pointer,
+            array_len,
+            init,
+        })
     }
 
     fn parse_statement(&mut self) -> Result<Stmt, ParseError> {
@@ -836,6 +862,14 @@ impl<'a> Parser<'a> {
                     callee: Box::new(n),
                     args,
                 };
+            } else if self.at_punct(b"[") {
+                self.next_tok();
+                let index = self.parse_assignment()?;
+                self.expect_punct(b"]", "']'")?;
+                n = Expr::Index {
+                    base: Box::new(n),
+                    index: Box::new(index),
+                };
             } else {
                 return Ok(n);
             }
@@ -1144,6 +1178,60 @@ mod tests {
         assert_sexp(
             "int a = 1, b = 2;",
             "(tu (decl int (initdecl a (int 1)) (initdecl b (int 2))))",
+        );
+    }
+
+    #[test]
+    fn array_and_pointer_declarators() {
+        assert_sexp(
+            "int f() { char a[3]; }",
+            "(tu (funcdef f (compound (decl char (initdecl a (int 3))))))",
+        );
+        assert_sexp(
+            "int f() { char *p = &x; }",
+            "(tu (funcdef f (compound (decl char (initdecl p (pointer) (unary & (ident x)))))))",
+        );
+        assert_sexp(
+            "int f() { char *a[2]; int b = 1, *q = &b; }",
+            "(tu (funcdef f (compound (decl char (initdecl a (pointer) (int 2))) (decl int (initdecl b (int 1)) (initdecl q (pointer) (unary & (ident b)))))))",
+        );
+        assert_sexp(
+            "char g[4];",
+            "(tu (decl char (initdecl g (int 4))))",
+        );
+    }
+
+    #[test]
+    fn subscript_and_dereference() {
+        assert_sexp(
+            "int f() { a[1] + a[i]; }",
+            "(tu (funcdef f (compound (exprstmt (binop + (index (ident a) (int 1)) (index (ident a) (ident i)))))))",
+        );
+        assert_sexp(
+            "int f() { *p = 1; a[0] = 2; a[i]++; p[1] = *q; }",
+            "(tu (funcdef f (compound (exprstmt (assign = (unary * (ident p)) (int 1))) (exprstmt (assign = (index (ident a) (int 0)) (int 2))) (exprstmt (postfix ++ (index (ident a) (ident i)))) (exprstmt (assign = (index (ident p) (int 1)) (unary * (ident q)))))))",
+        );
+        assert_sexp(
+            "int f() { x = a * *p; }",
+            "(tu (funcdef f (compound (exprstmt (assign = (ident x) (binop * (ident a) (unary * (ident p))))))))",
+        );
+    }
+
+    #[test]
+    fn array_declarator_errors() {
+        assert_err("int f() { int a[]; }", 1, 17, "expected expression, found ']'");
+        assert_err("int f() { int a[3][4]; }", 1, 19, "expected ';', found '['");
+        assert_err(
+            "int f() { char **p; }",
+            1,
+            17,
+            "expected declarator name, found '*'",
+        );
+        assert_err(
+            "int f() { int a[2] = {1, 2}; }",
+            1,
+            22,
+            "array initializers are not supported",
         );
     }
 
