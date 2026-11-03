@@ -154,6 +154,13 @@ MILESTONES = [
         "Strings add ~3.04M BF bytes (eight %s sites); static "
         "code is unchanged.",
     ),
+    (
+        "634c3f44f03e0c7c8def3d58706560ff07059829",
+        "Functions",
+        "User-defined functions by inline expansion, with return "
+        "guards and expansion reclaim. The functions fixture adds "
+        "~0.82M BF bytes on 275 cells; static code is unchanged.",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
