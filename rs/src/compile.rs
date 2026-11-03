@@ -56,6 +56,31 @@ fn int_literal_value(text: &[u8]) -> i32 {
     v.clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
 
+/// What a subscript base names: an array or a pointer variable.
+enum SubBase {
+    Array(i32, usize),
+    Pointer(i32),
+}
+
+/// A store destination for an assignment target.
+enum StoreTarget {
+    /// Static cell: write directly.
+    Cell(i32),
+    /// Runtime address, searching `cells` in order (array range).
+    Range { addr: i32, cells: Vec<i32> },
+    /// Runtime address, searching every byte address (dereference
+    /// or pointer subscript).
+    Any { addr: i32 },
+}
+
+/// A `scanf` destination: a static cell, or a runtime address to
+/// store through.
+#[derive(Clone, Copy)]
+enum ScanfTarget {
+    Cell(i32),
+    Through(i32),
+}
+
 /// A compiled program: Brainfuck code plus the number of tape cells
 /// the compiler allocated for it. Allocation never reuses cells, so
 /// `cells` is the static tape footprint of the program.
@@ -239,8 +264,8 @@ impl Emitter {
         }
     }
 
-    /// Cell of a constant-index element; variable indices are
-    /// rejected here until the dispatch support lands.
+    /// Cell of a constant-index element; variable indices go
+    /// through dispatch instead of this path.
     fn static_index_cell(&self, base: &Expr, index: &Expr) -> Result<i32, CompileError> {
         let (cell_base, len) = self.array_base(base)?;
         let k = match Self::const_index(index) {
@@ -251,6 +276,238 @@ impl Emitter {
             return Err(err("array index out of bounds"));
         }
         Ok(cell_base + k)
+    }
+
+    /// A cell holding a tape index as a byte value, for a statically
+    /// known index. Indexes of 256 and above cannot be held in a
+    /// byte; materializing such an address is an error (pointer
+    /// arithmetic that wraps there is ordinary byte arithmetic and
+    /// stays allowed).
+    fn address_const(&mut self, idx: i32) -> Result<i32, CompileError> {
+        if !(0..=255).contains(&idx) {
+            return Err(err("address is outside the addressable range"));
+        }
+        Ok(self.const_value(idx as u8))
+    }
+
+    /// What a subscript base names: an array (base cell, length) or
+    /// a pointer variable (its cell). Anything else is an error
+    /// with the same messages as the static subscript path.
+    fn subscript_base(&self, base: &Expr) -> Result<SubBase, CompileError> {
+        match base {
+            Expr::Ident(name) => {
+                if let Some((cell_base, len)) = self.memory.array_info(name) {
+                    Ok(SubBase::Array(cell_base, len))
+                } else if self.memory.is_pointer(name) {
+                    match self.memory.var_index(name) {
+                        Some(cell) => Ok(SubBase::Pointer(cell)),
+                        None => Err(err("pointer is not declared")),
+                    }
+                } else if self.memory.has_var(name) {
+                    Err(err("subscript of non-array"))
+                } else {
+                    Err(err("subscript of undeclared array"))
+                }
+            }
+            Expr::Paren(inner) => self.subscript_base(inner),
+            Expr::Index { .. } => Err(err("multi-dimensional arrays are not supported")),
+            _ => Err(err("unsupported subscript base")),
+        }
+    }
+
+    /// Cell holding the tape index of an element: `base + index` as
+    /// byte arithmetic. A constant array index is bounds-checked;
+    /// anything else wraps like all byte arithmetic.
+    fn index_address(&mut self, base: &Expr, index: &Expr) -> Result<i32, CompileError> {
+        match self.subscript_base(base)? {
+            SubBase::Array(cell_base, len) => {
+                if let Some(k) = Self::const_index(index) {
+                    if k < 0 || k as usize >= len {
+                        return Err(err("array index out of bounds"));
+                    }
+                    self.address_const(cell_base + k)
+                } else {
+                    let base_cell = self.address_const(cell_base)?;
+                    let idx = self.compile_expr(index)?;
+                    Ok(self.add_values(base_cell, idx))
+                }
+            }
+            SubBase::Pointer(ptr_cell) => {
+                if let Some(k) = Self::const_index(index) {
+                    if k == 0 {
+                        Ok(ptr_cell)
+                    } else {
+                        let k_cell = self.const_value(k as u8);
+                        Ok(self.add_values(ptr_cell, k_cell))
+                    }
+                } else {
+                    let idx = self.compile_expr(index)?;
+                    Ok(self.add_values(ptr_cell, idx))
+                }
+            }
+        }
+    }
+
+    /// Cell holding the tape index of the storage named by `e`:
+    /// a variable, an array (its base), an element (its address),
+    /// or a dereference (the address its operand evaluates to).
+    fn address_value(&mut self, e: &Expr) -> Result<i32, CompileError> {
+        match e {
+            Expr::Ident(name) => {
+                if let Some((base, _)) = self.memory.array_info(name) {
+                    self.address_const(base)
+                } else {
+                    let idx = self.memory.var_cell(name);
+                    self.address_const(idx)
+                }
+            }
+            Expr::Paren(inner) => self.address_value(inner),
+            Expr::Index { base, index } => self.index_address(base, index),
+            Expr::Unary { op, e: inner } if op.as_slice() == b"*" => self.compile_expr(inner),
+            _ => Err(err("unsupported address expression")),
+        }
+    }
+
+    /// Whether `e` is the address of a cell whose index is only
+    /// known at run time: a variable-index subscript or a
+    /// dereference. Such targets go through dispatch instead of
+    /// the static-cell paths.
+    fn needs_address_path(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Paren(inner) => self.needs_address_path(inner),
+            Expr::Index { base, index } => match self.subscript_base(base) {
+                Ok(SubBase::Pointer(_)) => true,
+                Ok(SubBase::Array(..)) => Self::const_index(index).is_none(),
+                Err(_) => false,
+            },
+            Expr::Unary { op, .. } => op.as_slice() == b"*",
+            _ => false,
+        }
+    }
+
+    /// Store destination for an assignment target: a static cell,
+    /// or a runtime address plus the cells a dispatch searches
+    /// (an array range, or every byte address when absent).
+    fn store_target(&mut self, e: &Expr) -> Result<StoreTarget, CompileError> {
+        match e {
+            Expr::Ident(name) => {
+                if self.memory.is_array(name) {
+                    Err(err("cannot assign to an array"))
+                } else {
+                    Ok(StoreTarget::Cell(self.memory.var_cell(name)))
+                }
+            }
+            Expr::Paren(inner) => self.store_target(inner),
+            Expr::Index { base, index } => match self.subscript_base(base)? {
+                SubBase::Array(cell_base, len) => {
+                    if Self::const_index(index).is_some() {
+                        Ok(StoreTarget::Cell(self.static_index_cell(base, index)?))
+                    } else {
+                        let addr = self.index_address(base, index)?;
+                        let n = len.min(256) as i32;
+                        Ok(StoreTarget::Range {
+                            addr,
+                            cells: (cell_base..cell_base + n).collect(),
+                        })
+                    }
+                }
+                SubBase::Pointer(_) => {
+                    let addr = self.index_address(base, index)?;
+                    Ok(StoreTarget::Any { addr })
+                }
+            },
+            Expr::Unary { op, e: inner } if op.as_slice() == b"*" => {
+                let addr = self.compile_expr(inner)?;
+                Ok(StoreTarget::Any { addr })
+            }
+            _ => Err(err("invalid lvalue in assignment")),
+        }
+    }
+
+    /// Write `value` into a store destination.
+    fn store_value(&mut self, target: &StoreTarget, value: i32) -> Result<i32, CompileError> {
+        match target {
+            StoreTarget::Cell(cell) => Ok(self.copy_value(value, *cell)),
+            StoreTarget::Range { addr, cells } => {
+                self.store_to_cells(*addr, cells, value)?;
+                Ok(value)
+            }
+            StoreTarget::Any { addr } => {
+                self.store_through(*addr, value)?;
+                Ok(value)
+            }
+        }
+    }
+
+    /// Value held by an assignment target, plus its store
+    /// destination for a read-modify-write: static cells are their
+    /// own value cell; address targets load through dispatch.
+    fn load_target(&mut self, e: &Expr) -> Result<(i32, StoreTarget), CompileError> {
+        let target = self.store_target(e)?;
+        let value = match &target {
+            StoreTarget::Cell(cell) => *cell,
+            StoreTarget::Range { addr, cells } => self.load_from_cells(*addr, cells)?,
+            StoreTarget::Any { addr } => self.load_through(*addr)?,
+        };
+        Ok((value, target))
+    }
+
+    /// Static cell holding the storage of an address-of operand, if
+    /// the address is statically known: a variable, an array base,
+    /// or a constant-index element. `None` means the address must
+    /// be computed into a cell at run time.
+    fn static_address_cell(&self, e: &Expr) -> Option<i32> {
+        match e {
+            Expr::Ident(name) => {
+                if let Some((base, _)) = self.memory.array_info(name) {
+                    Some(base)
+                } else {
+                    self.memory.var_index(name)
+                }
+            }
+            Expr::Paren(inner) => self.static_address_cell(inner),
+            Expr::Index { base, index } => match self.subscript_base(base).ok()? {
+                SubBase::Array(cell_base, len) => {
+                    let k = Self::const_index(index)?;
+                    if k < 0 || k as usize >= len {
+                        return None;
+                    }
+                    Some(cell_base + k)
+                }
+                SubBase::Pointer(_) => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Whether `e`, through parentheses, names an array (arrays are
+    /// not modifiable: increment and decrement must reject them
+    /// rather than modify a decayed address temporary).
+    fn names_array(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Ident(name) => self.memory.is_array(name),
+            Expr::Paren(inner) => self.names_array(inner),
+            _ => false,
+        }
+    }
+
+    /// Reject dereferencing a plain scalar variable (or an
+    /// undeclared name). Arrays and pointers, and any other
+    /// expression (whose value is an address), pass.
+    fn check_deref_operand(&self, e: &Expr) -> Result<(), CompileError> {
+        match e {
+            Expr::Paren(inner) => self.check_deref_operand(inner),
+            Expr::Ident(name) => {
+                if self.memory.is_array(name) || self.memory.is_pointer(name) {
+                    Ok(())
+                } else if self.memory.has_var(name) {
+                    Err(err("dereference of non-pointer"))
+                } else {
+                    Err(err("dereference of undeclared identifier"))
+                }
+            }
+            _ => Ok(()),
+        }
     }
 
     fn compile_block(&mut self, b: &Block) -> Result<(), CompileError> {
@@ -691,7 +948,16 @@ impl Emitter {
                 // escapes (`'\n'` yields '\\' = 92, exactly like the C++).
                 Ok(self.const_value(bytes.get(1).copied().unwrap_or(0)))
             }
-            Expr::Ident(name) => Ok(self.memory.var_cell(name)),
+            Expr::Ident(name) => {
+                // A bare array name decays to the address of its
+                // first element; scalars and pointers keep the
+                // variable cell itself.
+                if let Some((base, _)) = self.memory.array_info(name) {
+                    self.address_const(base)
+                } else {
+                    Ok(self.memory.var_cell(name))
+                }
+            }
             Expr::StringLit { .. } => Err(err("Unsupported string expression")),
             Expr::Paren(e) => self.compile_expr(e),
             Expr::Comma(es) => {
@@ -704,28 +970,30 @@ impl Emitter {
             }
             Expr::Assign { op, lhs, rhs } => {
                 if op.as_slice() == b"=" {
-                    // GCC right-to-left: the target (last argument) first.
-                    let target = self.compile_lvalue(lhs)?;
+                    // GCC right-to-left: the target (last argument) first,
+                    // so a subscript's index expression compiles before
+                    // the right-hand side.
+                    let target = self.store_target(lhs)?;
                     let r = self.compile_expr(rhs)?;
-                    Ok(self.copy_value(r, target))
+                    self.store_value(&target, r)
                 } else {
                     // Sequenced statements in C++: right-hand side first.
                     let r = self.compile_expr(rhs)?;
-                    let target = self.compile_lvalue(lhs)?;
+                    let (target_value, target) = self.load_target(lhs)?;
                     let res = match op.as_slice() {
-                        b"+=" => self.add_values(target, r),
-                        b"-=" => self.subtract_values(target, r),
-                        b"*=" => self.multiply_values(target, r),
-                        b"/=" => self.divide_values(target, r)?,
-                        b"%=" => self.mod_values(target, r)?,
-                        b"&=" => self.bitwise_and_values(target, r)?,
-                        b"|=" => self.bitwise_or_values(target, r)?,
-                        b"^=" => self.bitwise_xor_values(target, r)?,
-                        b"<<=" => self.shift_left_values(target, r)?,
-                        b">>=" => self.shift_right_values(target, r)?,
+                        b"+=" => self.add_values(target_value, r),
+                        b"-=" => self.subtract_values(target_value, r),
+                        b"*=" => self.multiply_values(target_value, r),
+                        b"/=" => self.divide_values(target_value, r)?,
+                        b"%=" => self.mod_values(target_value, r)?,
+                        b"&=" => self.bitwise_and_values(target_value, r)?,
+                        b"|=" => self.bitwise_or_values(target_value, r)?,
+                        b"^=" => self.bitwise_xor_values(target_value, r)?,
+                        b"<<=" => self.shift_left_values(target_value, r)?,
+                        b">>=" => self.shift_right_values(target_value, r)?,
                         _ => return Err(err("Unsupported assignment expression")),
                     };
-                    Ok(self.copy_value(res, target))
+                    self.store_value(&target, res)
                 }
             }
             Expr::Ternary { cond, then, els } => {
@@ -813,20 +1081,53 @@ impl Emitter {
                     let top = self.const_value(255);
                     Ok(self.subtract_values(top, v))
                 }
-                b"&" => self.compile_expr(e),
+                // Address-of: a cell holding the tape index of
+                // the operand's storage (variables, array bases,
+                // elements, and dereferences).
+                b"&" => self.address_value(e),
+                // Dereference: load the cell at the tape index the
+                // operand evaluates to. A scalar variable is not a
+                // pointer; anything else holds an address.
+                b"*" => {
+                    self.check_deref_operand(e)?;
+                    let addr = self.compile_expr(e)?;
+                    self.load_through(addr)
+                }
                 b"++" => {
-                    let t = self.compile_expr(e)?;
-                    let one = self.const_value(1);
-                    let sum = self.add_values(t, one);
-                    self.copy_value(sum, t);
-                    Ok(self.duplicate_value(t))
+                    if self.names_array(e) {
+                        return Err(err("cannot modify an array"));
+                    }
+                    if self.needs_address_path(e) {
+                        let (v, target) = self.load_target(e)?;
+                        let one = self.const_value(1);
+                        let sum = self.add_values(v, one);
+                        self.store_value(&target, sum)?;
+                        Ok(self.duplicate_value(sum))
+                    } else {
+                        let t = self.compile_expr(e)?;
+                        let one = self.const_value(1);
+                        let sum = self.add_values(t, one);
+                        self.copy_value(sum, t);
+                        Ok(self.duplicate_value(t))
+                    }
                 }
                 b"--" => {
-                    let t = self.compile_expr(e)?;
-                    let one = self.const_value(1);
-                    let diff = self.subtract_values(t, one);
-                    self.copy_value(diff, t);
-                    Ok(self.duplicate_value(t))
+                    if self.names_array(e) {
+                        return Err(err("cannot modify an array"));
+                    }
+                    if self.needs_address_path(e) {
+                        let (v, target) = self.load_target(e)?;
+                        let one = self.const_value(1);
+                        let diff = self.subtract_values(v, one);
+                        self.store_value(&target, diff)?;
+                        Ok(self.duplicate_value(diff))
+                    } else {
+                        let t = self.compile_expr(e)?;
+                        let one = self.const_value(1);
+                        let diff = self.subtract_values(t, one);
+                        self.copy_value(diff, t);
+                        Ok(self.duplicate_value(t))
+                    }
                 }
                 _ => Err(err("Unsupported unary expression")),
             },
@@ -842,6 +1143,23 @@ impl Emitter {
             }
             Expr::SizeofType(_) => Ok(self.const_value(1)),
             Expr::Postfix { op, e } => {
+                if self.names_array(e) {
+                    return Err(err("cannot modify an array"));
+                }
+                if self.needs_address_path(e) {
+                    let (old, target) = self.load_target(e)?;
+                    let one = self.const_value(1);
+                    if op.as_slice() == b"++" {
+                        let sum = self.add_values(old, one);
+                        self.store_value(&target, sum)?;
+                    } else if op.as_slice() == b"--" {
+                        let diff = self.subtract_values(old, one);
+                        self.store_value(&target, diff)?;
+                    } else {
+                        return Err(err("Unsupported postfix expression"));
+                    }
+                    return Ok(old);
+                }
                 let target = self.compile_expr(e)?;
                 let old = self.duplicate_value(target);
                 let one = self.const_value(1);
@@ -857,21 +1175,79 @@ impl Emitter {
                 Ok(old)
             }
             Expr::Call { callee, args } => self.compile_call(callee, args),
-            // Constant-index elements resolve to a static cell, like
-            // a variable; variable indices follow with dispatch.
-            Expr::Index { base, index } => self.static_index_cell(base, index),
+            // Constant array indices resolve to a static cell,
+            // like a variable; anything else loads through dispatch
+            // over the array's range (or every address, for a
+            // pointer base).
+            Expr::Index { base, index } => match self.subscript_base(base)? {
+                SubBase::Array(cell_base, len) => {
+                    if Self::const_index(index).is_some() {
+                        self.static_index_cell(base, index)
+                    } else {
+                        let addr = self.index_address(base, index)?;
+                        let n = len.min(256) as i32;
+                        let cells: Vec<i32> = (cell_base..cell_base + n).collect();
+                        self.load_from_cells(addr, &cells)
+                    }
+                }
+                SubBase::Pointer(_) => {
+                    let addr = self.index_address(base, index)?;
+                    self.load_through(addr)
+                }
+            },
         }
     }
 
-    /// Compile an assignment target. The C++ performs no lvalue check;
-    /// our frontend rejects invalid targets at parse time, so anything
-    /// reaching here is an identifier or parenthesized lvalue.
-    fn compile_lvalue(&mut self, e: &Expr) -> Result<i32, CompileError> {
-        match e {
-            Expr::Ident(name) => Ok(self.memory.var_cell(name)),
-            Expr::Paren(inner) => self.compile_lvalue(inner),
-            Expr::Index { base, index } => self.static_index_cell(base, index),
-            _ => Err(err("invalid lvalue in assignment")),
+    /// Compile a `scanf` destination: a static cell for a variable,
+    /// an array base, or a statically known element; otherwise a
+    /// runtime address to store through. A bare pointer variable
+    /// holds its address, so it stores through its own cell.
+    fn compile_scanf_target(&mut self, a: &Expr) -> Result<ScanfTarget, CompileError> {
+        match a {
+            Expr::Ident(name) => {
+                if let Some((base, _)) = self.memory.array_info(name) {
+                    Ok(ScanfTarget::Cell(base))
+                } else if self.memory.is_pointer(name) {
+                    Ok(ScanfTarget::Through(self.memory.var_cell(name)))
+                } else {
+                    Ok(ScanfTarget::Cell(self.memory.var_cell(name)))
+                }
+            }
+            Expr::Paren(inner) => self.compile_scanf_target(inner),
+            Expr::Unary { op, e: inner } if op.as_slice() == b"&" => {
+                if let Some(cell) = self.static_address_cell(inner) {
+                    Ok(ScanfTarget::Cell(cell))
+                } else {
+                    Ok(ScanfTarget::Through(self.address_value(inner)?))
+                }
+            }
+            _ => Err(err("scanf argument must be an address")),
+        }
+    }
+
+    /// Read one `scanf` value (`%c` or `%d`) into a destination:
+    /// directly for a static cell, through dispatch for a runtime
+    /// address.
+    fn read_into_target(&mut self, target: ScanfTarget, is_char: bool) -> Result<(), CompileError> {
+        match target {
+            ScanfTarget::Cell(cell) => {
+                if is_char {
+                    self.read_as_char(cell);
+                } else {
+                    self.read_as_number(cell)?;
+                }
+                Ok(())
+            }
+            ScanfTarget::Through(addr) => {
+                let tmp = self.const_value(0);
+                if is_char {
+                    self.read_as_char(tmp);
+                } else {
+                    self.read_as_number(tmp)?;
+                }
+                self.store_through(addr, tmp)?;
+                Ok(())
+            }
         }
     }
 
@@ -887,7 +1263,10 @@ impl Emitter {
             _ => return Err(err("Unsupported postfix expression")),
         };
         // Arguments compile left-to-right (sequenced vector construction).
+        // `printf` takes value cells; `scanf` takes destinations, so
+        // its arguments compile through `compile_scanf_target`.
         let mut vals: Vec<i32> = Vec::new();
+        let mut targets: Vec<ScanfTarget> = Vec::new();
         let mut format: &[u8] = b"";
         for (i, a) in args.iter().enumerate() {
             if i == 0 {
@@ -904,8 +1283,10 @@ impl Emitter {
                         }));
                     }
                 }
-            } else {
+            } else if is_printf {
                 vals.push(self.compile_expr(a)?);
+            } else {
+                targets.push(self.compile_scanf_target(a)?);
             }
         }
         let mut next_var = 0usize;
@@ -948,10 +1329,10 @@ impl Emitter {
                 match c {
                     b'%' => {
                         i += 1;
-                        let cell = next_format_arg(&vals, &mut next_var)?;
+                        let target = next_scanf_target(&targets, &mut next_var)?;
                         match format.get(i).copied() {
-                            Some(b'c') => self.read_as_char(cell),
-                            Some(b'd') => self.read_as_number(cell)?,
+                            Some(b'c') => self.read_into_target(target, true)?,
+                            Some(b'd') => self.read_into_target(target, false)?,
                             _ => return Err(err("Unexpected scanf format")),
                         }
                     }
@@ -1021,6 +1402,17 @@ fn next_format_arg(vals: &[i32], next: &mut usize) -> Result<i32, CompileError> 
         .ok_or_else(|| err("Too few arguments for format string"))?;
     *next += 1;
     Ok(v)
+}
+
+fn next_scanf_target(
+    targets: &[ScanfTarget],
+    next: &mut usize,
+) -> Result<ScanfTarget, CompileError> {
+    let t = *targets
+        .get(*next)
+        .ok_or_else(|| err("Too few arguments for format string"))?;
+    *next += 1;
+    Ok(t)
 }
 
 #[cfg(test)]
@@ -1138,10 +1530,6 @@ mod tests {
                 "array index out of bounds",
             ),
             (
-                b"int main() { char a[3]; int i = 0; a[i] = 1; }",
-                "only constant array indices are supported",
-            ),
-            (
                 b"int main() { char x = 1; printf(\"%d\", x[0]); }",
                 "subscript of non-array",
             ),
@@ -1173,6 +1561,98 @@ mod tests {
             (
                 b"int main() { char a[2] = 5; }",
                 "array initializers are not supported",
+            ),
+        ];
+        for (src, want) in cases {
+            assert_eq!(compile(src).unwrap_err().msg, *want, "for {:?}", src);
+        }
+    }
+
+    #[test]
+    fn pointers_load_store_and_arithmetic() {
+        let bf = compile(
+            b"int main() { char a[5]; char *p = 0; char *q = 0; int i = 0; a[0] = 10; a[1] = 20; a[2] = 30; a[3] = 40; a[4] = 50; p = &a[0]; printf(\"%d,\", *p); p++; printf(\"%d,\", *p); *p = 25; printf(\"%d,\", a[1]); p = p + 2; printf(\"%d,\", *p); printf(\"%d,\", p[0]); printf(\"%d,\", p[1]); i = 3; printf(\"%d,\", a[i]); a[i] = 44; printf(\"%d,\", a[3]); p = a; printf(\"%d,\", *p); p = &a[4]; printf(\"%d,\", *p); q = &a[2]; printf(\"%d,\", p == q); printf(\"%d,\", p > q); printf(\"%d,\", p - q); q = &a[1]; char *s2 = 0; s2 = &q; printf(\"%d,\", *(*s2)); }",
+        )
+        .expect("pointer program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"10,20,25,40,40,50,40,44,10,50,0,1,2,25,");
+    }
+
+    #[test]
+    fn pointers_deref_store_forms() {
+        // Prefix/postfix inc/dec and compound assignment through a
+        // dereference, plus *(p++) with its defined order: the store
+        // lands at the old address and p still advances.
+        let bf = compile(
+            b"int main() { char a[3]; char *p = 0; a[0] = 1; a[1] = 2; a[2] = 3; p = &a[0]; (*p)++; printf(\"%d,\", a[0]); ++*p; printf(\"%d,\", a[0]); *p += 10; printf(\"%d,\", a[0]); *p--; printf(\"%d,\", a[0]); *p++ = 99; printf(\"%d,%d,\", a[0], *p); printf(\"%d\", a[1]); }",
+        )
+        .expect("deref store program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"2,3,13,12,99,2,2");
+    }
+
+    #[test]
+    fn scanf_through_pointers_and_element_addresses() {
+        let bf = compile(
+            b"int main() { char a[3]; char *p = 0; int i = 0; p = &a[0]; scanf(\"%d\", p); scanf(\"%d\", &a[2]); i = 1; scanf(\"%d\", &a[i]); scanf(\"%d\", &a[1]); printf(\"%d,%d,%d\", a[0], a[1], a[2]); }",
+        )
+        .expect("scanf pointer program compiles");
+        let mut out = Vec::new();
+        let mut input = std::io::Cursor::new(b"7 8 9 6\n");
+        crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+        assert_eq!(out, b"7,6,8");
+    }
+
+    #[test]
+    fn variable_index_out_of_range_is_noop() {
+        // Out-of-range variable indices load zero and store
+        // nowhere (defined fallback; C leaves it undefined, so
+        // this is a unit test, not an oracle fixture).
+        let bf = compile(
+            b"int main() { char a[3]; int i = 0; a[0] = 5; i = 9; printf(\"%d,\", a[i]); a[i] = 7; printf(\"%d\", a[0]); }",
+        )
+        .expect("out-of-range program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"0,5");
+    }
+
+    #[test]
+    fn pointer_errors() {
+        let cases: &[(&[u8], &str)] = &[
+            (
+                b"int main() { char x = 1; printf(\"%d\", *x); }",
+                "dereference of non-pointer",
+            ),
+            (
+                b"int main() { printf(\"%d\", *b); }",
+                "dereference of undeclared identifier",
+            ),
+            (
+                b"int main() { char a[2]; char *p = 0; a = p; }",
+                "cannot assign to an array",
+            ),
+            (
+                b"int main() { char a[2]; a++; }",
+                "cannot modify an array",
+            ),
+            (
+                b"int main() { char a[2]; printf(\"%d\", &a[9]); }",
+                "array index out of bounds",
+            ),
+            (
+                b"int main() { scanf(\"%d\", 5); }",
+                "scanf argument must be an address",
+            ),
+            (
+                b"int main() { char a[300]; char x = 1; char *p = 0; p = &x; }",
+                "address is outside the addressable range",
+            ),
+            (
+                b"int main() { char f[260]; char a[3]; int i = 0; printf(\"%d\", a[i]); }",
+                "address is outside the addressable range",
             ),
         ];
         for (src, want) in cases {

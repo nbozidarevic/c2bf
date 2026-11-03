@@ -1,0 +1,52 @@
+#include <stdio.h>
+
+char g[4];
+
+int main() {
+  char a[5];
+  char *p = 0;
+  char *q = 0;
+  int i = 0;
+  a[0] = 10;
+  a[1] = 20;
+  a[2] = 30;
+  a[3] = 40;
+  a[4] = 50;
+  p = &a[0];
+  printf("%d\n", *p);
+  p++;
+  printf("%d\n", *p);
+  *p = 25;
+  printf("%d\n", a[1]);
+  p = p + 2;
+  printf("%d\n", *p);
+  printf("%d\n", p[0]);
+  printf("%d\n", p[1]);
+  i = 3;
+  printf("%d\n", a[i]);
+  a[i] = 44;
+  printf("%d\n", a[3]);
+  p = a;
+  printf("%d\n", *p);
+  p = &a[4];
+  printf("%d\n", *p);
+  q = &a[2];
+  printf("%d\n", p == q);
+  printf("%d\n", p > q);
+  printf("%d\n", p - q);
+  (*p)++;
+  printf("%d\n", a[4]);
+  *p++ = 99;
+  printf("%d\n", a[4]);
+  p = &a[0];
+  scanf("%d", p);
+  scanf("%d", &a[2]);
+  i = 1;
+  scanf("%d", &a[i]);
+  printf("%d %d %d\n", a[0], a[1], a[2]);
+  g[0] = 72;
+  g[1] = 105;
+  p = &g[0];
+  printf("%c%c\n", *p, g[1]);
+  return 0;
+}

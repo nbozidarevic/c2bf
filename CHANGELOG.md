@@ -113,6 +113,17 @@ below keep the pre-rename names as history.
   dereference, and address-of follow. Pinned by the `arrays`
   oracle fixture and `array_*` compile-error fixtures; pointer
   declarators parse but are not yet usable.
+- Pointers and variable indices: address-of (`&`), dereference
+  (`*`), pointer declarators, decay, pointer arithmetic, pointer
+  subscripts, and `scanf` through addresses, over a subtractive
+  dispatch (`load_from_cells`/`store_to_cells` in the emitter:
+  one arm per cell, a counter that cannot re-match after
+  wraparound). Addresses are bytes, so only the first 256 cells
+  are addressable and taking a higher address is a compile
+  error; out-of-range variable indices load zero and store
+  nowhere. Pinned by the `pointers` oracle fixture,
+  `order_index`/`order_deref` emission probes, and
+  `pointer_*` compile-error fixtures.
 
 ## Phase 5 — Performance
 

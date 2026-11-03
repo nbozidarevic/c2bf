@@ -51,9 +51,25 @@ fix-or-pin work for Phase 1.
   constant indices are supported so far; a constant index outside
   `0..N-1` is a compile error, and a variable index is rejected.
   `sizeof` an array is its element count (unlike the always-`1`
-  rule for other operands). Pointer declarators (`char *p`) parse,
-  but dereference (`*p`) and address-of (`&x`, beyond its current
-  identity behavior) land with variable indexing.
+  rule for other operands). Variable indices are also supported:
+  `a[i]` loads through a dispatch over the array's range (offsets
+  `0..255` only), and an out-of-range variable index loads zero
+  and stores nowhere — defined here, undefined in C, so the
+  fallback is pinned by unit tests, not by the oracle.
+- Pointers: there are no pointer types; a pointer is a byte
+  holding a tape index. `&x` is the index of `x`'s cell, `*p`
+  loads or stores the cell at the index `p` holds (a dispatch
+  over all 256 byte addresses), a bare array name decays to
+  `&a[0]`, and pointer arithmetic and comparison are ordinary
+  byte arithmetic (wrapping). Only the first 256 tape cells are
+  addressable: taking the address of storage at cell 256 or
+  above is a compile error, while static-index array access
+  works anywhere. The null pointer is address `0` (cell `0`).
+  `scanf` destinations may be variables, `&`-expressions, or
+  bare pointers, and store through the address. For `=`, a
+  subscript's index expression is evaluated before the
+  right-hand side; for compound assignment it is evaluated
+  after it, as for the other compound forms.
 - Only `char` variables are supported; anything wider needs multi-cell
   representation (deferred to language expansion).
 - Integer literals may be decimal, octal, hex, or binary, with `u`/`l`

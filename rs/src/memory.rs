@@ -105,6 +105,11 @@ impl Memory {
         self.vars.contains_key(name)
     }
 
+    /// Cell already assigned to `name`, if any, without allocating.
+    pub fn var_index(&self, name: &[u8]) -> Option<i32> {
+        self.vars.get(name).copied()
+    }
+
     /// Whether `name` denotes an array.
     pub fn is_array(&self, name: &[u8]) -> bool {
         self.arrays.contains_key(name)
@@ -266,6 +271,8 @@ mod tests {
         m.mark_pointer(b"p");
         assert!(m.is_pointer(b"p"));
         assert!(m.has_var(b"p"));
+        assert_eq!(m.var_index(b"p"), Some(cell));
+        assert_eq!(m.var_index(b"q"), None);
         assert_eq!(m.var_cell(b"p"), cell);
     }
 }
