@@ -1105,28 +1105,38 @@ impl Emitter {
     /// Read one character into cell `a` (`readAsChar`).
     /// Print the NUL-terminated string at the tape index held in
     /// `addr` (`printf %s`). A working copy of the address advances
-    /// through a dispatch load per character; the condition copies
-    /// each loaded character into `ch` before the loop test, so
-    /// the body prints the same character the condition saw. The
+    /// through a dispatch load per character. The loop is
+    /// hand-rolled do-while style: `ch` starts nonzero so the loop
+    /// is entered once, each pass loads one character into `ch`
+    /// and prints/advances only when it is nonzero, and the loop
+    /// re-tests `ch` itself. A `perform_while` shape would evaluate
+    /// its condition twice during emission and pay the 256-arm
+    /// dispatch twice per site; this shape pays it once. The
     /// string must be NUL-terminated; reading past the end
     /// continues into following cells until a zero cell.
     pub fn print_as_string(&mut self, addr: i32) -> Result<(), CompileError> {
         let cur = self.duplicate_value(addr);
-        let ch = self.const_value(0);
-        self.perform_while(
-            |em| {
-                let loaded = em.load_through(cur)?;
-                em.copy_value(loaded, ch);
-                Ok(loaded)
-            },
+        let ch = self.const_value(1);
+        let checkpoint = self.checkpoint();
+        self.move_pointer(ch);
+        self.emit("[");
+        let loaded = self.load_through(cur)?;
+        self.copy_value(loaded, ch);
+        let one = self.const_value(1);
+        self.perform_if_else(
+            ch,
             |em| {
                 em.print_as_char(ch);
-                let one = em.const_value(1);
                 let next = em.add_values(cur, one);
                 em.copy_value(next, cur);
                 Ok(())
             },
-        )
+            |_| Ok(()),
+        )?;
+        self.move_pointer(ch);
+        self.emit("]");
+        self.release_temps(checkpoint);
+        Ok(())
     }
 
     pub fn read_as_char(&mut self, a: i32) {
