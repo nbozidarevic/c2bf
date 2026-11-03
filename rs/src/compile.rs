@@ -16,7 +16,7 @@
 //!   C++ crashes with `bad_cast`).
 //! - Too few format arguments are rejected (the C++ reads out of bounds).
 
-use crate::ast::{Block, BlockItem, Decl, Expr, External, ForDecl, ForInit, Stmt};
+use crate::ast::{Block, BlockItem, Decl, Expr, External, ForDecl, ForInit, InitDecl, Stmt};
 use crate::codegen::{CompileError, Emitter};
 use crate::parser;
 
@@ -132,15 +132,125 @@ impl Emitter {
     fn compile_decl(&mut self, d: &Decl) -> Result<(), CompileError> {
         // `int;` — no declarators, the base visitor emits nothing.
         for init in &d.inits {
+            if init.array_len.is_some() {
+                self.compile_array_decl(init)?;
+                continue;
+            }
+            if self.memory.is_array(&init.name) {
+                return Err(err("cannot redeclare an array as a variable"));
+            }
             let e = match &init.init {
                 None => return Err(err("Unsupported init declarator")),
                 Some(e) => e,
             };
             let dest = self.memory.var_cell(&init.name);
+            if init.pointer {
+                self.memory.mark_pointer(&init.name);
+            }
             let src = self.compile_expr(e)?;
             self.copy_value(src, dest);
         }
         Ok(())
+    }
+
+    /// Compile an array declaration: reserve consecutive cells and
+    /// clear them, so elements start at zero (unlike C's indeterminate
+    /// values; the tape starts zeroed, but a reclaimed index could
+    /// otherwise carry a stale temporary). Arrays take no
+    /// initializer; the size must be a positive integer literal.
+    /// Redeclaring the same array with the same size re-clears it.
+    fn compile_array_decl(&mut self, init: &InitDecl) -> Result<(), CompileError> {
+        if self.memory.has_var(&init.name) {
+            return Err(err("cannot redeclare a variable as an array"));
+        }
+        if init.init.is_some() {
+            return Err(err("array initializers are not supported"));
+        }
+        let len_expr = init.array_len.as_ref().expect("array declarator");
+        let len = match len_expr {
+            Expr::Int(bytes) => int_literal_value(bytes),
+            _ => return Err(err("array size must be an integer literal")),
+        };
+        if len <= 0 {
+            return Err(err("array size must be positive"));
+        }
+        let len = len as usize;
+        if let Some((base, old_len)) = self.memory.array_info(&init.name) {
+            if old_len != len {
+                return Err(err("array size mismatch on redeclaration"));
+            }
+            for cell in base..base + len as i32 {
+                self.set_value(cell, 0);
+            }
+            return Ok(());
+        }
+        let base = self.memory.alloc_array(&init.name, len);
+        for cell in base..base + len as i32 {
+            self.set_value(cell, 0);
+        }
+        Ok(())
+    }
+
+    /// Base cell and length of the array named by a subscript base
+    /// (parentheses unwrap; anything else is rejected).
+    fn array_base(&self, base: &Expr) -> Result<(i32, usize), CompileError> {
+        match base {
+            Expr::Ident(name) => match self.memory.array_info(name) {
+                Some(info) => Ok(info),
+                None => {
+                    if self.memory.has_var(name) || self.memory.is_pointer(name) {
+                        Err(err("subscript of non-array"))
+                    } else {
+                        Err(err("subscript of undeclared array"))
+                    }
+                }
+            },
+            Expr::Paren(inner) => self.array_base(inner),
+            Expr::Index { .. } => Err(err("multi-dimensional arrays are not supported")),
+            _ => Err(err("unsupported subscript base")),
+        }
+    }
+
+    /// Constant subscript index, if the index expression is a compile
+    /// time constant (literal, character, parenthesized, or signed
+    /// constant). Anything else needs the variable-index support
+    /// that follows this stage.
+    fn const_index(e: &Expr) -> Option<i32> {
+        match e {
+            Expr::Int(bytes) => Some(int_literal_value(bytes)),
+            Expr::Char(bytes) => Some(bytes.get(1).copied().unwrap_or(0) as i32),
+            Expr::Paren(inner) => Self::const_index(inner),
+            Expr::Unary { op, e } if op.as_slice() == b"-" => {
+                Self::const_index(e).map(|v| v.wrapping_neg())
+            }
+            Expr::Unary { op, e } if op.as_slice() == b"+" => Self::const_index(e),
+            _ => None,
+        }
+    }
+
+    /// Element count of the array named by a `sizeof` operand, if
+    /// it names one (parentheses unwrap). Element subscripts size
+    /// 1, as does everything else.
+    fn array_size_of(&self, e: &Expr) -> Option<usize> {
+        match e {
+            Expr::Ident(name) => self.memory.array_info(name).map(|(_, len)| len),
+            Expr::Paren(inner) => self.array_size_of(inner),
+            _ => None,
+        }
+    }
+
+    /// Cell of a constant-index element; variable indices are
+    /// rejected here until the dispatch support lands.
+    fn static_index_cell(&self, base: &Expr, index: &Expr) -> Result<i32, CompileError> {
+        let (cell_base, len) = self.array_base(base)?;
+        let k = match Self::const_index(index) {
+            Some(k) => k,
+            None => return Err(err("only constant array indices are supported")),
+        };
+        if k < 0 || k as usize >= len {
+            return Err(err("array index out of bounds"));
+        }
+        Ok(cell_base + k)
     }
 
     fn compile_block(&mut self, b: &Block) -> Result<(), CompileError> {
@@ -724,8 +834,13 @@ impl Emitter {
             // literals and operations already truncate.
             Expr::Cast { e, .. } => self.compile_expr(e),
             // sizeof is always 1: every type is one byte here. The
-            // operand is never compiled (unevaluated, as in C).
-            Expr::Sizeof(_) | Expr::SizeofType(_) => Ok(self.const_value(1)),
+            // operand is never compiled (unevaluated, as in C) — except
+            // that an array operand yields its element count.
+            Expr::Sizeof(e) => {
+                let size = self.array_size_of(e).unwrap_or(1);
+                Ok(self.const_value(size as u8))
+            }
+            Expr::SizeofType(_) => Ok(self.const_value(1)),
             Expr::Postfix { op, e } => {
                 let target = self.compile_expr(e)?;
                 let old = self.duplicate_value(target);
@@ -742,10 +857,9 @@ impl Emitter {
                 Ok(old)
             }
             Expr::Call { callee, args } => self.compile_call(callee, args),
-            // Subscripts and dereference need the array/pointer
-            // code generation that follows the frontend; until then
-            // they are rejected here rather than silently miscompiled.
-            Expr::Index { .. } => Err(err("Unsupported subscript expression")),
+            // Constant-index elements resolve to a static cell, like
+            // a variable; variable indices follow with dispatch.
+            Expr::Index { base, index } => self.static_index_cell(base, index),
         }
     }
 
@@ -756,6 +870,7 @@ impl Emitter {
         match e {
             Expr::Ident(name) => Ok(self.memory.var_cell(name)),
             Expr::Paren(inner) => self.compile_lvalue(inner),
+            Expr::Index { base, index } => self.static_index_cell(base, index),
             _ => Err(err("invalid lvalue in assignment")),
         }
     }
@@ -963,6 +1078,106 @@ mod tests {
         let mut out = Vec::new();
         crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
         assert_eq!(out, b"3111");
+    }
+
+    #[test]
+    fn constant_index_arrays_read_write() {
+        let bf = compile(
+            b"int main() { char a[4]; a[0] = 65; a[1] = 66; a[2] = a[0] + 1; a[1]++; a[2] += 2; a[(3)] = 68; printf(\"%c%c%d%c\", a[0], a[1], a[2], a[3]); printf(\"%d\", sizeof(a)); }",
+        )
+        .expect("array program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"AC68D4");
+        // A character literal is a constant index too (same raw-slice
+        // value rule as a character in value position).
+        let bf = compile(
+            b"int main() { char a[120]; a['x'] = 7; printf(\"%d\", a['x']); }",
+        )
+        .expect("char-index program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"7");
+    }
+
+    #[test]
+    fn array_elements_start_zero() {
+        let bf = compile(b"int main() { char a[3]; printf(\"%d%d%d\", a[0], a[1], a[2]); }")
+            .expect("array program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"000");
+        // Redeclaring the same array with the same size re-clears it.
+        let bf = compile(
+            b"int main() { char a[2]; a[0] = 9; char a[2]; printf(\"%d\", a[0]); }",
+        )
+        .expect("redeclared array compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"0");
+        // Elements declared after a reclaimed branch still start at
+        // zero even if their cells reuse reclaimed indices.
+        let bf = compile(
+            b"int main() { if (1) { int y = 200; printf(\"%d\", y); } char a[2]; printf(\"%d\", a[0]); }",
+        )
+        .expect("array after branch compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"2000");
+    }
+
+    #[test]
+    fn array_errors() {
+        let cases: &[(&[u8], &str)] = &[
+            (
+                b"int main() { char a[3]; a[3] = 1; }",
+                "array index out of bounds",
+            ),
+            (
+                b"int main() { char a[3]; a[-1] = 1; }",
+                "array index out of bounds",
+            ),
+            (
+                b"int main() { char a[3]; int i = 0; a[i] = 1; }",
+                "only constant array indices are supported",
+            ),
+            (
+                b"int main() { char x = 1; printf(\"%d\", x[0]); }",
+                "subscript of non-array",
+            ),
+            (
+                b"int main() { b[0] = 1; }",
+                "subscript of undeclared array",
+            ),
+            (
+                b"int main() { char a[2]; printf(\"%d\", a[0][1]); }",
+                "multi-dimensional arrays are not supported",
+            ),
+            (b"int main() { char a[0]; }", "array size must be positive"),
+            (
+                b"int main() { int i = 2; char a[i]; }",
+                "array size must be an integer literal",
+            ),
+            (
+                b"int main() { char a[2]; char a[3]; }",
+                "array size mismatch on redeclaration",
+            ),
+            (
+                b"int main() { char x = 1; char x[2]; }",
+                "cannot redeclare a variable as an array",
+            ),
+            (
+                b"int main() { char a[2]; char a = 1; }",
+                "cannot redeclare an array as a variable",
+            ),
+            (
+                b"int main() { char a[2] = 5; }",
+                "array initializers are not supported",
+            ),
+        ];
+        for (src, want) in cases {
+            assert_eq!(compile(src).unwrap_err().msg, *want, "for {:?}", src);
+        }
     }
 
     #[test]

@@ -104,6 +104,15 @@ below keep the pre-rename names as history.
   on 632 cells (was 13,327), `bitassign` 610,311 -> 138,613
   bytes on 196 cells, `logic` on 215 cells (was 5,846);
   `hello_world` byte-identical. `docs/perf.md` refreshed.
+- Arrays, constant-index stage: `char a[N]` (positive literal
+  size, no initializers) with cleared, consecutive elements;
+  constant subscripts resolve to static cells, so element
+  assignment, increment, and compound assignment reuse the scalar
+  paths, and `sizeof` an array is its element count. The reclaim
+  floor now covers array cells too. Variable indices, pointer
+  dereference, and address-of follow. Pinned by the `arrays`
+  oracle fixture and `array_*` compile-error fixtures; pointer
+  declarators parse but are not yet usable.
 
 ## Phase 5 — Performance
 
