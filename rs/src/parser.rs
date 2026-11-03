@@ -258,7 +258,7 @@ impl<'a> Parser<'a> {
         self.fail("expected declaration or function definition".to_string())
     }
 
-    fn parse_funcdef(&mut self, _spec: Vec<u8>, name: Vec<u8>) -> Result<FuncDef, ParseError> {
+    fn parse_funcdef(&mut self, spec: Vec<u8>, name: Vec<u8>) -> Result<FuncDef, ParseError> {
         self.expect_punct(b"(", "'('")?;
         let mut params = Vec::new();
         if !self.at_punct(b")") {
@@ -304,7 +304,12 @@ impl<'a> Parser<'a> {
         }
         self.expect_punct(b")", "')'")?;
         let body = self.parse_compound()?;
-        Ok(FuncDef { name, params, body })
+        Ok(FuncDef {
+            name,
+            is_void: spec.as_slice() == b"void",
+            params,
+            body,
+        })
     }
 
     fn parse_declaration(&mut self) -> Result<Decl, ParseError> {

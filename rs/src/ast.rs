@@ -27,6 +27,10 @@ pub struct FnParam {
 #[derive(Debug)]
 pub struct FuncDef {
     pub name: Vec<u8>,
+    /// `true` when the return type is exactly `void`; kept (unlike
+    /// other return types) because a `void` call used as a value
+    /// must yield zero rather than a returned value.
+    pub is_void: bool,
     pub params: Vec<FnParam>,
     pub body: Block,
 }

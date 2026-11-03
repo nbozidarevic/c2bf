@@ -29,6 +29,7 @@ use std::rc::Rc;
 /// two expansions of the same function never interfere.
 #[derive(Debug)]
 pub struct ExpandedFunction {
+    pub is_void: bool,
     pub params: Vec<FnParam>,
     pub body: Block,
 }

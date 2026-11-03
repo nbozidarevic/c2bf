@@ -375,7 +375,11 @@ fn rename_function(f: &FuncDef) -> Result<ExpandedFunction, CompileError> {
         });
     }
     let body = renamer.rename_block(&f.body)?;
-    Ok(ExpandedFunction { params, body })
+    Ok(ExpandedFunction {
+        is_void: f.is_void,
+        params,
+        body,
+    })
 }
 
 /// A compiled program: Brainfuck code plus the number of tape cells
@@ -1810,7 +1814,9 @@ impl Emitter {
     /// under a fresh `returned` flag and result cell. Returns the
     /// result cell; a `void` call leaves it zero, and a bare
     /// `return;` leaves whatever value was last returned (zero for a
-    /// fresh cell).
+    /// fresh cell). Temporaries allocated by the expansion are
+    /// reclaimed on exit; only the pre-checkpoint result cell (and
+    /// variables, which the reclaim floor protects) flow out.
     ///
     /// There is no call stack and no return address: the body is
     /// emitted at the call site, so a function may not call itself,
@@ -1836,11 +1842,26 @@ impl Emitter {
                 String::from_utf8_lossy(name)
             )));
         }
-        let returned = self.const_value(0);
+        // The result cell is allocated *before* the reclaim
+        // checkpoint below, so the value flows out through a
+        // pre-region cell: without this, enough expansions in one
+        // program would push later variables past the 256
+        // addressable cells and `&` on them would fail. Everything
+        // else the expansion allocates is reclaimed on exit;
+        // parameters and body locals are variables, so the reclaim
+        // floor keeps their cells.
         let result = self.const_value(0);
+        let checkpoint = self.checkpoint();
+        let returned = self.const_value(0);
+        // Each argument value is copied to a fresh cell as soon as
+        // it is evaluated: an argument expression may yield a live
+        // variable cell (a bare identifier does), and a later
+        // argument assigning that variable must not rewrite an
+        // earlier argument's value before binding.
         let mut arg_cells = Vec::with_capacity(args.len());
         for arg in args {
-            arg_cells.push(self.compile_expr(arg)?);
+            let v = self.compile_expr(arg)?;
+            arg_cells.push(self.duplicate_value(v));
         }
         for (param, &arg) in def.params.iter().zip(arg_cells.iter()) {
             let cell = self.memory.var_cell(&param.name);
@@ -1859,6 +1880,12 @@ impl Emitter {
         self.continue_stack = saved_continue;
         self.return_context = saved_return;
         compiled?;
+        self.release_temps(checkpoint);
+        if def.is_void {
+            // A value returned from a `void` function is ignored: a
+            // `void` call used as a value yields zero.
+            self.set_value(result, 0);
+        }
         Ok(result)
     }
 }
@@ -2078,26 +2105,34 @@ mod tests {
 
     #[test]
     fn inline_invalid_args() {
+        // Calls sit in compiled positions: a call in `main`'s
+        // `return` operand is never compiled (`return` in `main` is
+        // a no-op), so arity and recursion errors there would not
+        // fire. Errors are lazy in the same way: an uncalled
+        // recursive function compiles.
         for (src, want) in [
             (
-                b"int f(int a) { return a; } int main() { return f(1, 2); }".as_slice(),
+                b"int f(int a) { return a; } int main() { int x = f(1, 2); printf(\"%d\", x); }".as_slice(),
                 "wrong number of arguments to function 'f'",
             ),
             (
-                b"int f(int a, int b) { return a; } int main() { return f(1); }".as_slice(),
+                b"int f(int a, int b) { return a; } int main() { int x = f(1); printf(\"%d\", x); }".as_slice(),
                 "wrong number of arguments to function 'f'",
             ),
             (
-                b"int f(int a) { return f(a); } int main() { return f(1); }".as_slice(),
+                b"int f(int a) { return f(a); } int main() { int x = f(1); printf(\"%d\", x); }".as_slice(),
                 "recursive call to function 'f' is not supported",
             ),
             (
-                b"int f(int a) { return g(a); } int g(int a) { return f(a); } int main() { return f(1); }".as_slice(),
+                b"int f(int a) { return g(a); } int g(int a) { return f(a); } int main() { int x = f(1); printf(\"%d\", x); }".as_slice(),
                 "recursive call to function 'f' is not supported",
             ),
         ] {
             assert_eq!(compile(src).unwrap_err().msg, want, "for {:?}", src);
         }
+        // Uncalled, the recursive function compiles.
+        compile(b"int f(int a) { return f(a); } int main() { printf(\"ok\"); }")
+            .expect("uncalled recursive function compiles");
     }
 
     #[test]
@@ -2205,6 +2240,24 @@ mod tests {
         let mut out = Vec::new();
         crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
         assert_eq!(out, b"5");
+    }
+
+    #[test]
+    fn expansions_reclaim_temporaries() {
+        // Forty sequential expansions must not push a later variable
+        // past the 256 addressable cells: the address-of below would
+        // fail to compile if expansion temporaries were never freed.
+        let mut src =
+            b"int id(int x) { return x; } int bump(int *p) { *p = *p + 1; return *p; } int main() { int i = 0; "
+                .to_vec();
+        for _ in 0..40 {
+            src.extend_from_slice(b"i = id(i + 1); ");
+        }
+        src.extend_from_slice(b"int x = 5; int b = bump(&x); printf(\"%d,%d,%d\", i, b, x); }");
+        let bf = compile(&src).expect("many-call program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"40,6,6");
     }
 
     #[test]

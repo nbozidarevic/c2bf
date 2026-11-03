@@ -31,7 +31,8 @@ source order, e.g.
 
 - `tu`: top-level `decl`/`funcdef` nodes in order (stray `;` skipped).
 - `funcdef(name)`: `[params?, compound body]`. The return type is
-  consumed, not kept; `params` is `[param]*`, present only when the
+  consumed, not shown; only `void`-ness is retained (invisibly) for
+  code generation. `params` is `[param]*`, present only when the
   parameter list is non-empty (`()` and `(void)` both give no child).
   `param(name)`: `[pointer?, array?]` — `pointer` for one `*`,
   `array` for `name[]` or `name[N]` (the size is discarded).
