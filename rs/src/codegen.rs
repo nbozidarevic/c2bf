@@ -361,20 +361,37 @@ impl Emitter {
         // `mod_values` can still read it afterwards.
         self.perform_if_else(
             b,
-            |em| {
-                em.perform_while(
-                    |em| Ok(em.greater_than_or_equal(a_copy, b)?),
-                    |em| {
-                        em.move_pointer(result);
-                        em.emit("+");
-                        let diff = em.subtract_values(a_copy, b);
-                        em.move_value(diff, a_copy);
-                        Ok(())
-                    },
-                )
-            },
+            |em| em.divide_loop(a_copy, result, b),
             |_| Ok(()),
         )?;
+        Ok(result)
+    }
+
+    /// The division loop shared by [`Emitter::divide_values`] and
+    /// [`Emitter::divide_values_unchecked`]: repeated subtraction
+    /// into `result`, draining `a_copy`.
+    fn divide_loop(&mut self, a_copy: i32, result: i32, b: i32) -> Result<(), CompileError> {
+        self.perform_while(
+            |em| Ok(em.greater_than_or_equal(a_copy, b)?),
+            |em| {
+                em.move_pointer(result);
+                em.emit("+");
+                let diff = em.subtract_values(a_copy, b);
+                em.move_value(diff, a_copy);
+                Ok(())
+            },
+        )
+    }
+
+    /// `result = a / b` without the zero-divisor branch: the caller
+    /// guarantees `b` is nonzero at runtime. Only the print helpers
+    /// use this — they divide by constants and by a place value
+    /// that is itself the loop condition, so a guard there would
+    /// be pure overhead on every `%d`/`%x` print.
+    pub fn divide_values_unchecked(&mut self, a: i32, b: i32) -> Result<i32, CompileError> {
+        let a_copy = self.duplicate_value(a);
+        let result = self.const_value(0);
+        self.divide_loop(a_copy, result, b)?;
         Ok(result)
     }
 
@@ -989,7 +1006,7 @@ impl Emitter {
                 em.perform_while(
                     |em| Ok(em.greater_than(digit, nine)?),
                     |em| {
-                        let q = em.divide_values(digit, ten)?;
+                        let q = em.divide_values_unchecked(digit, ten)?;
                         em.move_value(q, digit);
                         let h = em.multiply_values(helper, ten);
                         em.move_value(h, helper);
@@ -1002,14 +1019,14 @@ impl Emitter {
                 em.perform_while(
                     |em| Ok(helper),
                     |em| {
-                        let q = em.divide_values(a_copy, helper)?;
+                        let q = em.divide_values_unchecked(a_copy, helper)?;
                         em.move_value(q, digit);
                         let glyph = em.add_values(digit, zero_char);
                         em.print_as_char(glyph);
                         let scaled = em.multiply_values(digit, helper);
                         let rest = em.subtract_values(a_copy, scaled);
                         em.move_value(rest, a_copy);
-                        let q = em.divide_values(helper, ten)?;
+                        let q = em.divide_values_unchecked(helper, ten)?;
                         em.move_value(q, helper);
                         Ok(())
                     },
@@ -1044,7 +1061,7 @@ impl Emitter {
                 em.perform_while(
                     |em| Ok(em.greater_than(digit, fifteen)?),
                     |em| {
-                        let q = em.divide_values(digit, sixteen)?;
+                        let q = em.divide_values_unchecked(digit, sixteen)?;
                         em.move_value(q, digit);
                         let h = em.multiply_values(helper, sixteen);
                         em.move_value(h, helper);
@@ -1054,7 +1071,7 @@ impl Emitter {
                 em.perform_while(
                     |em| Ok(helper),
                     |em| {
-                        let q = em.divide_values(a_copy, helper)?;
+                        let q = em.divide_values_unchecked(a_copy, helper)?;
                         em.move_value(q, digit);
                         let glyph = em.add_values(digit, zero_char);
                         let is_letter = em.greater_than(digit, nine)?;
@@ -1072,7 +1089,7 @@ impl Emitter {
                         let scaled = em.multiply_values(digit, helper);
                         let rest = em.subtract_values(a_copy, scaled);
                         em.move_value(rest, a_copy);
-                        let q = em.divide_values(helper, sixteen)?;
+                        let q = em.divide_values_unchecked(helper, sixteen)?;
                         em.move_value(q, helper);
                         Ok(())
                     },
