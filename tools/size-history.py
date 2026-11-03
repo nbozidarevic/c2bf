@@ -19,6 +19,7 @@ including any fixture edits in that same commit.
 """
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -191,8 +192,45 @@ def fmt_delta(delta):
     return "—" if delta is None else f"{delta:+d}"
 
 
-def render(rows):
-    """Render the size-history document from [(sha, label, note, sizes)]."""
+def load_cell_history(script_dir):
+    """Load tools/cell-history.json, or None (with a warning) if absent.
+
+    Malformed data is an error: a stale or half-written memory
+    section is worse than none.
+    """
+    path = script_dir / "cell-history.json"
+    if not path.exists():
+        print(
+            f"warning: {path} not found; rendering memory sections "
+            "as unrecorded",
+            file=sys.stderr,
+        )
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        print(f"error: {path} is not valid JSON: {e}", file=sys.stderr)
+        sys.exit(2)
+    if not isinstance(data, dict) or "allocated" not in data or "runtime" not in data:
+        print(
+            f"error: {path} lacks 'allocated'/'runtime' sections",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return data
+
+
+def short_sha(sha):
+    """Short SHA prefix used as a key in the cell-history data."""
+    return sha[:7]
+
+
+def render(rows, cell_data):
+    """Render the size-history document.
+
+    `rows` is [(sha, label, note, sizes)]; `cell_data` is the parsed
+    tools/cell-history.json, or None when it has not been recorded.
+    """
     lines = []
     lines.append("# BF size history")
     lines.append("")
@@ -236,6 +274,13 @@ def render(rows):
     lines.append(
         "- Before the first milestone there are no committed golden "
         "outputs, so the C++ era is not reconstructed here."
+    )
+    lines.append(
+        "- Memory usage is tracked in the sections below: cells "
+        "allocated by the compiler (recorded from the last "
+        "milestone onward; allocation counts were never recorded "
+        "before) and the runtime footprint backfilled from the "
+        "golden programs themselves."
     )
     lines.append(
         "- To record a new point, append its commit (full SHA, "
@@ -284,7 +329,88 @@ def render(rows):
             )
         lines.append("")
         prev = sizes
+    render_memory_sections(lines, rows, cell_data)
     return "\n".join(lines) + "\n"
+
+
+def render_memory_sections(lines, rows, cell_data):
+    """Append the allocated-cells and runtime-footprint sections."""
+    lines.append("## Cells allocated (compiler)")
+    lines.append("")
+    lines.append(
+        "Tape cells the compiler's bump allocator reserved for each "
+        "program (`Memory::allocated_cells` after compilation). "
+        "Allocation never reuses cells, so this is the static tape "
+        "footprint: fewer allocated cells means less tape reserved, "
+        "whether or not execution ever visits them all."
+    )
+    lines.append("")
+    if cell_data is None:
+        lines.append("No allocated-cell data recorded yet.")
+        lines.append("")
+    else:
+        allocated = cell_data["allocated"]
+        measured = [r for r in rows if short_sha(r[0]) in allocated]
+        for sha, label, _note, _sizes in measured:
+            cells = allocated[short_sha(sha)]
+            lines.append(f"### {label} (`{sha[:7]}`)")
+            lines.append("")
+            lines.append("| Fixture | Cells alloc |")
+            lines.append("|---|---|")
+            for fixture in sorted(cells):
+                lines.append(f"| `{fixture}` | {cells[fixture]} |")
+            lines.append("")
+        unmeasured = [label for sha, label, _n, _s in rows
+                      if short_sha(sha) not in allocated]
+        if unmeasured:
+            lines.append(
+                "Allocated cells were not recorded at: "
+                + ", ".join(unmeasured)
+                + ". Allocation counts were never recorded before "
+                "the last milestone, and golden BF alone does not "
+                "record them, so they are not backfilled."
+            )
+            lines.append("")
+    lines.append("## Runtime footprint (from golden BF)")
+    lines.append("")
+    lines.append(
+        "Tape cells actually used when each milestone's committed "
+        "golden program runs with its committed fixture input "
+        "(empty input where a golden has no input file): cells "
+        "touched counts distinct pointer positions whose cell was "
+        "accessed; peak cell is the largest pointer value held; "
+        "low cell is the smallest (0 for every transpiled program "
+        "here). Backfilled by running the golden programs under "
+        "the current runner; see `tools/cell-history.json` for "
+        "provenance. A gap between cells allocated and cells "
+        "touched is reserved-but-never-visited tape: the main "
+        "allocation-optimization signal."
+    )
+    lines.append("")
+    if cell_data is None:
+        lines.append("No runtime footprint data recorded yet.")
+        lines.append("")
+        return
+    runtime = cell_data["runtime"]
+    for sha, label, _note, _sizes in rows:
+        entries = runtime.get(short_sha(sha))
+        if entries is None:
+            lines.append(f"### {label} (`{sha[:7]}`)")
+            lines.append("")
+            lines.append("No runtime footprint recorded for this milestone.")
+            lines.append("")
+            continue
+        lines.append(f"### {label} (`{sha[:7]}`)")
+        lines.append("")
+        lines.append("| Fixture | Cells touched | Peak cell | Low cell |")
+        lines.append("|---|---|---|---|")
+        for fixture in sorted(entries):
+            e = entries[fixture]
+            lines.append(
+                f"| `{fixture}` | {e['cells_touched']} | "
+                f"{e['high_water']} | {e['low_water']} |"
+            )
+        lines.append("")
 
 
 def main(argv=None):
@@ -310,7 +436,8 @@ def main(argv=None):
         (sha, label, note, sizes_at(root, sha))
         for sha, label, note in MILESTONES
     ]
-    text = render(rows)
+    cell_data = load_cell_history(Path(__file__).resolve().parent)
+    text = render(rows, cell_data)
     if args.check:
         if not output.exists() or output.read_text(encoding="utf-8") != text:
             print(f"error: {output} is stale; rerun tools/size-history.py",

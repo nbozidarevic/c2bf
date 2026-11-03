@@ -14,6 +14,7 @@ How the emitted Brainfuck size (bytes) for each golden fixture changed across no
 - A fixture absent at a milestone did not exist yet (shown as `—`). Totals therefore grow as fixtures are added and are not comparable across milestones with different fixture sets. The like-for-like change compares only fixtures present at both milestones.
 - Sizes reflect both the code generator and the fixture source at that commit. A milestone that edits a fixture changes sizes for reasons other than a single optimization; the milestone notes say so where it applies.
 - Before the first milestone there are no committed golden outputs, so the C++ era is not reconstructed here.
+- Memory usage is tracked in the sections below: cells allocated by the compiler (recorded from the last milestone onward; allocation counts were never recorded before) and the runtime footprint backfilled from the golden programs themselves.
 - To record a new point, append its commit (full SHA, label, note) to `MILESTONES` in the script, rerun it, and commit the regenerated document with the change.
 
 ## Summary
@@ -718,4 +719,688 @@ Raw bit-combine loops and conditional place accumulation. Only bitwise, bitassig
 | `ternary` | 726950 | +0 |
 | `typespec` | 361423 | +0 |
 | `unary` | 340913 | +0 |
+
+## Cells allocated (compiler)
+
+Tape cells the compiler's bump allocator reserved for each program (`Memory::allocated_cells` after compilation). Allocation never reuses cells, so this is the static tape footprint: fewer allocated cells means less tape reserved, whether or not execution ever visits them all.
+
+### Raw combine/scale (`3c4ab19`)
+
+| Fixture | Cells alloc |
+|---|---|
+| `addition` | 417 |
+| `addsub` | 3764 |
+| `assign` | 6423 |
+| `bitassign` | 3548 |
+| `bitwise` | 13327 |
+| `branch` | 228 |
+| `break` | 4748 |
+| `casts` | 2896 |
+| `cmp` | 7206 |
+| `complex` | 2081 |
+| `continue` | 6200 |
+| `define` | 1655 |
+| `div` | 4448 |
+| `dowhile` | 3866 |
+| `fordecl` | 1835 |
+| `hello_world` | 24 |
+| `io` | 857 |
+| `literals` | 3704 |
+| `logic` | 5846 |
+| `loop` | 1458 |
+| `mod` | 4574 |
+| `mul` | 3363 |
+| `multidecl` | 1669 |
+| `printfmt` | 4111 |
+| `printnum` | 9900 |
+| `sizeof` | 1685 |
+| `switch` | 1283 |
+| `ternary` | 4515 |
+| `typespec` | 2264 |
+| `unary` | 2543 |
+
+Allocated cells were not recorded at: Rust baseline, do...while, break, ternary, continue + decimal printing rewrite, Rename to c2bf (v0.1.0), Loop-based constants, Unary -, +, ~, printf %%, %u, %x, Hex/octal/binary literals, Multiple declarators, Multi-word type specifiers, Casts, sizeof, Object-like #define, Bitwise ops and shifts, Bitwise/shift compound assignment, Bitwise optimization. Allocation counts were never recorded before the last milestone, and golden BF alone does not record them, so they are not backfilled.
+
+## Runtime footprint (from golden BF)
+
+Tape cells actually used when each milestone's committed golden program runs with its committed fixture input (empty input where a golden has no input file): cells touched counts distinct pointer positions whose cell was accessed; peak cell is the largest pointer value held; low cell is the smallest (0 for every transpiled program here). Backfilled by running the golden programs under the current runner; see `tools/cell-history.json` for provenance. A gap between cells allocated and cells touched is reserved-but-never-visited tape: the main allocation-optimization signal.
+
+### Rust baseline (`a2e3653`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 320 | 332 | 0 |
+| `addsub` | 1987 | 3006 | 0 |
+| `assign` | 2956 | 5177 | 0 |
+| `branch` | 202 | 212 | 0 |
+| `cmp` | 1965 | 5877 | 0 |
+| `complex` | 1332 | 1803 | 0 |
+| `div` | 1763 | 3700 | 0 |
+| `fordecl` | 1118 | 1502 | 0 |
+| `hello_world` | 14 | 13 | 0 |
+| `io` | 650 | 771 | 0 |
+| `logic` | 1122 | 4683 | 0 |
+| `loop` | 992 | 1208 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1727 | 3826 | 0 |
+| `mul` | 1984 | 2697 | 0 |
+| `switch` | 971 | 1173 | 0 |
+
+### do...while (`61def42`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 320 | 332 | 0 |
+| `addsub` | 1987 | 3006 | 0 |
+| `assign` | 2956 | 5177 | 0 |
+| `branch` | 202 | 212 | 0 |
+| `cmp` | 1965 | 5877 | 0 |
+| `complex` | 1332 | 1803 | 0 |
+| `div` | 1763 | 3700 | 0 |
+| `dowhile` | 1839 | 3201 | 0 |
+| `fordecl` | 1118 | 1502 | 0 |
+| `hello_world` | 14 | 13 | 0 |
+| `io` | 650 | 771 | 0 |
+| `logic` | 1122 | 4683 | 0 |
+| `loop` | 992 | 1208 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1727 | 3826 | 0 |
+| `mul` | 1984 | 2697 | 0 |
+| `switch` | 971 | 1173 | 0 |
+
+### break (`5edd230`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 320 | 332 | 0 |
+| `addsub` | 1987 | 3006 | 0 |
+| `assign` | 2956 | 5177 | 0 |
+| `branch` | 202 | 212 | 0 |
+| `break` | 2555 | 3997 | 0 |
+| `cmp` | 1965 | 5877 | 0 |
+| `complex` | 1332 | 1803 | 0 |
+| `div` | 1763 | 3700 | 0 |
+| `dowhile` | 1839 | 3201 | 0 |
+| `fordecl` | 1118 | 1502 | 0 |
+| `hello_world` | 14 | 13 | 0 |
+| `io` | 650 | 771 | 0 |
+| `logic` | 1122 | 4683 | 0 |
+| `loop` | 992 | 1208 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1727 | 3826 | 0 |
+| `mul` | 1984 | 2697 | 0 |
+| `switch` | 971 | 1173 | 0 |
+
+### ternary (`b6f6435`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 320 | 332 | 0 |
+| `addsub` | 1987 | 3006 | 0 |
+| `assign` | 2956 | 5177 | 0 |
+| `branch` | 202 | 212 | 0 |
+| `break` | 2555 | 3997 | 0 |
+| `cmp` | 1965 | 5877 | 0 |
+| `complex` | 1332 | 1803 | 0 |
+| `div` | 1763 | 3700 | 0 |
+| `dowhile` | 1839 | 3201 | 0 |
+| `fordecl` | 1118 | 1502 | 0 |
+| `hello_world` | 14 | 13 | 0 |
+| `io` | 650 | 771 | 0 |
+| `logic` | 1122 | 4683 | 0 |
+| `loop` | 992 | 1208 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1727 | 3826 | 0 |
+| `mul` | 1984 | 2697 | 0 |
+| `switch` | 971 | 1173 | 0 |
+| `ternary` | 2505 | 3684 | 0 |
+
+### continue + decimal printing rewrite (`db7db25`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 400 | 415 | 0 |
+| `addsub` | 2489 | 3753 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `branch` | 202 | 212 | 0 |
+| `break` | 3032 | 4744 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1518 | 2052 | 0 |
+| `continue` | 4620 | 6198 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 14 | 13 | 0 |
+| `io` | 727 | 854 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2473 | 3361 | 0 |
+| `printnum` | 8859 | 9882 | 0 |
+| `switch` | 1018 | 1256 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+
+### Rename to c2bf (v0.1.0) (`52b87b4`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 400 | 415 | 0 |
+| `addsub` | 2489 | 3753 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `branch` | 202 | 212 | 0 |
+| `break` | 3032 | 4744 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1518 | 2052 | 0 |
+| `continue` | 4620 | 6198 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 14 | 13 | 0 |
+| `io` | 727 | 854 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2473 | 3361 | 0 |
+| `printnum` | 8859 | 9882 | 0 |
+| `switch` | 1018 | 1256 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+
+### Loop-based constants (`c37dc8a`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+
+### Unary -, +, ~ (`42c58df`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+| `unary` | 743 | 2542 | 0 |
+
+### printf %%, %u, %x (`069bafe`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `printfmt` | 3096 | 4110 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+| `unary` | 743 | 2542 | 0 |
+
+### Hex/octal/binary literals (`e13e51c`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `literals` | 2439 | 3703 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `printfmt` | 3096 | 4110 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+| `unary` | 743 | 2542 | 0 |
+
+### Multiple declarators (`2798235`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `literals` | 2439 | 3703 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `multidecl` | 849 | 1668 | 0 |
+| `printfmt` | 3096 | 4110 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+| `unary` | 743 | 2542 | 0 |
+
+### Multi-word type specifiers (`45b9cfc`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `literals` | 2439 | 3703 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `multidecl` | 849 | 1668 | 0 |
+| `printfmt` | 3096 | 4110 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+| `typespec` | 1973 | 2263 | 0 |
+| `unary` | 743 | 2542 | 0 |
+
+### Casts (`fec53d9`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `casts` | 2428 | 2895 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `literals` | 2439 | 3703 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `multidecl` | 849 | 1668 | 0 |
+| `printfmt` | 3096 | 4110 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+| `typespec` | 1973 | 2263 | 0 |
+| `unary` | 743 | 2542 | 0 |
+
+### sizeof (`f2122c7`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `casts` | 2428 | 2895 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `literals` | 2439 | 3703 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `multidecl` | 849 | 1668 | 0 |
+| `printfmt` | 3096 | 4110 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `sizeof` | 839 | 1684 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+| `typespec` | 1973 | 2263 | 0 |
+| `unary` | 743 | 2542 | 0 |
+
+### Object-like #define (`4627a7b`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `casts` | 2428 | 2895 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `define` | 1030 | 1654 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `literals` | 2439 | 3703 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `multidecl` | 849 | 1668 | 0 |
+| `printfmt` | 3096 | 4110 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `sizeof` | 839 | 1684 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+| `typespec` | 1973 | 2263 | 0 |
+| `unary` | 743 | 2542 | 0 |
+
+### Bitwise ops and shifts (`d4418ab`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `bitwise` | 13013 | 19406 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `casts` | 2428 | 2895 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `define` | 1030 | 1654 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `literals` | 2439 | 3703 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_bitwise` | 1016 | 1305 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `micro_order_shift` | 29 | 28 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `multidecl` | 849 | 1668 | 0 |
+| `printfmt` | 3096 | 4110 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `sizeof` | 839 | 1684 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+| `typespec` | 1973 | 2263 | 0 |
+| `unary` | 743 | 2542 | 0 |
+
+### Bitwise/shift compound assignment (`2f84071`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `bitassign` | 4786 | 5323 | 0 |
+| `bitwise` | 13013 | 19406 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `casts` | 2428 | 2895 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `define` | 1030 | 1654 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `literals` | 2439 | 3703 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_bitwise` | 1016 | 1305 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `micro_order_shift` | 29 | 28 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `multidecl` | 849 | 1668 | 0 |
+| `printfmt` | 3096 | 4110 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `sizeof` | 839 | 1684 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+| `typespec` | 1973 | 2263 | 0 |
+| `unary` | 743 | 2542 | 0 |
+
+### Bitwise optimization (`5a3bffa`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `bitassign` | 3112 | 3617 | 0 |
+| `bitwise` | 7948 | 13572 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `casts` | 2428 | 2895 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `define` | 1030 | 1654 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `literals` | 2439 | 3703 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_bitwise` | 197 | 212 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `micro_order_shift` | 15 | 14 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `multidecl` | 849 | 1668 | 0 |
+| `printfmt` | 3096 | 4110 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `sizeof` | 839 | 1684 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+| `typespec` | 1973 | 2263 | 0 |
+| `unary` | 743 | 2542 | 0 |
+
+### Raw combine/scale (`3c4ab19`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 401 | 416 | 0 |
+| `addsub` | 2499 | 3763 | 0 |
+| `assign` | 3745 | 6422 | 0 |
+| `bitassign` | 3042 | 3547 | 0 |
+| `bitwise` | 7722 | 13326 | 0 |
+| `branch` | 210 | 227 | 0 |
+| `break` | 3033 | 4747 | 0 |
+| `casts` | 2428 | 2895 | 0 |
+| `cmp` | 2301 | 7205 | 0 |
+| `complex` | 1546 | 2080 | 0 |
+| `continue` | 4621 | 6199 | 0 |
+| `define` | 1030 | 1654 | 0 |
+| `div` | 2088 | 4447 | 0 |
+| `dowhile` | 2242 | 3865 | 0 |
+| `fordecl` | 1365 | 1834 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 729 | 856 | 0 |
+| `literals` | 2439 | 3703 | 0 |
+| `logic` | 1372 | 5845 | 0 |
+| `loop` | 1189 | 1457 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_bitwise` | 151 | 158 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 23 | 22 | 0 |
+| `micro_order_le` | 60 | 62 | 0 |
+| `micro_order_shift` | 15 | 14 | 0 |
+| `mod` | 1997 | 4573 | 0 |
+| `mul` | 2474 | 3362 | 0 |
+| `multidecl` | 849 | 1668 | 0 |
+| `printfmt` | 3096 | 4110 | 0 |
+| `printnum` | 8876 | 9899 | 0 |
+| `sizeof` | 839 | 1684 | 0 |
+| `switch` | 1031 | 1282 | 0 |
+| `ternary` | 3071 | 4514 | 0 |
+| `typespec` | 1973 | 2263 | 0 |
+| `unary` | 743 | 2542 | 0 |
 

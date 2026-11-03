@@ -1,0 +1,2798 @@
+{
+  "provenance": "Runtime footprints measured by the temporary cell-backfill CI workflow running c2bf-bench --footprint over each milestone's committed golden BF files with that milestone's fixture inputs (empty input where a golden has no input file; the micro probes never read stdin), using the runner at commit 0ce60a0615b6b292f2070ecf08e352b8a3a5b878. Allocated cells measured by c2bf-bench --quick --json at the same commit; the BF goldens there are byte-identical to the 3c4ab19 milestone (CI golden-codegen green) and no emission or allocation order changed in between, so the allocated counts are recorded under 3c4ab19.",
+  "allocated_commit": "0ce60a0615b6b292f2070ecf08e352b8a3a5b878",
+  "allocated": {
+    "3c4ab19": {
+      "addition": 417,
+      "addsub": 3764,
+      "assign": 6423,
+      "bitassign": 3548,
+      "bitwise": 13327,
+      "branch": 228,
+      "break": 4748,
+      "casts": 2896,
+      "cmp": 7206,
+      "complex": 2081,
+      "continue": 6200,
+      "define": 1655,
+      "div": 4448,
+      "dowhile": 3866,
+      "fordecl": 1835,
+      "hello_world": 24,
+      "io": 857,
+      "literals": 3704,
+      "logic": 5846,
+      "loop": 1458,
+      "mod": 4574,
+      "mul": 3363,
+      "multidecl": 1669,
+      "printfmt": 4111,
+      "printnum": 9900,
+      "sizeof": 1685,
+      "switch": 1283,
+      "ternary": 4515,
+      "typespec": 2264,
+      "unary": 2543
+    }
+  },
+  "runtime": {
+    "a2e3653": {
+      "addition": {
+        "cells_touched": 320,
+        "high_water": 332,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 1987,
+        "high_water": 3006,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 2956,
+        "high_water": 5177,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 202,
+        "high_water": 212,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 1965,
+        "high_water": 5877,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1332,
+        "high_water": 1803,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 1763,
+        "high_water": 3700,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1118,
+        "high_water": 1502,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 14,
+        "high_water": 13,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 650,
+        "high_water": 771,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1122,
+        "high_water": 4683,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 992,
+        "high_water": 1208,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1727,
+        "high_water": 3826,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 1984,
+        "high_water": 2697,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 971,
+        "high_water": 1173,
+        "low_water": 0
+      }
+    },
+    "61def42": {
+      "addition": {
+        "cells_touched": 320,
+        "high_water": 332,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 1987,
+        "high_water": 3006,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 2956,
+        "high_water": 5177,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 202,
+        "high_water": 212,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 1965,
+        "high_water": 5877,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1332,
+        "high_water": 1803,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 1763,
+        "high_water": 3700,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 1839,
+        "high_water": 3201,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1118,
+        "high_water": 1502,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 14,
+        "high_water": 13,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 650,
+        "high_water": 771,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1122,
+        "high_water": 4683,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 992,
+        "high_water": 1208,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1727,
+        "high_water": 3826,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 1984,
+        "high_water": 2697,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 971,
+        "high_water": 1173,
+        "low_water": 0
+      }
+    },
+    "5edd230": {
+      "addition": {
+        "cells_touched": 320,
+        "high_water": 332,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 1987,
+        "high_water": 3006,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 2956,
+        "high_water": 5177,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 202,
+        "high_water": 212,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 2555,
+        "high_water": 3997,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 1965,
+        "high_water": 5877,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1332,
+        "high_water": 1803,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 1763,
+        "high_water": 3700,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 1839,
+        "high_water": 3201,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1118,
+        "high_water": 1502,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 14,
+        "high_water": 13,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 650,
+        "high_water": 771,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1122,
+        "high_water": 4683,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 992,
+        "high_water": 1208,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1727,
+        "high_water": 3826,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 1984,
+        "high_water": 2697,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 971,
+        "high_water": 1173,
+        "low_water": 0
+      }
+    },
+    "b6f6435": {
+      "addition": {
+        "cells_touched": 320,
+        "high_water": 332,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 1987,
+        "high_water": 3006,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 2956,
+        "high_water": 5177,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 202,
+        "high_water": 212,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 2555,
+        "high_water": 3997,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 1965,
+        "high_water": 5877,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1332,
+        "high_water": 1803,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 1763,
+        "high_water": 3700,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 1839,
+        "high_water": 3201,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1118,
+        "high_water": 1502,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 14,
+        "high_water": 13,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 650,
+        "high_water": 771,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1122,
+        "high_water": 4683,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 992,
+        "high_water": 1208,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1727,
+        "high_water": 3826,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 1984,
+        "high_water": 2697,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 971,
+        "high_water": 1173,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 2505,
+        "high_water": 3684,
+        "low_water": 0
+      }
+    },
+    "db7db25": {
+      "addition": {
+        "cells_touched": 400,
+        "high_water": 415,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2489,
+        "high_water": 3753,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 202,
+        "high_water": 212,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3032,
+        "high_water": 4744,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1518,
+        "high_water": 2052,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4620,
+        "high_water": 6198,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 14,
+        "high_water": 13,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 727,
+        "high_water": 854,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2473,
+        "high_water": 3361,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8859,
+        "high_water": 9882,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1018,
+        "high_water": 1256,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      }
+    },
+    "52b87b4": {
+      "addition": {
+        "cells_touched": 400,
+        "high_water": 415,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2489,
+        "high_water": 3753,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 202,
+        "high_water": 212,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3032,
+        "high_water": 4744,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1518,
+        "high_water": 2052,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4620,
+        "high_water": 6198,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 14,
+        "high_water": 13,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 727,
+        "high_water": 854,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2473,
+        "high_water": 3361,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8859,
+        "high_water": 9882,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1018,
+        "high_water": 1256,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      }
+    },
+    "c37dc8a": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      }
+    },
+    "42c58df": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 743,
+        "high_water": 2542,
+        "low_water": 0
+      }
+    },
+    "069bafe": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 3096,
+        "high_water": 4110,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 743,
+        "high_water": 2542,
+        "low_water": 0
+      }
+    },
+    "e13e51c": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "literals": {
+        "cells_touched": 2439,
+        "high_water": 3703,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 3096,
+        "high_water": 4110,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 743,
+        "high_water": 2542,
+        "low_water": 0
+      }
+    },
+    "2798235": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "literals": {
+        "cells_touched": 2439,
+        "high_water": 3703,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "multidecl": {
+        "cells_touched": 849,
+        "high_water": 1668,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 3096,
+        "high_water": 4110,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 743,
+        "high_water": 2542,
+        "low_water": 0
+      }
+    },
+    "45b9cfc": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "literals": {
+        "cells_touched": 2439,
+        "high_water": 3703,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "multidecl": {
+        "cells_touched": 849,
+        "high_water": 1668,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 3096,
+        "high_water": 4110,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      },
+      "typespec": {
+        "cells_touched": 1973,
+        "high_water": 2263,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 743,
+        "high_water": 2542,
+        "low_water": 0
+      }
+    },
+    "fec53d9": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "casts": {
+        "cells_touched": 2428,
+        "high_water": 2895,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "literals": {
+        "cells_touched": 2439,
+        "high_water": 3703,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "multidecl": {
+        "cells_touched": 849,
+        "high_water": 1668,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 3096,
+        "high_water": 4110,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      },
+      "typespec": {
+        "cells_touched": 1973,
+        "high_water": 2263,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 743,
+        "high_water": 2542,
+        "low_water": 0
+      }
+    },
+    "f2122c7": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "casts": {
+        "cells_touched": 2428,
+        "high_water": 2895,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "literals": {
+        "cells_touched": 2439,
+        "high_water": 3703,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "multidecl": {
+        "cells_touched": 849,
+        "high_water": 1668,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 3096,
+        "high_water": 4110,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "sizeof": {
+        "cells_touched": 839,
+        "high_water": 1684,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      },
+      "typespec": {
+        "cells_touched": 1973,
+        "high_water": 2263,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 743,
+        "high_water": 2542,
+        "low_water": 0
+      }
+    },
+    "4627a7b": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "casts": {
+        "cells_touched": 2428,
+        "high_water": 2895,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "define": {
+        "cells_touched": 1030,
+        "high_water": 1654,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "literals": {
+        "cells_touched": 2439,
+        "high_water": 3703,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "multidecl": {
+        "cells_touched": 849,
+        "high_water": 1668,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 3096,
+        "high_water": 4110,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "sizeof": {
+        "cells_touched": 839,
+        "high_water": 1684,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      },
+      "typespec": {
+        "cells_touched": 1973,
+        "high_water": 2263,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 743,
+        "high_water": 2542,
+        "low_water": 0
+      }
+    },
+    "d4418ab": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "bitwise": {
+        "cells_touched": 13013,
+        "high_water": 19406,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "casts": {
+        "cells_touched": 2428,
+        "high_water": 2895,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "define": {
+        "cells_touched": 1030,
+        "high_water": 1654,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "literals": {
+        "cells_touched": 2439,
+        "high_water": 3703,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_bitwise": {
+        "cells_touched": 1016,
+        "high_water": 1305,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "micro_order_shift": {
+        "cells_touched": 29,
+        "high_water": 28,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "multidecl": {
+        "cells_touched": 849,
+        "high_water": 1668,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 3096,
+        "high_water": 4110,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "sizeof": {
+        "cells_touched": 839,
+        "high_water": 1684,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      },
+      "typespec": {
+        "cells_touched": 1973,
+        "high_water": 2263,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 743,
+        "high_water": 2542,
+        "low_water": 0
+      }
+    },
+    "2f84071": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "bitassign": {
+        "cells_touched": 4786,
+        "high_water": 5323,
+        "low_water": 0
+      },
+      "bitwise": {
+        "cells_touched": 13013,
+        "high_water": 19406,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "casts": {
+        "cells_touched": 2428,
+        "high_water": 2895,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "define": {
+        "cells_touched": 1030,
+        "high_water": 1654,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "literals": {
+        "cells_touched": 2439,
+        "high_water": 3703,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_bitwise": {
+        "cells_touched": 1016,
+        "high_water": 1305,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "micro_order_shift": {
+        "cells_touched": 29,
+        "high_water": 28,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "multidecl": {
+        "cells_touched": 849,
+        "high_water": 1668,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 3096,
+        "high_water": 4110,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "sizeof": {
+        "cells_touched": 839,
+        "high_water": 1684,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      },
+      "typespec": {
+        "cells_touched": 1973,
+        "high_water": 2263,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 743,
+        "high_water": 2542,
+        "low_water": 0
+      }
+    },
+    "5a3bffa": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "bitassign": {
+        "cells_touched": 3112,
+        "high_water": 3617,
+        "low_water": 0
+      },
+      "bitwise": {
+        "cells_touched": 7948,
+        "high_water": 13572,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "casts": {
+        "cells_touched": 2428,
+        "high_water": 2895,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "define": {
+        "cells_touched": 1030,
+        "high_water": 1654,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "literals": {
+        "cells_touched": 2439,
+        "high_water": 3703,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_bitwise": {
+        "cells_touched": 197,
+        "high_water": 212,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "micro_order_shift": {
+        "cells_touched": 15,
+        "high_water": 14,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "multidecl": {
+        "cells_touched": 849,
+        "high_water": 1668,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 3096,
+        "high_water": 4110,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "sizeof": {
+        "cells_touched": 839,
+        "high_water": 1684,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      },
+      "typespec": {
+        "cells_touched": 1973,
+        "high_water": 2263,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 743,
+        "high_water": 2542,
+        "low_water": 0
+      }
+    },
+    "3c4ab19": {
+      "addition": {
+        "cells_touched": 401,
+        "high_water": 416,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 2499,
+        "high_water": 3763,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 3745,
+        "high_water": 6422,
+        "low_water": 0
+      },
+      "bitassign": {
+        "cells_touched": 3042,
+        "high_water": 3547,
+        "low_water": 0
+      },
+      "bitwise": {
+        "cells_touched": 7722,
+        "high_water": 13326,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 210,
+        "high_water": 227,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 3033,
+        "high_water": 4747,
+        "low_water": 0
+      },
+      "casts": {
+        "cells_touched": 2428,
+        "high_water": 2895,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 2301,
+        "high_water": 7205,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 1546,
+        "high_water": 2080,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 4621,
+        "high_water": 6199,
+        "low_water": 0
+      },
+      "define": {
+        "cells_touched": 1030,
+        "high_water": 1654,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 2088,
+        "high_water": 4447,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 2242,
+        "high_water": 3865,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 1365,
+        "high_water": 1834,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 729,
+        "high_water": 856,
+        "low_water": 0
+      },
+      "literals": {
+        "cells_touched": 2439,
+        "high_water": 3703,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 1372,
+        "high_water": 5845,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 1189,
+        "high_water": 1457,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_bitwise": {
+        "cells_touched": 151,
+        "high_water": 158,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 23,
+        "high_water": 22,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 60,
+        "high_water": 62,
+        "low_water": 0
+      },
+      "micro_order_shift": {
+        "cells_touched": 15,
+        "high_water": 14,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 1997,
+        "high_water": 4573,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 2474,
+        "high_water": 3362,
+        "low_water": 0
+      },
+      "multidecl": {
+        "cells_touched": 849,
+        "high_water": 1668,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 3096,
+        "high_water": 4110,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 8876,
+        "high_water": 9899,
+        "low_water": 0
+      },
+      "sizeof": {
+        "cells_touched": 839,
+        "high_water": 1684,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 1031,
+        "high_water": 1282,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 3071,
+        "high_water": 4514,
+        "low_water": 0
+      },
+      "typespec": {
+        "cells_touched": 1973,
+        "high_water": 2263,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 743,
+        "high_water": 2542,
+        "low_water": 0
+      }
+    }
+  }
+}
