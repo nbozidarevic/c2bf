@@ -130,6 +130,14 @@ MILESTONES = [
         "Raw bit-combine loops and conditional place accumulation. "
         "Only bitwise, bitassign, and the order_bitwise probe change.",
     ),
+    (
+        "e0e858f0607892f1551eef50fc090f6b36616d7b",
+        "Scoped temp reclaim",
+        "perform_if_else/perform_while hand out again the temporaries "
+        "allocated inside (never below the largest variable cell). "
+        "BF bytes shrink corpus-wide from shorter pointer motion; "
+        "hello_world byte-identical.",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
@@ -367,7 +375,7 @@ def render_memory_sections(lines, rows, cell_data):
                 "Allocated cells were not recorded at: "
                 + ", ".join(unmeasured)
                 + ". Allocation counts were never recorded before "
-                "the last milestone, and golden BF alone does not "
+                "the first measured milestone, and golden BF alone does not "
                 "record them, so they are not backfilled."
             )
             lines.append("")

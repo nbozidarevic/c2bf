@@ -1,6 +1,6 @@
 {
-  "provenance": "Runtime footprints measured by the temporary cell-backfill CI workflow running c2bf-bench --footprint over each milestone's committed golden BF files with that milestone's fixture inputs (empty input where a golden has no input file; the micro probes never read stdin), using the runner at commit 0ce60a0615b6b292f2070ecf08e352b8a3a5b878. Allocated cells measured by c2bf-bench --quick --json at the same commit; the BF goldens there are byte-identical to the 3c4ab19 milestone (CI golden-codegen green) and no emission or allocation order changed in between, so the allocated counts are recorded under 3c4ab19.",
-  "allocated_commit": "0ce60a0615b6b292f2070ecf08e352b8a3a5b878",
+  "provenance": "Runtime footprints measured by the temporary cell-backfill CI workflow running c2bf-bench --footprint over each milestone's committed golden BF files with that milestone's fixture inputs (empty input where a golden has no input file; the micro probes never read stdin), using the runner at commit 0ce60a0615b6b292f2070ecf08e352b8a3a5b878. Allocated cells measured by c2bf-bench --quick --json at the same commit; the BF goldens there are byte-identical to the 3c4ab19 milestone (CI golden-codegen green) and no emission or allocation order changed in between, so the allocated counts are recorded under 3c4ab19. A second backfill run of the same workflow (runner at commit 9f2443a2146f3e5737765b83e8020bdde3fe5917) reproduced every recorded runtime entry exactly and added the e0e858f reclaim snapshot: its runtime footprint over the snapshot goldens, and its allocated cells from --quick --json at that commit, whose BF goldens are byte-identical to the e0e858f milestone.",
+  "allocated_commit": "9f2443a2146f3e5737765b83e8020bdde3fe5917",
   "allocated": {
     "3c4ab19": {
       "addition": 417,
@@ -33,6 +33,38 @@
       "ternary": 4515,
       "typespec": 2264,
       "unary": 2543
+    },
+    "e0e858f": {
+      "addition": 69,
+      "addsub": 207,
+      "assign": 302,
+      "bitassign": 196,
+      "bitwise": 632,
+      "branch": 64,
+      "break": 183,
+      "casts": 141,
+      "cmp": 378,
+      "complex": 134,
+      "continue": 231,
+      "define": 103,
+      "div": 180,
+      "dowhile": 183,
+      "fordecl": 107,
+      "hello_world": 24,
+      "io": 82,
+      "literals": 144,
+      "logic": 215,
+      "loop": 90,
+      "mod": 306,
+      "mul": 207,
+      "multidecl": 115,
+      "printfmt": 189,
+      "printnum": 328,
+      "sizeof": 102,
+      "switch": 281,
+      "ternary": 237,
+      "typespec": 163,
+      "unary": 174
     }
   },
   "runtime": {
@@ -2791,6 +2823,193 @@
       "unary": {
         "cells_touched": 743,
         "high_water": 2542,
+        "low_water": 0
+      }
+    },
+    "e0e858f": {
+      "addition": {
+        "cells_touched": 69,
+        "high_water": 68,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 207,
+        "high_water": 206,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 289,
+        "high_water": 288,
+        "low_water": 0
+      },
+      "bitassign": {
+        "cells_touched": 196,
+        "high_water": 195,
+        "low_water": 0
+      },
+      "bitwise": {
+        "cells_touched": 619,
+        "high_water": 618,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 61,
+        "high_water": 61,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 170,
+        "high_water": 169,
+        "low_water": 0
+      },
+      "casts": {
+        "cells_touched": 141,
+        "high_water": 140,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 349,
+        "high_water": 348,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 134,
+        "high_water": 133,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 218,
+        "high_water": 217,
+        "low_water": 0
+      },
+      "define": {
+        "cells_touched": 90,
+        "high_water": 89,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 167,
+        "high_water": 166,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 170,
+        "high_water": 169,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 94,
+        "high_water": 93,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 82,
+        "high_water": 81,
+        "low_water": 0
+      },
+      "literals": {
+        "cells_touched": 124,
+        "high_water": 123,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 202,
+        "high_water": 201,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 90,
+        "high_water": 89,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 3,
+        "high_water": 2,
+        "low_water": 0
+      },
+      "micro_order_bitwise": {
+        "cells_touched": 52,
+        "high_water": 51,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 4,
+        "high_water": 3,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 16,
+        "high_water": 15,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 22,
+        "high_water": 21,
+        "low_water": 0
+      },
+      "micro_order_shift": {
+        "cells_touched": 14,
+        "high_water": 13,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 293,
+        "high_water": 292,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 207,
+        "high_water": 206,
+        "low_water": 0
+      },
+      "multidecl": {
+        "cells_touched": 102,
+        "high_water": 101,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 189,
+        "high_water": 188,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 328,
+        "high_water": 327,
+        "low_water": 0
+      },
+      "sizeof": {
+        "cells_touched": 89,
+        "high_water": 88,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 268,
+        "high_water": 267,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 224,
+        "high_water": 223,
+        "low_water": 0
+      },
+      "typespec": {
+        "cells_touched": 150,
+        "high_water": 149,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 137,
+        "high_water": 136,
         "low_water": 0
       }
     }

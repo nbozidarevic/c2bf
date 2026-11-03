@@ -40,6 +40,7 @@ How the emitted Brainfuck size (bytes) for each golden fixture changed across no
 | Bitwise/shift compound assignment | `2f84071` | 37 | 18234387 | +0 | Adds the bitassign fixture; existing output unchanged. |
 | Bitwise optimization | `5a3bffa` | 37 | 16669768 | -1564619 | Fused divmod, in-place double/halve, early fold exit. Only bitwise, bitassign, and the order probes change. |
 | Raw combine/scale | `3c4ab19` | 37 | 16627848 | -41920 | Raw bit-combine loops and conditional place accumulation. Only bitwise, bitassign, and the order_bitwise probe change. |
+| Scoped temp reclaim | `e0e858f` | 37 | 4174226 | -12453622 | perform_if_else/perform_while hand out again the temporaries allocated inside (never below the largest variable cell). BF bytes shrink corpus-wide from shorter pointer motion; hello_world byte-identical. |
 
 ## Sizes by fixture
 
@@ -720,6 +721,50 @@ Raw bit-combine loops and conditional place accumulation. Only bitwise, bitassig
 | `typespec` | 361423 | +0 |
 | `unary` | 340913 | +0 |
 
+### Scoped temp reclaim (`e0e858f`)
+
+perform_if_else/perform_while hand out again the temporaries allocated inside (never below the largest variable cell). BF bytes shrink corpus-wide from shorter pointer motion; hello_world byte-identical.
+
+| Fixture | Bytes | Change vs previous |
+|---|---|---|
+| `addition` | 15493 | -40846 |
+| `addsub` | 139838 | -380811 |
+| `assign` | 277812 | -1509587 |
+| `bitassign` | 138613 | -471698 |
+| `bitwise` | 508390 | -1504817 |
+| `branch` | 6242 | -4539 |
+| `break` | 173494 | -459313 |
+| `casts` | 107759 | -288701 |
+| `cmp` | 261219 | -676808 |
+| `complex` | 79457 | -297727 |
+| `continue` | 233174 | -622567 |
+| `define` | 61477 | -164972 |
+| `div` | 161256 | -423882 |
+| `dowhile` | 142908 | -372261 |
+| `fordecl` | 69726 | -211138 |
+| `hello_world` | 597 | +0 |
+| `io` | 32074 | -91261 |
+| `literals` | 138053 | -371187 |
+| `logic` | 216689 | -595849 |
+| `loop` | 54968 | -181230 |
+| `micro_order_arith` | 500 | +0 |
+| `micro_order_assign` | 32 | +0 |
+| `micro_order_bitwise` | 5877 | -3050 |
+| `micro_order_case` | 38 | +0 |
+| `micro_order_eq` | 507 | -155 |
+| `micro_order_le` | 1662 | -1251 |
+| `micro_order_shift` | 363 | -7 |
+| `mod` | 169722 | -448164 |
+| `mul` | 125408 | -337162 |
+| `multidecl` | 64485 | -214696 |
+| `printfmt` | 162174 | -482943 |
+| `printnum` | 369202 | -989832 |
+| `sizeof` | 62091 | -165129 |
+| `switch` | 39825 | -65854 |
+| `ternary` | 172820 | -554130 |
+| `typespec` | 86826 | -274597 |
+| `unary` | 93455 | -247458 |
+
 ## Cells allocated (compiler)
 
 Tape cells the compiler's bump allocator reserved for each program (`Memory::allocated_cells` after compilation). Allocation never reuses cells, so this is the static tape footprint: fewer allocated cells means less tape reserved, whether or not execution ever visits them all.
@@ -759,7 +804,42 @@ Tape cells the compiler's bump allocator reserved for each program (`Memory::all
 | `typespec` | 2264 |
 | `unary` | 2543 |
 
-Allocated cells were not recorded at: Rust baseline, do...while, break, ternary, continue + decimal printing rewrite, Rename to c2bf (v0.1.0), Loop-based constants, Unary -, +, ~, printf %%, %u, %x, Hex/octal/binary literals, Multiple declarators, Multi-word type specifiers, Casts, sizeof, Object-like #define, Bitwise ops and shifts, Bitwise/shift compound assignment, Bitwise optimization. Allocation counts were never recorded before the last milestone, and golden BF alone does not record them, so they are not backfilled.
+### Scoped temp reclaim (`e0e858f`)
+
+| Fixture | Cells alloc |
+|---|---|
+| `addition` | 69 |
+| `addsub` | 207 |
+| `assign` | 302 |
+| `bitassign` | 196 |
+| `bitwise` | 632 |
+| `branch` | 64 |
+| `break` | 183 |
+| `casts` | 141 |
+| `cmp` | 378 |
+| `complex` | 134 |
+| `continue` | 231 |
+| `define` | 103 |
+| `div` | 180 |
+| `dowhile` | 183 |
+| `fordecl` | 107 |
+| `hello_world` | 24 |
+| `io` | 82 |
+| `literals` | 144 |
+| `logic` | 215 |
+| `loop` | 90 |
+| `mod` | 306 |
+| `mul` | 207 |
+| `multidecl` | 115 |
+| `printfmt` | 189 |
+| `printnum` | 328 |
+| `sizeof` | 102 |
+| `switch` | 281 |
+| `ternary` | 237 |
+| `typespec` | 163 |
+| `unary` | 174 |
+
+Allocated cells were not recorded at: Rust baseline, do...while, break, ternary, continue + decimal printing rewrite, Rename to c2bf (v0.1.0), Loop-based constants, Unary -, +, ~, printf %%, %u, %x, Hex/octal/binary literals, Multiple declarators, Multi-word type specifiers, Casts, sizeof, Object-like #define, Bitwise ops and shifts, Bitwise/shift compound assignment, Bitwise optimization. Allocation counts were never recorded before the first measured milestone, and golden BF alone does not record them, so they are not backfilled.
 
 ## Runtime footprint (from golden BF)
 
@@ -1403,4 +1483,46 @@ Tape cells actually used when each milestone's committed golden program runs wit
 | `ternary` | 3071 | 4514 | 0 |
 | `typespec` | 1973 | 2263 | 0 |
 | `unary` | 743 | 2542 | 0 |
+
+### Scoped temp reclaim (`e0e858f`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 69 | 68 | 0 |
+| `addsub` | 207 | 206 | 0 |
+| `assign` | 289 | 288 | 0 |
+| `bitassign` | 196 | 195 | 0 |
+| `bitwise` | 619 | 618 | 0 |
+| `branch` | 61 | 61 | 0 |
+| `break` | 170 | 169 | 0 |
+| `casts` | 141 | 140 | 0 |
+| `cmp` | 349 | 348 | 0 |
+| `complex` | 134 | 133 | 0 |
+| `continue` | 218 | 217 | 0 |
+| `define` | 90 | 89 | 0 |
+| `div` | 167 | 166 | 0 |
+| `dowhile` | 170 | 169 | 0 |
+| `fordecl` | 94 | 93 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 82 | 81 | 0 |
+| `literals` | 124 | 123 | 0 |
+| `logic` | 202 | 201 | 0 |
+| `loop` | 90 | 89 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_bitwise` | 52 | 51 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_eq` | 16 | 15 | 0 |
+| `micro_order_le` | 22 | 21 | 0 |
+| `micro_order_shift` | 14 | 13 | 0 |
+| `mod` | 293 | 292 | 0 |
+| `mul` | 207 | 206 | 0 |
+| `multidecl` | 102 | 101 | 0 |
+| `printfmt` | 189 | 188 | 0 |
+| `printnum` | 328 | 327 | 0 |
+| `sizeof` | 89 | 88 | 0 |
+| `switch` | 268 | 267 | 0 |
+| `ternary` | 224 | 223 | 0 |
+| `typespec` | 150 | 149 | 0 |
+| `unary` | 137 | 136 | 0 |
 
