@@ -6,7 +6,7 @@
 //! scoped reclaim of temporaries inside branch/loop emission (see
 //! [`Memory::release_temps`]): cells allocated since a checkpoint are
 //! handed out again once the construct that owned them is done, while
-//! variable and array cells are never reclaimed.
+//! variable, array, and anonymous-array cells are never reclaimed.
 
 use std::collections::{HashMap, HashSet};
 
@@ -26,6 +26,10 @@ pub struct Memory {
     /// variable's cell holds a tape index (a byte), like any scalar;
     /// the set only records which names are pointers.
     pointers: HashSet<Vec<u8>>,
+    /// Anonymous array ranges (string literal storage): base cell
+    /// and length each. Like named arrays, they are never
+    /// reclaimed, so the reclaim floor covers them.
+    anon_arrays: Vec<(i32, usize)>,
 }
 
 impl Memory {
@@ -76,7 +80,13 @@ impl Memory {
             .map(|&(base, len)| base + len as i32 - 1)
             .max()
             .unwrap_or(-1);
-        let floor = var_top.max(array_top) + 1;
+        let anon_top = self
+            .anon_arrays
+            .iter()
+            .map(|&(base, len)| base + len as i32 - 1)
+            .max()
+            .unwrap_or(-1);
+        let floor = var_top.max(array_top).max(anon_top) + 1;
         self.next = checkpoint.clamp(floor, self.next);
     }
 
@@ -146,6 +156,17 @@ impl Memory {
     /// from [`Memory::var_cell`]; this only records the kind.
     pub fn mark_pointer(&mut self, name: &[u8]) {
         self.pointers.insert(name.to_vec());
+    }
+
+    /// Reserve `len` consecutive cells without a name (string
+    /// literal storage), starting at the returned base cell.
+    pub fn alloc_anon_array(&mut self, len: usize) -> i32 {
+        let base = self.next;
+        for _ in 0..len {
+            self.temp_cell();
+        }
+        self.anon_arrays.push((base, len));
+        base
     }
 }
 
@@ -261,6 +282,18 @@ mod tests {
         // over them.
         assert_eq!(m.array_info(b"a"), Some((0, 2)));
         assert_eq!(m.peek_temp_cell(), 2);
+    }
+
+    #[test]
+    fn anon_arrays_are_contiguous_and_protected() {
+        let mut m = Memory::new();
+        assert_eq!(m.alloc_anon_array(3), 0);
+        assert_eq!(m.alloc_anon_array(2), 3);
+        let checkpoint = m.checkpoint();
+        assert_eq!(m.temp_cell(), 5);
+        m.release_temps(checkpoint);
+        assert_eq!(m.peek_temp_cell(), 5);
+        assert_eq!(m.allocated_cells(), 6);
     }
 
     #[test]

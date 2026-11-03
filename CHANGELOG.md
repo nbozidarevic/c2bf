@@ -124,6 +124,12 @@ below keep the pre-rename names as history.
   nowhere. Pinned by the `pointers` oracle fixture,
   `order_index`/`order_deref` emission probes, and
   `pointer_*` compile-error fixtures.
+- Strings: string-literal array initializers (sized and unsized
+  `char a[] = "…"`, bytes plus zero fill), string literals in
+  value position decaying to anonymous NUL-terminated storage,
+  `printf` `%s` over the dispatch, and `sizeof` of a literal.
+  Pinned by the `strings` oracle fixture and `strings_*`
+  compile-error fixtures; `scanf` `%s` is out of scope.
 
 ## Phase 5 — Performance
 

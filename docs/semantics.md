@@ -46,8 +46,16 @@ fix-or-pin work for Phase 1.
 - Arrays: `char a[N]` reserves `N` consecutive cells, named by
   the array and cleared at the declaration, so elements start at
   zero (C leaves them indeterminate). The size must be a positive
-  integer literal, initializers and multi-dimensional arrays are
-  rejected, and an array must be declared before use. Only
+  integer literal, braced initializers and multi-dimensional
+  arrays are rejected, and an array must be declared before use.
+  A string literal may initialize an array (`char a[N] = "hi"`,
+  bytes plus zero fill, a NUL when it fits; `char a[] = "hi"`
+  sizes itself to the bytes plus the NUL), and a string literal
+  in value position decays to the address of its anonymous,
+  NUL-terminated storage. `printf` `%s` prints the
+  NUL-terminated string at the argument's address; it must be
+  NUL-terminated (an unterminated array reads on into following
+  cells, as in C). `scanf` `%s` is not supported. Only
   constant indices are supported so far; a constant index outside
   `0..N-1` is a compile error, and a variable index is rejected.
   `sizeof` an array is its element count (unlike the always-`1`

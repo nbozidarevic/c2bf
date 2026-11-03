@@ -189,31 +189,60 @@ impl Emitter {
         if self.memory.has_var(&init.name) {
             return Err(err("cannot redeclare a variable as an array"));
         }
-        if init.init.is_some() {
-            return Err(err("array initializers are not supported"));
-        }
-        let len_expr = init.array_len.as_ref().expect("array declarator");
-        let len = match len_expr {
-            Expr::Int(bytes) => int_literal_value(bytes),
-            _ => return Err(err("array size must be an integer literal")),
+        // A string initializer fills the elements (plus a NUL when
+        // it fits); any other initializer is rejected, as before.
+        let string_init = match &init.init {
+            Some(Expr::StringLit { cooked, .. }) => Some(cooked.clone()),
+            Some(_) => return Err(err("array initializers are not supported")),
+            None => None,
         };
-        if len <= 0 {
-            return Err(err("array size must be positive"));
-        }
-        let len = len as usize;
+        let len = if init.array_unsized {
+            match &string_init {
+                Some(cooked) => cooked.len() + 1,
+                None => {
+                    return Err(err("unsized array requires a string initializer"));
+                }
+            }
+        } else {
+            let len_expr = init.array_len.as_ref().expect("array declarator");
+            let len = match len_expr {
+                Expr::Int(bytes) => int_literal_value(bytes),
+                _ => return Err(err("array size must be an integer literal")),
+            };
+            if len <= 0 {
+                return Err(err("array size must be positive"));
+            }
+            let len = len as usize;
+            if let Some(cooked) = &string_init {
+                if cooked.len() > len {
+                    return Err(err("string initializer is too long"));
+                }
+            }
+            len
+        };
+        // Fill the elements: string bytes plus zero fill (a NUL
+        // terminator when it fits), or plain clearing. Setting every
+        // element covers clearing, so the string path needs no
+        // separate pass.
+        let fill = |em: &mut Self, base: i32| {
+            for cell in base..base + len as i32 {
+                let offset = (cell - base) as usize;
+                let value = string_init
+                    .as_ref()
+                    .and_then(|cooked| cooked.get(offset).copied())
+                    .unwrap_or(0);
+                em.set_value(cell, value);
+            }
+        };
         if let Some((base, old_len)) = self.memory.array_info(&init.name) {
             if old_len != len {
                 return Err(err("array size mismatch on redeclaration"));
             }
-            for cell in base..base + len as i32 {
-                self.set_value(cell, 0);
-            }
+            fill(self, base);
             return Ok(());
         }
         let base = self.memory.alloc_array(&init.name, len);
-        for cell in base..base + len as i32 {
-            self.set_value(cell, 0);
-        }
+        fill(self, base);
         Ok(())
     }
 
@@ -261,6 +290,8 @@ impl Emitter {
         match e {
             Expr::Ident(name) => self.memory.array_info(name).map(|(_, len)| len),
             Expr::Paren(inner) => self.array_size_of(inner),
+            // A string literal sizes as its bytes plus the NUL.
+            Expr::StringLit { cooked, .. } => Some(cooked.len() + 1),
             _ => None,
         }
     }
@@ -965,7 +996,10 @@ impl Emitter {
                     Ok(self.memory.var_cell(name))
                 }
             }
-            Expr::StringLit { .. } => Err(err("Unsupported string expression")),
+            // A string literal in value position decays to the
+            // address of its anonymous storage (the format
+            // argument of printf/scanf never reaches here).
+            Expr::StringLit { cooked, .. } => self.string_value(cooked),
             Expr::Paren(e) => self.compile_expr(e),
             Expr::Comma(es) => {
                 debug_assert!(!es.is_empty());
@@ -1321,11 +1355,12 @@ impl Emitter {
                         // `%x` prints lowercase hex.
                         match format.get(i).copied() {
                             Some(b'%') => self.print_char(b'%'),
-                            Some(spec @ (b'c' | b'd' | b'u' | b'x')) => {
+                            Some(spec @ (b'c' | b'd' | b'u' | b'x' | b's')) => {
                                 let cell = next_format_arg(&vals, &mut next_var)?;
                                 match spec {
                                     b'c' => self.print_as_char(cell),
                                     b'x' => self.print_as_hex(cell)?,
+                                    b's' => self.print_as_string(cell)?,
                                     _ => self.print_as_number(cell)?,
                                 }
                             }
@@ -1679,6 +1714,45 @@ mod tests {
             (
                 b"int main() { char f[260]; char a[3]; char *p = 0; p = &a[0]; }",
                 "address is outside the addressable range",
+            ),
+        ];
+        for (src, want) in cases {
+            assert_eq!(compile(src).unwrap_err().msg, *want, "for {:?}", src);
+        }
+    }
+
+    #[test]
+    fn string_literals_and_percent_s() {
+        let bf = compile(
+            b"int main() { char s[6] = \"hello\"; char t[] = \"hi\"; char *p = \"bye\"; printf(\"[%s|%s|%s]\", s, t, p); printf(\"[%s]\", &s[1]); s[0] = 'H'; printf(\"[%s]\", s); printf(\"%d,%d,%d\", sizeof(s), sizeof(t), sizeof(\"bye\")); char e[] = \"\"; printf(\"[%s]\", e); char *q = \"a\\tb\"; printf(\"[%s]\", q); char *r = \"x\"; printf(\"%d\", *r); printf(\"[%s]\", \"lit\"); }",
+        )
+        .expect("string program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(
+            out,
+            b"[hello|hi|bye][ello][Hello]6,3,4[][a\tb]120[lit]"
+        );
+    }
+
+    #[test]
+    fn string_errors() {
+        let cases: &[(&[u8], &str)] = &[
+            (
+                b"int main() { char s[2] = \"hello\"; }",
+                "string initializer is too long",
+            ),
+            (
+                b"int main() { char s[] = 5; }",
+                "unsized array requires a string initializer",
+            ),
+            (
+                b"int main() { char s[]; }",
+                "unsized array requires a string initializer",
+            ),
+            (
+                b"int main() { char s[3] = 5; }",
+                "array initializers are not supported",
             ),
         ];
         for (src, want) in cases {

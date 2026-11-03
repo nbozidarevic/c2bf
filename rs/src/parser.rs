@@ -310,17 +310,22 @@ impl<'a> Parser<'a> {
             false
         };
         let name = self.expect_ident("declarator name")?.text;
-        let array_len = if self.at_punct(b"[") {
+        let mut array_len = None;
+        let mut array_unsized = false;
+        if self.at_punct(b"[") {
             self.next_tok();
-            let len = self.parse_assignment()?;
+            if self.at_punct(b"]") {
+                // `name[]`: sized only by a string initializer.
+                array_unsized = true;
+            } else {
+                array_len = Some(self.parse_assignment()?);
+            }
             self.expect_punct(b"]", "']'")?;
-            Some(len)
-        } else {
-            None
-        };
+        }
+        let is_array = array_len.is_some() || array_unsized;
         let init = if self.at_punct(b"=") {
             self.next_tok();
-            if array_len.is_some() && self.at_punct(b"{") {
+            if is_array && self.at_punct(b"{") {
                 return self.fail("array initializers are not supported".to_string());
             }
             Some(self.parse_assignment()?)
@@ -331,6 +336,7 @@ impl<'a> Parser<'a> {
             name,
             pointer,
             array_len,
+            array_unsized,
             init,
         })
     }
@@ -1199,6 +1205,10 @@ mod tests {
             "char g[4];",
             "(tu (decl char (initdecl g (int 4))))",
         );
+        assert_sexp(
+            "int f() { char t[] = \"hi\"; int a[]; }",
+            "(tu (funcdef f (compound (decl char (initdecl t (unsized) (string hi))) (decl int (initdecl a (unsized))))))",
+        );
     }
 
     #[test]
@@ -1219,7 +1229,6 @@ mod tests {
 
     #[test]
     fn array_declarator_errors() {
-        assert_err("int f() { int a[]; }", 1, 17, "expected expression, found ']'");
         assert_err("int f() { int a[3][4]; }", 1, 19, "expected ';', found '['");
         assert_err(
             "int f() { char **p; }",

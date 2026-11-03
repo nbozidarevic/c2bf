@@ -35,10 +35,13 @@ source order, e.g.
 - `decl(spec)`: `[initdecl]*` (`int;` has no children; declarators
   are comma-separated, in order). `spec` is one or more words
   (`unsigned int`, `const char`, `long long`), space-joined.
-- `initdecl(name)`: `[pointer?, size?, init?]` — `pointer` (no children)
-  when the declarator has one `*`, `size` for an array declarator
-  (`name[N]`, the size expression), then the initializer. A second `*`
-  is a parse error, as is an array initializer (`= {…}`).
+- `initdecl(name)`: `[pointer?, (size | unsized)?, init?]` —
+  `pointer` (no children) when the declarator has one `*`, `size`
+  for an array declarator (`name[N]`, the size expression) or
+  `unsized` for `name[]` (sized only by a string initializer),
+  then the initializer. A second `*` is a parse error, as is a
+  braced array initializer (`= {…}`); a string literal may
+  initialize an array.
 - `compound`: block items in order. `exprstmt`: `[expr]`. `empty`: none.
 - `if`: `[cond, then]`; `ifelse`: `[cond, then, else]`.
 - `switch`: `[expr, body]`; `while`: `[cond, body]`.

@@ -34,6 +34,9 @@ pub struct InitDecl {
     pub pointer: bool,
     /// Array size expression for `name[N]`; `None` for scalars.
     pub array_len: Option<Expr>,
+    /// `true` for an unsized declarator (`name[]`); only a string
+    /// initializer may size it.
+    pub array_unsized: bool,
     pub init: Option<Expr>,
 }
 
@@ -212,6 +215,11 @@ fn dump_decl(d: &Decl, out: &mut Vec<u8>) {
         if let Some(len) = &init.array_len {
             out.push(b' ');
             dump_expr(len, out);
+        }
+        if init.array_unsized {
+            out.push(b' ');
+            open(out, "unsized");
+            close(out);
         }
         if let Some(e) = &init.init {
             out.push(b' ');

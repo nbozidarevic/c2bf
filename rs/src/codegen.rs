@@ -244,6 +244,24 @@ impl Emitter {
         cell
     }
 
+    /// Materialize a string literal's cooked bytes plus a NUL
+    /// terminator in anonymous, never-reclaimed cells, and return a
+    /// fresh cell holding the base address. The base must fit in a
+    /// byte, like every other address.
+    pub fn string_value(&mut self, cooked: &[u8]) -> Result<i32, CompileError> {
+        let base = self.memory.alloc_anon_array(cooked.len() + 1);
+        if !(0..=255).contains(&base) {
+            return Err(CompileError {
+                msg: "address is outside the addressable range".to_string(),
+            });
+        }
+        for (i, &byte) in cooked.iter().enumerate() {
+            self.set_value(base + i as i32, byte);
+        }
+        self.set_value(base + cooked.len() as i32, 0);
+        Ok(self.const_value(base as u8))
+    }
+
     /// `result = a + b` in a fresh cell (`addValues`).
     pub fn add_values(&mut self, a: i32, b: i32) -> i32 {
         let a_copy = self.duplicate_value(a);
@@ -1026,6 +1044,32 @@ impl Emitter {
     }
 
     /// Read one character into cell `a` (`readAsChar`).
+    /// Print the NUL-terminated string at the tape index held in
+    /// `addr` (`printf %s`). A working copy of the address advances
+    /// through a dispatch load per character; the condition copies
+    /// each loaded character into `ch` before the loop test, so
+    /// the body prints the same character the condition saw. The
+    /// string must be NUL-terminated; reading past the end
+    /// continues into following cells until a zero cell.
+    pub fn print_as_string(&mut self, addr: i32) -> Result<(), CompileError> {
+        let cur = self.duplicate_value(addr);
+        let ch = self.const_value(0);
+        self.perform_while(
+            |em| {
+                let loaded = em.load_through(cur)?;
+                em.copy_value(loaded, ch);
+                Ok(loaded)
+            },
+            |em| {
+                em.print_as_char(ch);
+                let one = em.const_value(1);
+                let next = em.add_values(cur, one);
+                em.copy_value(next, cur);
+                Ok(())
+            },
+        )
+    }
+
     pub fn read_as_char(&mut self, a: i32) {
         self.move_pointer(a);
         self.emit(",");
