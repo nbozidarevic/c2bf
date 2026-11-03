@@ -1,5 +1,8 @@
 #include <stdio.h>
 
+// Truncation (over-long input into t) is a defined deviation
+// pinned by unit tests, not by this oracle fixture: in C it is
+// buffer overflow, and g++ prints past the array instead.
 int main() {
   char s[8] = "";
   char t[4] = "";
