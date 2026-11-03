@@ -1,0 +1,59 @@
+name: probe-alloc
+
+# TEMPORARY: measure allocated vs touched cells for single-construct
+# probe programs, to attribute the untouched-cell gap before any
+# allocator change. Removed once attribution is done.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build bench
+        run: cargo build --release --manifest-path rs/Cargo.toml
+
+      - name: Write probes and bench them
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/probes
+          write_probe() {
+            printf '#include <stdio.h>\nint main() { %s }\n' "$2" > "/tmp/probes/$1.c"
+            : > "/tmp/probes/$1.in"
+          }
+          write_probe baseline 'printf("%d\n", 1);'
+          write_probe div_zero_iter 'printf("%d\n", 3/7);'
+          write_probe div_many 'printf("%d\n", 100/7);'
+          write_probe mod_zero_iter 'printf("%d\n", 3%7);'
+          write_probe cmp_lt 'printf("%d\n", 3<5);'
+          write_probe cmp_ge 'printf("%d\n", 3>=5);'
+          write_probe logic_and 'printf("%d\n", 1&&1);'
+          write_probe logic_and_short 'printf("%d\n", 0&&1);'
+          write_probe logic_or 'printf("%d\n", 0||1);'
+          write_probe negate 'printf("%d\n", !5);'
+          write_probe equal 'printf("%d\n", 3==5);'
+          write_probe if_skipped 'if (0) { printf("%d\n", 100/7); } printf("%d\n", 1);'
+          write_probe if_taken 'if (1) { printf("%d\n", 100/7); } printf("%d\n", 1);'
+          write_probe while_zero 'while (0) { printf("%d\n", 100/7); } printf("%d\n", 1);'
+          write_probe while_once 'int x = 1; while (x) { printf("%d\n", 100/7); x = 0; } printf("%d\n", 1);'
+          write_probe ternary_false 'printf("%d\n", 0 ? 10 : 20);'
+          write_probe switch_taken 'switch (2) { case 1: printf("%d\n", 11); break; case 2: printf("%d\n", 22); break; default: printf("%d\n", 33); }'
+          write_probe bitwise_zero 'printf("%d\n", 0 & 0);'
+          write_probe bitwise_full 'printf("%d\n", 255 ^ 255);'
+          write_probe shift_zero 'printf("%d\n", 5 << 0);'
+          ./rs/target/release/c2bf-bench --quick --json /tmp/probes > probes.json
+
+      - name: Upload probe results
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-alloc
+          path: probes.json
+          if-no-files-found: error
