@@ -814,6 +814,91 @@ impl Emitter {
         })
     }
 
+    /// Decrement `cell` by one in place, wrapping like all
+    /// arithmetic. Only used where a fresh result cell would be
+    /// waste; the pointer ends on `cell`, tracked as usual.
+    fn decrement_in_place(&mut self, cell: i32) {
+        self.move_pointer(cell);
+        self.emit("-");
+    }
+
+    /// Load the cell at the tape index held in `addr`, searching
+    /// `cells` in order, into a fresh cell: a subtractive dispatch.
+    /// A copy of the address counts down; each arm runs when the
+    /// counter is zero, then the counter is decremented in place.
+    /// After a match the counter wraps (0 to 255, downward) and
+    /// cannot reach zero again within the remaining arms (at most
+    /// 255 follow a match when `cells` holds at most 256 entries),
+    /// so exactly one arm fires. An address with no arm leaves the
+    /// result zero. The address cell and every target cell are
+    /// preserved; only the result and the counter scratch are
+    /// written. All pointer motion is static, so the tracked
+    /// pointer stays exact throughout.
+    pub fn load_from_cells(
+        &mut self,
+        addr: i32,
+        cells: &[i32],
+    ) -> Result<i32, CompileError> {
+        // The counter wraps after 256 decrements; more arms could
+        // fire twice. All callers pass at most 256 cells (an array
+        // dispatch covers offsets 0..255, a pointer dispatch covers
+        // every byte address).
+        debug_assert!(cells.len() <= 256);
+        let result = self.const_value(0);
+        let counter = self.duplicate_value(addr);
+        for &cell in cells {
+            self.perform_if_else(
+                counter,
+                |_| Ok(()),
+                |em| {
+                    em.copy_value(cell, result);
+                    Ok(())
+                },
+            )?;
+            self.decrement_in_place(counter);
+        }
+        Ok(result)
+    }
+
+    /// Store `value` into the cell at the tape index held in `addr`,
+    /// searching `cells` in order, with the same dispatch as
+    /// [`Emitter::load_from_cells`]. An address with no arm stores
+    /// nowhere. The address and value cells are preserved.
+    pub fn store_to_cells(
+        &mut self,
+        addr: i32,
+        cells: &[i32],
+        value: i32,
+    ) -> Result<(), CompileError> {
+        debug_assert!(cells.len() <= 256);
+        let counter = self.duplicate_value(addr);
+        for &cell in cells {
+            self.perform_if_else(
+                counter,
+                |_| Ok(()),
+                |em| {
+                    em.copy_value(value, cell);
+                    Ok(())
+                },
+            )?;
+            self.decrement_in_place(counter);
+        }
+        Ok(())
+    }
+
+    /// Load the cell at any byte tape index held in `addr`.
+    pub fn load_through(&mut self, addr: i32) -> Result<i32, CompileError> {
+        let cells: Vec<i32> = (0..256).collect();
+        self.load_from_cells(addr, &cells)
+    }
+
+    /// Store `value` into the cell at any byte tape index held in
+    /// `addr`.
+    pub fn store_through(&mut self, addr: i32, value: i32) -> Result<(), CompileError> {
+        let cells: Vec<i32> = (0..256).collect();
+        self.store_to_cells(addr, &cells, value)
+    }
+
     /// Print cell `a` as a character (`printAsChar`).
     pub fn print_as_char(&mut self, a: i32) {
         self.move_pointer(a);
@@ -1192,6 +1277,19 @@ mod tests {
         out[0]
     }
 
+    /// Run the emitter's output, then print each listed cell in
+    /// order and return the printed bytes.
+    fn run_cells(em: &mut Emitter, cells: &[i32]) -> Vec<u8> {
+        for &cell in cells {
+            em.move_pointer(cell);
+            em.emit(".");
+        }
+        let code = em.output().to_vec();
+        let mut out = Vec::new();
+        runner::run(&code, &mut std::io::empty(), &mut out).expect("bf runs");
+        out
+    }
+
     #[test]
     fn bitwise_and_or_xor_values() {
         for (a, b, and, or, xor) in [
@@ -1445,5 +1543,114 @@ mod tests {
                 .expect("bf runs");
             assert_eq!(out, vec![value], "dest {dest} value {value}");
         }
+    }
+
+    #[test]
+    fn load_from_cells_exhaustive() {
+        for addr in [0u8, 1, 2, 3, 4, 5, 255] {
+            for values in [[7u8, 99, 0, 255], [255, 1, 128, 64]] {
+                let mut em = Emitter::new();
+                let targets: Vec<i32> =
+                    values.iter().map(|&v| em.const_value(v)).collect();
+                let sentinel = em.const_value(77);
+                let addr_cell = em.const_value(addr);
+                let result = em.load_from_cells(addr_cell, &targets).unwrap();
+                let mut probe = vec![result, addr_cell, sentinel];
+                probe.extend_from_slice(&targets);
+                let out = run_cells(&mut em, &probe);
+                let want_target = if (addr as usize) < targets.len() {
+                    values[addr as usize]
+                } else {
+                    0
+                };
+                let mut want = vec![want_target, addr, 77];
+                want.extend_from_slice(&values);
+                assert_eq!(out, want, "addr {addr} values {values:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn store_to_cells_exhaustive() {
+        for addr in [0u8, 1, 2, 3, 4, 5, 255] {
+            let mut em = Emitter::new();
+            let targets: Vec<i32> = [11u8, 22, 33, 44]
+                .iter()
+                .map(|&v| em.const_value(v))
+                .collect();
+            let sentinel = em.const_value(77);
+            let value = em.const_value(201);
+            let addr_cell = em.const_value(addr);
+            em.store_to_cells(addr_cell, &targets, value).unwrap();
+            let mut probe = vec![value, addr_cell, sentinel];
+            probe.extend_from_slice(&targets);
+            let out = run_cells(&mut em, &probe);
+            let mut want_values = [11u8, 22, 33, 44];
+            if (addr as usize) < want_values.len() {
+                want_values[addr as usize] = 201;
+            }
+            let mut want = vec![201, addr, 77];
+            want.extend_from_slice(&want_values);
+            assert_eq!(out, want, "addr {addr}");
+        }
+    }
+
+    #[test]
+    fn load_and_store_through_full_range() {
+        // Tape indices are cell indices: burn the low indices so
+        // dispatch temporaries allocate above the setup cells, then
+        // set values by literal index.
+        for addr in [0u8, 3, 7, 200] {
+            let mut em = Emitter::new();
+            for _ in 0..64 {
+                em.memory.temp_cell();
+            }
+            em.set_value(3, 30);
+            em.set_value(7, 70);
+            em.set_value(50, addr);
+            let result = em.load_through(50).unwrap();
+            let out = run_cells(&mut em, &[result, 50, 3, 7]);
+            let want = if addr == 3 {
+                30
+            } else if addr == 7 {
+                70
+            } else {
+                0
+            };
+            assert_eq!(out, vec![want, addr, 30, 70], "load addr {addr}");
+        }
+        for addr in [0u8, 3, 7, 200] {
+            let mut em = Emitter::new();
+            for _ in 0..64 {
+                em.memory.temp_cell();
+            }
+            em.set_value(50, addr);
+            em.set_value(60, 42);
+            em.store_through(50, 60).unwrap();
+            // Probe: addr cell, value cell, target cell, and the
+            // neighbors of cell 200 (for addr 200 they must stay
+            // zero around the stored cell).
+            let out = run_cells(&mut em, &[50, 60, addr as i32, 199, 201]);
+            assert_eq!(out[0], addr, "addr preserved {addr}");
+            assert_eq!(out[1], 42, "value preserved {addr}");
+            assert_eq!(out[2], 42, "stored value at {addr}");
+            if addr == 200 {
+                assert_eq!(out[3], 0, "left neighbor untouched");
+                assert_eq!(out[4], 0, "right neighbor untouched");
+            }
+        }
+    }
+
+    #[test]
+    fn dispatch_with_no_cells_is_noop() {
+        let mut em = Emitter::new();
+        let addr_cell = em.const_value(3);
+        let result = em.load_from_cells(addr_cell, &[]).unwrap();
+        assert_eq!(run_cell(&mut em, result), 0);
+        let mut em = Emitter::new();
+        let addr_cell = em.const_value(3);
+        let value = em.const_value(9);
+        em.store_to_cells(addr_cell, &[], value).unwrap();
+        assert_eq!(run_cell(&mut em, value), 9);
     }
 }
