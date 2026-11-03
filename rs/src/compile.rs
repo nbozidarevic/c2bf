@@ -1585,7 +1585,7 @@ mod tests {
         // dereference, plus *(p++) with its defined order: the store
         // lands at the old address and p still advances.
         let bf = compile(
-            b"int main() { char a[3]; char *p = 0; a[0] = 1; a[1] = 2; a[2] = 3; p = &a[0]; (*p)++; printf(\"%d,\", a[0]); ++*p; printf(\"%d,\", a[0]); *p += 10; printf(\"%d,\", a[0]); *p--; printf(\"%d,\", a[0]); *p++ = 99; printf(\"%d,%d,\", a[0], *p); printf(\"%d\", a[1]); }",
+            b"int main() { char a[3]; char *p = 0; a[0] = 1; a[1] = 2; a[2] = 3; p = &a[0]; (*p)++; printf(\"%d,\", a[0]); ++*p; printf(\"%d,\", a[0]); *p += 10; printf(\"%d,\", a[0]); (*p)--; printf(\"%d,\", a[0]); *p++ = 99; printf(\"%d,%d,\", a[0], *p); printf(\"%d\", a[1]); }",
         )
         .expect("deref store program compiles");
         let mut out = Vec::new();
