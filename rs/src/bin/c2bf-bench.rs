@@ -6,11 +6,17 @@
 //!
 //! Usage (from the repo root):
 //!   c2bf-bench [--quick] [--json | --md | --write docs/perf.md] [root]
+//!   c2bf-bench --footprint <dir>
 //!
 //! Timing is adaptive: each case runs at least 3 iterations and until
 //! ~2s total elapsed (cap 100 iterations), so fast and slow cases both
 //! get stable means. CI runners are shared and noisy: compare numbers
 //! within one run, not across runs. See `docs/perf.md`.
+//!
+//! With `--footprint`, each `*.bf` in the directory runs once with its
+//! `*.in` sibling (empty input if absent) and prints JSON footprint
+//! stats; no timing is done. It exists for backfilling the runtime
+//! footprint of committed golden programs.
 
 use std::env;
 use std::ffi::OsStr;
@@ -51,6 +57,8 @@ fn bench<F: FnMut()>(mut f: F, min_iters: usize, target_ms: u128, cap: usize) ->
 struct Case {
     name: String,
     bf_bytes: usize,
+    cells_alloc: usize,
+    footprint: runner::RunStats,
     compile: Stats,
     run: Stats,
     out_bytes: usize,
@@ -75,12 +83,17 @@ fn bench_corpus(root: &Path, target_ms: u128, cap: usize) -> Vec<Case> {
         eprintln!("benching corpus {stem}");
         let src = fs::read(&cpath).expect("read source");
         let input = fs::read(cpath.with_extension("in")).unwrap_or_default();
-        let bf = compile::compile(&src).expect("compile corpus");
+        let program = compile::compile_program(&src).expect("compile corpus");
+        let bf = program.code;
+        let cells_alloc = program.cells;
         let cstats = bench(|| {
             let _ = compile::compile(&src);
         }, 3, target_ms, cap);
         let mut out = Vec::new();
-        let _ = runner::run(&bf, &mut Cursor::new(input.as_slice()), &mut out);
+        // A failed run keeps the old tolerance (timings still report);
+        // its footprint defaults to zero stats.
+        let footprint = runner::run_with_stats(&bf, &mut Cursor::new(input.as_slice()), &mut out)
+            .unwrap_or_default();
         let out_bytes = out.len();
         let code = bf.clone();
         let rstats = bench(
@@ -95,6 +108,8 @@ fn bench_corpus(root: &Path, target_ms: u128, cap: usize) -> Vec<Case> {
         cases.push(Case {
             name: stem,
             bf_bytes: bf.len(),
+            cells_alloc,
+            footprint,
             compile: cstats,
             run: rstats,
             out_bytes,
@@ -106,6 +121,7 @@ fn bench_corpus(root: &Path, target_ms: u128, cap: usize) -> Vec<Case> {
 struct Micro {
     name: &'static str,
     code: Vec<u8>,
+    footprint: runner::RunStats,
     run: Stats,
     out_bytes: usize,
 }
@@ -145,7 +161,9 @@ fn bench_micros(target_ms: u128, cap: usize) -> Vec<Micro> {
         .map(|(name, code, input)| {
             eprintln!("benching micro {name}");
             let mut out = Vec::new();
-            let _ = runner::run(&code, &mut Cursor::new(input.as_slice()), &mut out);
+            let footprint =
+                runner::run_with_stats(&code, &mut Cursor::new(input.as_slice()), &mut out)
+                    .unwrap_or_default();
             let out_bytes = out.len();
             let run = bench(
                 || {
@@ -159,6 +177,7 @@ fn bench_micros(target_ms: u128, cap: usize) -> Vec<Micro> {
             Micro {
                 name,
                 code,
+                footprint,
                 run,
                 out_bytes,
             }
@@ -173,22 +192,33 @@ fn md_fragment(cases: &[Case], micros: &[Micro]) -> String {
         env::consts::OS,
         env::consts::ARCH
     ));
-    s.push_str("| program | BF bytes | compile mean (ms) | run mean (ms) | run min (ms) | iters | out bytes |\n");
-    s.push_str("|---|---|---|---|---|---|---|\n");
+    s.push_str("| program | BF bytes | cells alloc | cells touched | peak cell | compile mean (ms) | run mean (ms) | run min (ms) | iters | out bytes |\n");
+    s.push_str("|---|---|---|---|---|---|---|---|---|---|\n");
     for c in cases {
         s.push_str(&format!(
-            "| {} | {} | {:.3} | {:.3} | {:.3} | {} | {} |\n",
-            c.name, c.bf_bytes, c.compile.mean_ms, c.run.mean_ms, c.run.min_ms, c.run.iters, c.out_bytes
+            "| {} | {} | {} | {} | {} | {:.3} | {:.3} | {:.3} | {} | {} |\n",
+            c.name,
+            c.bf_bytes,
+            c.cells_alloc,
+            c.footprint.cells_touched,
+            c.footprint.high_water,
+            c.compile.mean_ms,
+            c.run.mean_ms,
+            c.run.min_ms,
+            c.run.iters,
+            c.out_bytes
         ));
     }
     s.push_str("\nRunner microbenchmarks:\n\n");
-    s.push_str("| name | BF bytes | run mean (ms) | run min (ms) | iters | out bytes |\n");
-    s.push_str("|---|---|---|---|---|---|\n");
+    s.push_str("| name | BF bytes | cells touched | peak cell | run mean (ms) | run min (ms) | iters | out bytes |\n");
+    s.push_str("|---|---|---|---|---|---|---|---|\n");
     for m in micros {
         s.push_str(&format!(
-            "| {} | {} | {:.3} | {:.3} | {} | {} |\n",
+            "| {} | {} | {} | {} | {:.3} | {:.3} | {} | {} |\n",
             m.name,
             m.code.len(),
+            m.footprint.cells_touched,
+            m.footprint.high_water,
             m.run.mean_ms,
             m.run.min_ms,
             m.run.iters,
@@ -210,8 +240,18 @@ fn json_report(cases: &[Case], micros: &[Micro]) -> String {
             s.push_str(", ");
         }
         s.push_str(&format!(
-            "{{\"name\": \"{}\", \"bf_bytes\": {}, \"compile_mean_ms\": {:.3}, \"run_mean_ms\": {:.3}, \"run_min_ms\": {:.3}, \"iters\": {}, \"out_bytes\": {}}}",
-            c.name, c.bf_bytes, c.compile.mean_ms, c.run.mean_ms, c.run.min_ms, c.run.iters, c.out_bytes
+            "{{\"name\": \"{}\", \"bf_bytes\": {}, \"cells_alloc\": {}, \"cells_touched\": {}, \"high_water\": {}, \"low_water\": {}, \"compile_mean_ms\": {:.3}, \"run_mean_ms\": {:.3}, \"run_min_ms\": {:.3}, \"iters\": {}, \"out_bytes\": {}}}",
+            c.name,
+            c.bf_bytes,
+            c.cells_alloc,
+            c.footprint.cells_touched,
+            c.footprint.high_water,
+            c.footprint.low_water,
+            c.compile.mean_ms,
+            c.run.mean_ms,
+            c.run.min_ms,
+            c.run.iters,
+            c.out_bytes
         ));
     }
     s.push_str("], \"micros\": [");
@@ -220,9 +260,12 @@ fn json_report(cases: &[Case], micros: &[Micro]) -> String {
             s.push_str(", ");
         }
         s.push_str(&format!(
-            "{{\"name\": \"{}\", \"bf_bytes\": {}, \"run_mean_ms\": {:.3}, \"run_min_ms\": {:.3}, \"iters\": {}, \"out_bytes\": {}}}",
+            "{{\"name\": \"{}\", \"bf_bytes\": {}, \"cells_touched\": {}, \"high_water\": {}, \"low_water\": {}, \"run_mean_ms\": {:.3}, \"run_min_ms\": {:.3}, \"iters\": {}, \"out_bytes\": {}}}",
             m.name,
             m.code.len(),
+            m.footprint.cells_touched,
+            m.footprint.high_water,
+            m.footprint.low_water,
             m.run.mean_ms,
             m.run.min_ms,
             m.run.iters,
@@ -241,26 +284,91 @@ fn table_report(cases: &[Case], micros: &[Micro]) -> String {
         env::consts::ARCH
     ));
     s.push_str("corpus:\n");
-    s.push_str("program          bf_bytes  compile_ms  run_mean_ms  run_min_ms  iters  out\n");
+    s.push_str("program          bf_bytes  cells  touched  peak  compile_ms  run_mean_ms  run_min_ms  iters  out\n");
     for c in cases {
         s.push_str(&format!(
-            "{:<16} {:>8}  {:>10.3}  {:>11.3}  {:>10.3}  {:>5}  {}\n",
-            c.name, c.bf_bytes, c.compile.mean_ms, c.run.mean_ms, c.run.min_ms, c.run.iters, c.out_bytes
+            "{:<16} {:>8}  {:>6}  {:>7}  {:>5}  {:>10.3}  {:>11.3}  {:>10.3}  {:>5}  {}\n",
+            c.name,
+            c.bf_bytes,
+            c.cells_alloc,
+            c.footprint.cells_touched,
+            c.footprint.high_water,
+            c.compile.mean_ms,
+            c.run.mean_ms,
+            c.run.min_ms,
+            c.run.iters,
+            c.out_bytes
         ));
     }
     s.push_str("\nmicros:\n");
-    s.push_str("name             bf_bytes  run_mean_ms  run_min_ms  iters  out\n");
+    s.push_str("name             bf_bytes  touched  peak  run_mean_ms  run_min_ms  iters  out\n");
     for m in micros {
         s.push_str(&format!(
-            "{:<16} {:>8}  {:>11.3}  {:>10.3}  {:>5}  {}\n",
+            "{:<16} {:>8}  {:>7}  {:>5}  {:>11.3}  {:>10.3}  {:>5}  {}\n",
             m.name,
             m.code.len(),
+            m.footprint.cells_touched,
+            m.footprint.high_water,
             m.run.mean_ms,
             m.run.min_ms,
             m.run.iters,
             m.out_bytes
         ));
     }
+    s
+}
+
+fn json_str(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Run each `*.bf` in `dir` once with its `*.in` sibling (empty input
+/// if absent) and report footprint stats as one JSON object. No
+/// timing is done. Entries for programs that error carry
+/// `"ok": false` and an error string instead of stats.
+fn footprint_report(dir: &Path) -> String {
+    let mut paths: Vec<PathBuf> = fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("cannot read {}: {}", dir.display(), e))
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == OsStr::new("bf")))
+        .collect();
+    paths.sort();
+    let mut s = String::new();
+    s.push_str("{\"footprint\": [");
+    for (i, path) in paths.iter().enumerate() {
+        if i > 0 {
+            s.push_str(", ");
+        }
+        let name = path
+            .file_stem()
+            .expect("stem")
+            .to_string_lossy()
+            .into_owned();
+        let code = fs::read(path).expect("read bf");
+        let input = fs::read(path.with_extension("in")).unwrap_or_default();
+        let mut out = Vec::new();
+        match runner::run_with_stats(&code, &mut Cursor::new(input.as_slice()), &mut out) {
+            Ok(stats) => {
+                s.push_str(&format!(
+                    "{{\"name\": {}, \"ok\": true, \"cells_touched\": {}, \"high_water\": {}, \"low_water\": {}, \"out_bytes\": {}}}",
+                    json_str(&name),
+                    stats.cells_touched,
+                    stats.high_water,
+                    stats.low_water,
+                    out.len()
+                ));
+            }
+            Err(e) => {
+                s.push_str(&format!(
+                    "{{\"name\": {}, \"ok\": false, \"error\": {}}}",
+                    json_str(&name),
+                    json_str(e)
+                ));
+            }
+        }
+    }
+    s.push_str("]}\n");
     s
 }
 
@@ -285,6 +393,7 @@ fn main() {
     let mut json = false;
     let mut md = false;
     let mut write: Option<PathBuf> = None;
+    let mut footprint: Option<PathBuf> = None;
     let mut target_ms: u128 = 2000;
     let mut cap: usize = 100;
     let mut args = env::args().skip(1);
@@ -295,6 +404,11 @@ fn main() {
             "--write" => {
                 write = Some(PathBuf::from(
                     args.next().expect("--write needs a path"),
+                ));
+            }
+            "--footprint" => {
+                footprint = Some(PathBuf::from(
+                    args.next().expect("--footprint needs a directory"),
                 ));
             }
             "--quick" => {
@@ -321,6 +435,10 @@ fn main() {
             }
             s => root = PathBuf::from(s),
         }
+    }
+    if let Some(dir) = footprint {
+        print!("{}", footprint_report(&dir));
+        return;
     }
     let cases = bench_corpus(&root, target_ms, cap);
     let micros = bench_micros(target_ms, cap);
