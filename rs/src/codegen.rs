@@ -67,6 +67,12 @@ impl Emitter {
         &self.output
     }
 
+    /// Cells allocated during emission so far (see
+    /// [`Memory::allocated_cells`]).
+    pub fn allocated_cells(&self) -> usize {
+        self.memory.allocated_cells()
+    }
+
     fn emit(&mut self, s: &str) {
         self.output.extend_from_slice(s.as_bytes());
     }

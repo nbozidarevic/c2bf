@@ -56,12 +56,23 @@ fn int_literal_value(text: &[u8]) -> i32 {
     v.clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
 
-/// Parse and compile `src` to Brainfuck plus trailing newline.
+/// A compiled program: Brainfuck code plus the number of tape cells
+/// the compiler allocated for it. Allocation never reuses cells, so
+/// `cells` is the static tape footprint of the program.
+pub struct CompiledProgram {
+    /// Brainfuck code plus trailing newline, as from [`compile`].
+    pub code: Vec<u8>,
+    /// Tape cells allocated during emission.
+    pub cells: usize,
+}
+
+/// Parse and compile `src` to Brainfuck plus trailing newline, and
+/// report the allocated cell count.
 ///
 /// Mirrors `BrainfuckCompiler::run()`: externals compile in source order
 /// and a final newline is appended. Parse failures surface as
 /// `CompileError` carrying the parse diagnostic.
-pub fn compile(src: &[u8]) -> Result<Vec<u8>, CompileError> {
+pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
     let tu = parser::parse(src).map_err(|e| err(e.to_string()))?;
     let mut em = Emitter::new();
     for item in &tu.0 {
@@ -77,9 +88,17 @@ pub fn compile(src: &[u8]) -> Result<Vec<u8>, CompileError> {
             }
         }
     }
-    let mut out = em.output().to_vec();
-    out.push(b'\n');
-    Ok(out)
+    let cells = em.allocated_cells();
+    let mut code = em.output().to_vec();
+    code.push(b'\n');
+    Ok(CompiledProgram { code, cells })
+}
+
+/// Parse and compile `src` to Brainfuck plus trailing newline.
+///
+/// See [`compile_program`] for the allocated cell count.
+pub fn compile(src: &[u8]) -> Result<Vec<u8>, CompileError> {
+    compile_program(src).map(|program| program.code)
 }
 
 struct SwitchCase<'a> {
@@ -888,6 +907,25 @@ fn next_format_arg(vals: &[i32], next: &mut usize) -> Result<i32, CompileError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compile_program_reports_code_and_cells() {
+        let empty = compile_program(b"int main() {}").expect("empty main compiles");
+        assert_eq!(empty.code, compile(b"int main() {}").unwrap());
+        let bigger = compile_program(
+            b"int main() { int x = 0; int y = 0; printf(\"%d\", x + y); }",
+        )
+        .expect("bigger program compiles");
+        assert_eq!(bigger.code, compile(
+            b"int main() { int x = 0; int y = 0; printf(\"%d\", x + y); }",
+        ).unwrap());
+        assert!(bigger.cells > empty.cells);
+        assert_eq!(
+            compile_program(b"int main() {}").unwrap().cells,
+            empty.cells,
+            "allocation is deterministic"
+        );
+    }
 
     #[test]
     fn sizeof_is_one_and_unevaluated() {

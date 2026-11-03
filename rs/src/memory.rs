@@ -27,6 +27,13 @@ impl Memory {
         self.next
     }
 
+    /// Number of cells allocated so far (indices `0..next`).
+    /// The allocator never frees or reuses cells, so this is the
+    /// tape footprint the transpiler reserved for a program.
+    pub fn allocated_cells(&self) -> usize {
+        self.next as usize
+    }
+
     /// Allocate a fresh temporary cell (`getTemporaryCell`).
     pub fn temp_cell(&mut self) -> i32 {
         let cell = self.next;

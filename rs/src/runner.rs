@@ -31,19 +31,46 @@ const TAPE_INIT: usize = 1024;
 const ORIGIN_INIT: i64 = 512;
 
 /// Tape index for `pointer`, growing the tape like `BrainfuckRunner::cell`.
-fn cell_index(tape: &mut Vec<u8>, origin: &mut i64, pointer: i64) -> usize {
+/// `touched` is kept the same length as `tape` and marks every cell
+/// this access visits, so the runner can report its footprint.
+fn cell_index(
+    tape: &mut Vec<u8>,
+    touched: &mut Vec<bool>,
+    origin: &mut i64,
+    pointer: i64,
+) -> usize {
     let index = pointer + *origin;
-    if index < 0 {
+    let i = if index < 0 {
         let need = (-index) as usize;
         tape.splice(0..0, std::iter::repeat(0).take(need));
+        touched.splice(0..0, std::iter::repeat(false).take(need));
         *origin += -index;
         0
     } else if (index as usize) >= tape.len() {
         tape.resize((index as usize) * 2 + 1, 0);
+        touched.resize((index as usize) * 2 + 1, false);
         index as usize
     } else {
         index as usize
-    }
+    };
+    touched[i] = true;
+    i
+}
+
+/// Footprint of a Brainfuck execution (see [`run_with_stats`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RunStats {
+    /// Largest pointer value ever held (`0` if the program never
+    /// moves right of its start).
+    pub high_water: i64,
+    /// Smallest pointer value ever held (`0` if the program never
+    /// moves left of its start; negative only for programs that
+    /// move left, which transpiled programs never do).
+    pub low_water: i64,
+    /// Distinct pointer positions whose cell was accessed by
+    /// `+`, `-`, `,`, `.`, `[`, or `]`. Pure `<`/`>` motion to a
+    /// position that is never accessed does not count.
+    pub cells_touched: usize,
 }
 
 /// Execute `code` (raw bytes; non-commands ignored), reading input and
@@ -56,6 +83,18 @@ pub fn run<R: Read, W: Write>(
     input: &mut R,
     output: &mut W,
 ) -> Result<(), &'static str> {
+    run_with_stats(code, input, output).map(|_| ())
+}
+
+/// Execute `code` like [`run`], reporting the execution footprint.
+///
+/// Stats are returned only on successful completion; on an error
+/// (unbalanced brackets) no stats are reported.
+pub fn run_with_stats<R: Read, W: Write>(
+    code: &[u8],
+    input: &mut R,
+    output: &mut W,
+) -> Result<RunStats, &'static str> {
     let cmds: Vec<u8> = code
         .iter()
         .copied()
@@ -81,8 +120,11 @@ pub fn run<R: Read, W: Write>(
     let mut input = BufReader::with_capacity(8192, input);
     let mut output = BufWriter::new(output);
     let mut tape = vec![0u8; TAPE_INIT];
+    let mut touched = vec![false; TAPE_INIT];
     let mut origin: i64 = ORIGIN_INIT;
     let mut pointer: i64 = 0;
+    let mut high_water: i64 = 0;
+    let mut low_water: i64 = 0;
     let mut depth: usize = 0;
     let mut pc: usize = 0;
     let mut result = Ok(());
@@ -90,19 +132,21 @@ pub fn run<R: Read, W: Write>(
         match cmds[pc] {
             b'<' => {
                 pointer -= 1;
+                low_water = low_water.min(pointer);
                 pc += 1;
             }
             b'>' => {
                 pointer += 1;
+                high_water = high_water.max(pointer);
                 pc += 1;
             }
             b'+' => {
-                let i = cell_index(&mut tape, &mut origin, pointer);
+                let i = cell_index(&mut tape, &mut touched, &mut origin, pointer);
                 tape[i] = tape[i].wrapping_add(1);
                 pc += 1;
             }
             b'-' => {
-                let i = cell_index(&mut tape, &mut origin, pointer);
+                let i = cell_index(&mut tape, &mut touched, &mut origin, pointer);
                 tape[i] = tape[i].wrapping_sub(1);
                 pc += 1;
             }
@@ -111,18 +155,18 @@ pub fn run<R: Read, W: Write>(
                 // `read_exact` retries on Interrupted; EOF or any other
                 // failure leaves the cell unchanged, like `get` failing.
                 if input.read_exact(&mut b).is_ok() {
-                    let i = cell_index(&mut tape, &mut origin, pointer);
+                    let i = cell_index(&mut tape, &mut touched, &mut origin, pointer);
                     tape[i] = b[0];
                 }
                 pc += 1;
             }
             b'.' => {
-                let i = cell_index(&mut tape, &mut origin, pointer);
+                let i = cell_index(&mut tape, &mut touched, &mut origin, pointer);
                 let _ = output.write_all(&tape[i..i + 1]);
                 pc += 1;
             }
             b'[' => {
-                let i = cell_index(&mut tape, &mut origin, pointer);
+                let i = cell_index(&mut tape, &mut touched, &mut origin, pointer);
                 if tape[i] == 0 {
                     let target = jumps[pc];
                     if target == usize::MAX {
@@ -143,7 +187,7 @@ pub fn run<R: Read, W: Write>(
                     break;
                 }
                 depth -= 1;
-                let i = cell_index(&mut tape, &mut origin, pointer);
+                let i = cell_index(&mut tape, &mut touched, &mut origin, pointer);
                 if tape[i] != 0 {
                     pc = target;
                 } else {
@@ -156,8 +200,13 @@ pub fn run<R: Read, W: Write>(
     if result.is_ok() && depth != 0 {
         result = Err(ERR_UNCLOSED_OPEN);
     }
+    let stats = RunStats {
+        high_water,
+        low_water,
+        cells_touched: touched.iter().filter(|&&t| t).count(),
+    };
     let _ = output.flush();
-    result
+    result.map(|_| stats)
 }
 
 #[cfg(test)]
@@ -258,6 +307,54 @@ mod tests {
     #[test]
     fn zero_skip_jumps_nested() {
         assert_eq!(run_str("[[[]]]+.", b"").unwrap(), vec![1]);
+    }
+
+    fn run_stats_str(code: &str, input: &[u8]) -> (Vec<u8>, RunStats) {
+        let mut out = Vec::new();
+        let stats = run_with_stats(code.as_bytes(), &mut Cursor::new(input), &mut out)
+            .expect("bf runs");
+        (out, stats)
+    }
+
+    #[test]
+    fn stats_track_pointer_range_and_touched() {
+        let (out, stats) = run_stats_str("++.", b"");
+        assert_eq!(out, vec![2]);
+        assert_eq!(
+            stats,
+            RunStats { high_water: 0, low_water: 0, cells_touched: 1 }
+        );
+        let (out, stats) = run_stats_str(">>+++<+.", b"");
+        assert_eq!(out, vec![1]);
+        assert_eq!(
+            stats,
+            RunStats { high_water: 2, low_water: 0, cells_touched: 2 }
+        );
+        let (out, stats) = run_stats_str("<+>.", b"");
+        assert_eq!(out, vec![0]);
+        assert_eq!(
+            stats,
+            RunStats { high_water: 0, low_water: -1, cells_touched: 2 }
+        );
+        let (out, stats) = run_stats_str("++[>++<-]>.", b"");
+        assert_eq!(out, vec![4]);
+        assert_eq!(
+            stats,
+            RunStats { high_water: 1, low_water: 0, cells_touched: 2 }
+        );
+        // Pure motion to a never-accessed cell moves the water mark
+        // without counting the cell as touched.
+        let (_, stats) = run_stats_str(">>><<.", b"");
+        assert_eq!(
+            stats,
+            RunStats { high_water: 3, low_water: 0, cells_touched: 1 }
+        );
+    }
+
+    #[test]
+    fn stats_error_reports_no_stats() {
+        let mut out = Vec::new();
+        assert!(run_with_stats(b"+.]", &mut Cursor::new(b""), &mut out).is_err());
     }
 
     #[test]
