@@ -138,6 +138,14 @@ MILESTONES = [
         "BF bytes shrink corpus-wide from shorter pointer motion; "
         "hello_world byte-identical.",
     ),
+    (
+        "412a09b663d85ddc12c49274c2ac9e58e8debabc",
+        "Arrays and pointers",
+        "Constant-index arrays resolve to static cells; variable "
+        "indices and dereference load/store through a subtractive "
+        "dispatch (one arm per cell). Pointers add ~2.95M BF bytes; "
+        "static code is unchanged.",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
