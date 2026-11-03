@@ -1291,10 +1291,12 @@ mod tests {
             .unwrap();
         assert_eq!(em.allocated_cells(), after_one);
         // while: a zero-iteration loop's condition/body temps are
-        // reclaimed, so the high-water mark is unchanged.
+        // reclaimed, so the next free index is unchanged (the
+        // high-water mark still records the indices the loop's
+        // emitted code visits while it runs).
         let mut em = Emitter::new();
         let counter = em.const_value(0);
-        let before = em.allocated_cells();
+        let before = em.checkpoint();
         em.perform_while(
             |em| {
                 let one = em.const_value(1);
@@ -1306,7 +1308,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(em.allocated_cells(), before);
+        assert_eq!(em.checkpoint(), before);
         // Values written through reused indices still execute
         // correctly: two sequential branches write distinct
         // pre-allocated cells.

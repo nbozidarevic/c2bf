@@ -150,13 +150,15 @@ mod tests {
     }
 
     #[test]
-    fn release_with_stale_checkpoint_never_grows() {
+    fn release_clamps_out_of_range_checkpoints() {
         let mut m = Memory::new();
         assert_eq!(m.temp_cell(), 0);
+        // A future checkpoint never grows `next` again.
         m.release_temps(99);
         assert_eq!(m.peek_temp_cell(), 1);
+        // A checkpoint below the floor clamps to the floor (0 here).
         m.release_temps(-5);
-        assert_eq!(m.peek_temp_cell(), 1);
+        assert_eq!(m.peek_temp_cell(), 0);
     }
 
     #[test]
