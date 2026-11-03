@@ -1092,7 +1092,7 @@ mod tests {
         // A character literal is a constant index too (same raw-slice
         // value rule as a character in value position).
         let bf = compile(
-            b"int main() { char a[120]; a['x'] = 7; printf(\"%d\", a['x']); }",
+            b"int main() { char a[121]; a['x'] = 7; printf(\"%d\", a['x']); }",
         )
         .expect("char-index program compiles");
         let mut out = Vec::new();
