@@ -47,5 +47,22 @@
 10:18 char '!'
 10:21 punct )
 10:22 punct ;
-11:1 punct }
-12:1 end
+11:3 ident scanf
+11:8 punct (
+11:9 string %d
+11:13 punct ,
+11:15 punct &
+11:16 ident a
+11:17 punct )
+11:18 punct ;
+12:3 ident printf
+12:9 punct (
+12:10 string ,%d\n
+12:17 punct ,
+12:19 ident a
+12:21 punct +
+12:23 int 5
+12:24 punct )
+12:25 punct ;
+13:1 punct }
+14:1 end
