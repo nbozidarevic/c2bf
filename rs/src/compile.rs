@@ -928,6 +928,27 @@ mod tests {
     }
 
     #[test]
+    fn variables_survive_temp_reclaim() {
+        // A variable declared inside an if branch keeps its cell
+        // when later code allocates temporaries in the reclaimed
+        // range around it.
+        let bf = compile(
+            b"int main() { int x = 0; if (1) { int y = 7; x = y; } printf(\"%d\", x); }",
+        )
+        .expect("branch-var program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"7");
+        let bf = compile(
+            b"int main() { if (1) { int y = 7; printf(\"%d\", y); } printf(\"%d\", 3); }",
+        )
+        .expect("branch-var program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"73");
+    }
+
+    #[test]
     fn sizeof_is_one_and_unevaluated() {
         // sizeof(x + 1) is 1 here although C says 4 (int type); the
         // operand is never compiled, so x++ has no side effect.

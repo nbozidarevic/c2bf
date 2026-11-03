@@ -73,6 +73,18 @@ impl Emitter {
         self.memory.allocated_cells()
     }
 
+    /// Allocation checkpoint for scoped temporary reclaim (see
+    /// [`Memory::checkpoint`]).
+    pub fn checkpoint(&self) -> i32 {
+        self.memory.checkpoint()
+    }
+
+    /// Reclaim temporaries allocated since `checkpoint` (see
+    /// [`Memory::release_temps`]).
+    pub fn release_temps(&mut self, checkpoint: i32) {
+        self.memory.release_temps(checkpoint);
+    }
+
     fn emit(&mut self, s: &str) {
         self.output.extend_from_slice(s.as_bytes());
     }
@@ -720,12 +732,18 @@ impl Emitter {
     }
 
     /// If/else on `expression` (`performIfElse`).
+    ///
+    /// Temporaries allocated inside (guard cells, branch temps) are
+    /// reclaimed afterwards: values only flow out through cells
+    /// allocated before the call or through variables, which the
+    /// reclaim never touches.
     pub fn perform_if_else(
         &mut self,
         expression: i32,
         mut iff: impl FnMut(&mut Self) -> Result<(), CompileError>,
         mut els: impl FnMut(&mut Self) -> Result<(), CompileError>,
     ) -> Result<(), CompileError> {
+        let checkpoint = self.checkpoint();
         let if_value = self.duplicate_value(expression);
         let else_value = self.const_value(1);
         self.move_pointer(if_value);
@@ -741,15 +759,22 @@ impl Emitter {
         els(self)?;
         self.move_pointer(else_value);
         self.emit("]");
+        self.release_temps(checkpoint);
         Ok(())
     }
 
     /// While loop, re-evaluating `cond` every iteration (`performWhile`).
+    ///
+    /// Like [`Emitter::perform_if_else`], temporaries allocated for
+    /// the condition and body evaluations are reclaimed afterwards:
+    /// counters, results, and flags live in cells allocated before
+    /// the loop, and variables are never reclaimed.
     pub fn perform_while(
         &mut self,
         mut cond: impl FnMut(&mut Self) -> Result<i32, CompileError>,
         mut body: impl FnMut(&mut Self) -> Result<(), CompileError>,
     ) -> Result<(), CompileError> {
+        let checkpoint = self.checkpoint();
         let expression = cond(self)?;
         self.move_pointer(expression);
         self.emit("[");
@@ -759,6 +784,7 @@ impl Emitter {
         self.move_value(new_expression, expression);
         self.move_pointer(expression);
         self.emit("]");
+        self.release_temps(checkpoint);
         Ok(())
     }
 
@@ -1249,6 +1275,67 @@ mod tests {
             em.halve_in_place(ca).unwrap();
             assert_eq!(run_cell(&mut em, ca), a / 2, "halve {a}");
         }
+    }
+
+    #[test]
+    fn branch_and_loop_temps_are_reclaimed() {
+        // if/else: the second region reuses the first region's indices.
+        let mut em = Emitter::new();
+        let cond = em.const_value(1);
+        let before = em.allocated_cells();
+        em.perform_if_else(cond, |em| { em.const_value(7); Ok(()) }, |_| Ok(()))
+            .unwrap();
+        let after_one = em.allocated_cells();
+        assert!(after_one > before);
+        em.perform_if_else(cond, |em| { em.const_value(7); Ok(()) }, |_| Ok(()))
+            .unwrap();
+        assert_eq!(em.allocated_cells(), after_one);
+        // while: a zero-iteration loop's condition/body temps are
+        // reclaimed, so the high-water mark is unchanged.
+        let mut em = Emitter::new();
+        let counter = em.const_value(0);
+        let before = em.allocated_cells();
+        em.perform_while(
+            |em| Ok(em.greater_than_or_equal(counter, em.const_value(1))?),
+            |em| {
+                em.const_value(9);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(em.allocated_cells(), before);
+        // Values written through reused indices still execute
+        // correctly: two sequential branches write distinct
+        // pre-allocated cells.
+        let build = |which: u8| {
+            let mut em = Emitter::new();
+            let cond = em.const_value(1);
+            let r1 = em.const_value(0);
+            let r2 = em.const_value(0);
+            em.perform_if_else(
+                cond,
+                |em| {
+                    em.set_value(r1, 5);
+                    Ok(())
+                },
+                |_| Ok(()),
+            )
+            .unwrap();
+            em.perform_if_else(
+                cond,
+                |em| {
+                    em.set_value(r2, 6);
+                    Ok(())
+                },
+                |_| Ok(()),
+            )
+            .unwrap();
+            (em, if which == 1 { r1 } else { r2 })
+        };
+        let (mut em, cell) = build(1);
+        assert_eq!(run_cell(&mut em, cell), 5);
+        let (mut em, cell) = build(2);
+        assert_eq!(run_cell(&mut em, cell), 6);
     }
 
     #[test]
