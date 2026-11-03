@@ -97,6 +97,13 @@ below keep the pre-rename names as history.
   `accumulate_bit`), replacing the general multiply/add/scale
   steps. `bitwise` 2,038,802 -> 2,013,207 BF bytes, `bitassign`
   621,887 -> 610,311; runtime flat in the sampled runs.
+- Scoped temp reclaim: `perform_if_else`/`perform_while` hand
+  out again the temporaries allocated inside (never below the
+  largest variable cell; a high-water mark keeps the tape
+  footprint honest). `bitwise` 2,013,207 -> 508,390 BF bytes
+  on 632 cells (was 13,327), `bitassign` 610,311 -> 138,613
+  bytes on 196 cells, `logic` on 215 cells (was 5,846);
+  `hello_world` byte-identical. `docs/perf.md` refreshed.
 
 ## Phase 5 — Performance
 
