@@ -143,3 +143,38 @@ replaces the old value, chained macros expand, and a macro expanding
 to itself yields one plain identifier. Function-like macros are an
 error. Every other `#` line (including `#include`) is skipped, as
 before; there is no conditional compilation or file inclusion.
+
+## Functions
+
+User-defined functions are supported by inline expansion: there is
+no call stack and no return address, and the body is emitted at each
+call site.
+
+- Definitions may appear in any order; calls may refer to functions
+  defined later in the file. Duplicate definitions and duplicate
+  parameter names are compile errors. A definition without `main`
+  is valid but emits nothing unless called. `printf` and `scanf`
+  keep their built-in meanings and cannot be redefined.
+- Parameters are values, except pointer (`*`) and array (`[]`/`[N]`)
+  parameters, which receive an address. Array parameters decay to
+  pointers, and the size is discarded. Arguments evaluate
+  left-to-right into temporaries before any parameter is bound.
+  A wrong number of arguments is a compile error.
+- Recursion, direct or mutual, is a compile error: a function on
+  the expansion stack may not be called again. (An uncalled
+  recursive function is never expanded, so it compiles.)
+- `return` sets the result and skips the rest of the callee at
+  runtime, including loop re-entry, the `for` update, and later
+  `switch` cases. Falling off the end returns the last returned
+  value, or zero if `return` never ran. A bare `return;` sets no
+  value; a value returned from a `void` function is ignored, and
+  a `void` call used as a value yields zero. `return` in `main`
+  stays a no-op, as before: the operand is not compiled.
+- No prototypes or forward declarations, no function pointers, no
+  arrays or pointers returned by value beyond the byte model.
+- Declarations are lexically scoped: a declaration in a nested
+  block shadows an outer one (each gets its own cells), while a
+  redeclaration in the same block is the same declaration the
+  emitter always diagnosed (for example, array size mismatch).
+  A body-top-level declaration shadows a parameter of the same
+  name; whether GCC agrees is unverified.

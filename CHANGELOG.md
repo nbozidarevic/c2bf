@@ -133,6 +133,14 @@ below keep the pre-rename names as history.
   duplicate parameter names are rejected, and a lone definition
   without `main` is valid but emits nothing. Calls do not expand
   yet. The `non_main.c` error fixture is retired.
+- Functions, inline expansion: calls expand the scope-renamed
+  body at the call site under a fresh `returned` flag and result
+  cell, with arguments evaluated left-to-right before binding,
+  pointer/array parameters receiving addresses, and `return`
+  gating the rest of the callee (including loop re-entry, the
+  `for` update, and later `switch` cases). Recursion and wrong
+  argument counts are compile errors. Pinned by the `functions`
+  oracle fixture and `function_*` compile-error fixtures.
 - Strings: string-literal array initializers (sized and unsized
   `char a[] = "…"`, bytes plus zero fill), string literals in
   value position decaying to anonymous NUL-terminated storage,

@@ -869,22 +869,28 @@ impl Emitter {
     }
 
     fn compile_block(&mut self, b: &Block) -> Result<(), CompileError> {
-        // Once a sibling may have executed `break` or `continue`, the rest
-        // of the block must be skipped at runtime (a bare flag checked only
+        // Once a sibling may have executed `break`, `continue`, or
+        // (inside a function expansion) `return`, the rest of the
+        // block must be skipped at runtime (a bare flag checked only
         // by the loop condition would let them run once more).
         let mut after_break = false;
         let mut after_continue = false;
+        let mut after_return = false;
         for item in &b.0 {
             match item {
                 BlockItem::Decl(d) => {
-                    if after_break || after_continue {
+                    if after_return {
+                        self.compile_decl_return_guarded(d)?
+                    } else if after_break || after_continue {
                         self.compile_decl_guarded(d)?
                     } else {
                         self.compile_decl(d)?
                     }
                 }
                 BlockItem::Stmt(s) => {
-                    if after_break || after_continue {
+                    if after_return {
+                        self.compile_stmt_return_guarded(s)?
+                    } else if after_break || after_continue {
                         self.compile_stmt_guarded(s)?
                     } else {
                         self.compile_stmt(s)?
@@ -894,6 +900,12 @@ impl Emitter {
                     }
                     if stmt_may_continue(s) {
                         after_continue = true;
+                    }
+                    // `return` in `main` is a no-op, so it gates
+                    // nothing; inside an expansion it gates the rest
+                    // of the block.
+                    if self.return_context.is_some() && stmt_may_return(s) {
+                        after_return = true;
                     }
                 }
             }
@@ -1013,6 +1025,48 @@ impl Emitter {
         }
     }
 
+    /// Condition `c` additionally gated on the innermost function
+    /// not having returned (identity outside an expansion, and in
+    /// `main`, which has no return context).
+    fn and_not_returned(&mut self, c: i32) -> Result<i32, CompileError> {
+        match self.return_context {
+            Some((flag, _)) => {
+                let nr = self.negate(flag)?;
+                self.logical_and(c, nr)
+            }
+            None => Ok(c),
+        }
+    }
+
+    /// Run `f` at runtime only if the innermost function (if any) has
+    /// not returned. Outside an expansion `f` runs unconditionally.
+    fn unless_returned(
+        &mut self,
+        mut f: impl FnMut(&mut Self) -> Result<(), CompileError>,
+    ) -> Result<(), CompileError> {
+        match self.return_context {
+            Some((flag, _)) => {
+                let nr = self.negate(flag)?;
+                self.perform_if_else(nr, |em| f(em), |_| Ok(()))
+            }
+            None => f(self),
+        }
+    }
+
+    /// Like `compile_stmt_guarded`, additionally skipped at runtime
+    /// once the innermost function has returned (statements after a
+    /// potential `return` in the same block). The return guard is the
+    /// outer layer, so a returned function skips the statement
+    /// outright instead of consulting the loop flags.
+    fn compile_stmt_return_guarded(&mut self, s: &Stmt) -> Result<(), CompileError> {
+        self.unless_returned(|em| em.compile_stmt_guarded(s))
+    }
+
+    /// Like `compile_decl_guarded`, additionally return-guarded.
+    fn compile_decl_return_guarded(&mut self, d: &Decl) -> Result<(), CompileError> {
+        self.unless_returned(|em| em.compile_decl_guarded(d))
+    }
+
     /// Clear the `continued` flag at the start of a loop-body execution,
     /// then compile the body. Clearing here (rather than after the body)
     /// is what makes `continue` skip the rest of the body but still run
@@ -1054,7 +1108,8 @@ impl Emitter {
                 let r = self.perform_while(
                     |em| {
                         let c = em.compile_expr(cond)?;
-                        em.and_not_broken(c, broken)
+                        let c = em.and_not_broken(c, broken)?;
+                        em.and_not_returned(c)
                     },
                     |em| em.compile_loop_body(body, continued),
                 );
@@ -1068,7 +1123,8 @@ impl Emitter {
                 let r = self.perform_do_while(
                     |em| {
                         let c = em.compile_expr(cond)?;
-                        em.and_not_broken(c, broken)
+                        let c = em.and_not_broken(c, broken)?;
+                        em.and_not_returned(c)
                     },
                     |em| em.compile_loop_body(body, continued),
                 );
@@ -1086,26 +1142,31 @@ impl Emitter {
                             Some(e) => em.compile_expr(e),
                             None => Ok(em.const_value(1)),
                         }?;
-                        em.and_not_broken(c, broken)
+                        let c = em.and_not_broken(c, broken)?;
+                        em.and_not_returned(c)
                     },
                     |em| {
-                        // `break` skips the update: run it only if not broken.
-                        if let Some(b) = broken {
-                            let nb = em.negate(b)?;
-                            em.perform_if_else(
-                                nb,
-                                |em| match incr {
+                        // `return` skips the update, as `break` does:
+                        // run it only if the function has not returned.
+                        em.unless_returned(|em| {
+                            // `break` skips the update: run it only if not broken.
+                            if let Some(b) = broken {
+                                let nb = em.negate(b)?;
+                                em.perform_if_else(
+                                    nb,
+                                    |em| match incr {
+                                        Some(e) => em.compile_expr(e).map(|_| ()),
+                                        None => Ok(()),
+                                    },
+                                    |_| Ok(()),
+                                )
+                            } else {
+                                match incr {
                                     Some(e) => em.compile_expr(e).map(|_| ()),
                                     None => Ok(()),
-                                },
-                                |_| Ok(()),
-                            )
-                        } else {
-                            match incr {
-                                Some(e) => em.compile_expr(e).map(|_| ()),
-                                None => Ok(()),
+                                }
                             }
-                        }
+                        })
                     },
                     |em| em.compile_loop_body(body, continued),
                 );
@@ -1113,8 +1174,21 @@ impl Emitter {
                 self.break_stack.pop();
                 r
             }
-            // Return values are ignored: the C++ never compiles the operand.
-            Stmt::Return(_) => Ok(()),
+            // In `main` return values are ignored: the C++ never
+            // compiles the operand. Inside a function expansion the
+            // operand is the result and the returned flag skips the
+            // rest of the body at runtime (see `compile_block`).
+            Stmt::Return(e) => {
+                let Some((returned, result)) = self.return_context else {
+                    return Ok(());
+                };
+                if let Some(e) = e {
+                    let v = self.compile_expr(e)?;
+                    self.copy_value(v, result);
+                }
+                self.set_value(returned, 1);
+                Ok(())
+            }
             Stmt::Break => {
                 let Some(&top) = self.break_stack.last() else {
                     return Err(err("Unsupported break outside of any loop or switch"));
@@ -1213,27 +1287,34 @@ impl Emitter {
             // A `continue` in a case binds the enclosing loop: later
             // cases must not run (fallthrough is cut) and the loop's
             // `continued` flag stays set until the next body execution.
+            // A `return` in a case likewise cuts later cases.
             let run_cond = self.and_not_continued(run_cond)?;
+            let run_cond = self.and_not_returned(run_cond)?;
             self.perform_if_else(
                 run_cond,
                 |em| {
                     em.set_value(fall, 1);
                     // Same sibling rule as blocks: statements after a
-                    // potential `break` or `continue` in this case are
-                    // flag-guarded.
+                    // potential `break`, `continue`, or `return` in
+                    // this case are flag-guarded.
                     let mut after_break = false;
                     let mut after_continue = false;
+                    let mut after_return = false;
                     for item in &c.body {
                         match item {
                             SwitchBodyItem::Decl(d) => {
-                                if after_break || after_continue {
+                                if after_return {
+                                    em.compile_decl_return_guarded(d)?
+                                } else if after_break || after_continue {
                                     em.compile_decl_guarded(d)?
                                 } else {
                                     em.compile_decl(d)?
                                 }
                             }
                             SwitchBodyItem::Stmt(s) => {
-                                if after_break || after_continue {
+                                if after_return {
+                                    em.compile_stmt_return_guarded(s)?
+                                } else if after_break || after_continue {
                                     em.compile_stmt_guarded(s)?
                                 } else {
                                     em.compile_stmt(s)?
@@ -1243,6 +1324,9 @@ impl Emitter {
                                 }
                                 if stmt_may_continue(s) {
                                     after_continue = true;
+                                }
+                                if em.return_context.is_some() && stmt_may_return(s) {
+                                    after_return = true;
                                 }
                             }
                         }
@@ -1620,6 +1704,14 @@ impl Emitter {
             Expr::Ident(name) => name.as_slice(),
             _ => return Err(err("Unsupported postfix expression")),
         };
+        if self.functions.contains_key(name) {
+            let def = Rc::clone(
+                self.functions
+                    .get(name)
+                    .expect("registered function is present"),
+            );
+            return self.expand_call(name, &def, args);
+        }
         let is_printf = match name {
             b"printf" => true,
             b"scanf" => false,
@@ -1710,6 +1802,65 @@ impl Emitter {
         // drop it. Zero is a dummy for the unreachable use-as-value spot.
         Ok(0)
     }
+
+    /// Inline-expand a call to a user-defined function: evaluate the
+    /// arguments left-to-right (as for `printf`/`scanf` here; GCC
+    /// leaves the order unspecified), bind them to fresh cells for
+    /// the scope-renamed parameters, and compile the renamed body
+    /// under a fresh `returned` flag and result cell. Returns the
+    /// result cell; a `void` call leaves it zero, and a bare
+    /// `return;` leaves whatever value was last returned (zero for a
+    /// fresh cell).
+    ///
+    /// There is no call stack and no return address: the body is
+    /// emitted at the call site, so a function may not call itself,
+    /// directly or through other functions. `break`/`continue`
+    /// stacks and the return context are saved and restored around
+    /// the expansion, so a loop or `return` inside the body binds
+    /// to the callee, never to the caller.
+    fn expand_call(
+        &mut self,
+        name: &[u8],
+        def: &ExpandedFunction,
+        args: &[Expr],
+    ) -> Result<i32, CompileError> {
+        if self.expanding.iter().any(|n| n.as_slice() == name) {
+            return Err(err(format!(
+                "recursive call to function '{}' is not supported",
+                String::from_utf8_lossy(name)
+            )));
+        }
+        if args.len() != def.params.len() {
+            return Err(err(format!(
+                "wrong number of arguments to function '{}'",
+                String::from_utf8_lossy(name)
+            )));
+        }
+        let returned = self.const_value(0);
+        let result = self.const_value(0);
+        let mut arg_cells = Vec::with_capacity(args.len());
+        for arg in args {
+            arg_cells.push(self.compile_expr(arg)?);
+        }
+        for (param, &arg) in def.params.iter().zip(arg_cells.iter()) {
+            let cell = self.memory.var_cell(&param.name);
+            if param.pointer || param.array {
+                self.memory.mark_pointer(&param.name);
+            }
+            self.copy_value(arg, cell);
+        }
+        let saved_break = std::mem::take(&mut self.break_stack);
+        let saved_continue = std::mem::take(&mut self.continue_stack);
+        let saved_return = self.return_context.replace((returned, result));
+        self.expanding.push(name.to_vec());
+        let compiled = self.compile_block(&def.body);
+        self.expanding.pop();
+        self.break_stack = saved_break;
+        self.continue_stack = saved_continue;
+        self.return_context = saved_return;
+        compiled?;
+        Ok(result)
+    }
 }
 
 /// Whether `s` may execute a `break` bound to the *innermost enclosing*
@@ -1758,6 +1909,35 @@ fn stmt_may_continue(s: &Stmt) -> bool {
         Stmt::While { .. } | Stmt::DoWhile { .. } | Stmt::For { .. } => false,
         _ => false,
     }
+}
+
+/// Whether `s` may execute a `return`. Unlike `break`/`continue`,
+/// a `return` is never bound by an enclosing loop or `switch`: it
+/// always belongs to the innermost function, so bodies of loops and
+/// switches propagate it.
+fn stmt_may_return(s: &Stmt) -> bool {
+    match s {
+        Stmt::Return(_) => true,
+        Stmt::Compound(b) => block_may_return(b),
+        Stmt::If { then, els, .. } => {
+            stmt_may_return(then) || els.as_ref().is_some_and(|e| stmt_may_return(e))
+        }
+        Stmt::Switch { body, .. }
+        | Stmt::While { body, .. }
+        | Stmt::DoWhile { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::Case { body, .. }
+        | Stmt::Default { body }
+        | Stmt::GotoLabel { body, .. } => stmt_may_return(body),
+        _ => false,
+    }
+}
+
+fn block_may_return(b: &Block) -> bool {
+    b.0.iter().any(|it| match it {
+        BlockItem::Stmt(s) => stmt_may_return(s),
+        BlockItem::Decl(_) => false,
+    })
 }
 
 fn next_format_arg(vals: &[i32], next: &mut usize) -> Result<i32, CompileError> {
@@ -1870,6 +2050,161 @@ mod tests {
             "unexpected error: {}",
             err.msg
         );
+    }
+
+    #[test]
+    fn inline_two_calls_identity() {
+        // Sequential calls rebind the parameter cell; a call to a
+        // function defined after `main` works (forward reference).
+        let bf = compile(
+            b"int main() { printf(\"%d,%d\", id(3), id(4)); } int id(int x) { return x; }",
+        )
+        .expect("forward-call program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"3,4");
+    }
+
+    #[test]
+    fn inline_value_call_nested() {
+        let bf = compile(
+            b"int add(int a, int b) { return a + b; } int quad(int x) { int y = dbl(x); return dbl(y); } int dbl(int x) { return x * 2; } int main() { printf(\"%d,%d\", add(add(1, 2), add(3, 4)), quad(3)); }",
+        )
+        .expect("nested-call program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"10,12");
+    }
+
+    #[test]
+    fn inline_invalid_args() {
+        for (src, want) in [
+            (
+                b"int f(int a) { return a; } int main() { return f(1, 2); }".as_slice(),
+                "wrong number of arguments to function 'f'",
+            ),
+            (
+                b"int f(int a, int b) { return a; } int main() { return f(1); }".as_slice(),
+                "wrong number of arguments to function 'f'",
+            ),
+            (
+                b"int f(int a) { return f(a); } int main() { return f(1); }".as_slice(),
+                "recursive call to function 'f' is not supported",
+            ),
+            (
+                b"int f(int a) { return g(a); } int g(int a) { return f(a); } int main() { return f(1); }".as_slice(),
+                "recursive call to function 'f' is not supported",
+            ),
+        ] {
+            assert_eq!(compile(src).unwrap_err().msg, want, "for {:?}", src);
+        }
+    }
+
+    #[test]
+    fn return_in_loop_exits_and_falls_through() {
+        // Without the loop-condition gate the second program would
+        // run the loop to completion and return 99 instead of 2.
+        let bf = compile(
+            b"int first(int n) { int i = 0; while (i < 10) { if (i == n) { return i * 2; } i++; } return 99; } int main() { printf(\"%d,%d\", first(3), first(20)); }",
+        )
+        .expect("return-in-loop program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"6,99");
+        let bf = compile(
+            b"int f() { int i = 0; int c = 0; while (i < 3) { c = c + 1; if (c == 2) { return c; } i = i + 1; } return 99; } int main() { printf(\"%d\", f()); }",
+        )
+        .expect("re-entry program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"2");
+    }
+
+    #[test]
+    fn return_in_switch_cuts_later_cases() {
+        let bf = compile(
+            b"int pick(int s) { switch (s) { case 1: return 10; case 2: return 20; default: return 30; } } int main() { printf(\"%d,%d,%d\", pick(1), pick(2), pick(9)); }",
+        )
+        .expect("return-in-switch program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"10,20,30");
+    }
+
+    #[test]
+    fn return_skips_following_statements() {
+        let bf = compile(
+            b"int f(int x) { if (x) { return 1; } printf(\"BAD\"); return 2; } int main() { printf(\"%d,\", f(1)); printf(\"%d\", f(0)); }",
+        )
+        .expect("return-guard program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"1,BAD2");
+    }
+
+    #[test]
+    fn void_calls_and_bare_return() {
+        let bf = compile(
+            b"void greet() { printf(\"hi\"); return; } int main() { greet(); printf(\"!\"); }",
+        )
+        .expect("void program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"hi!");
+        // A void call used as a value yields zero; a value returned
+        // from a void function is ignored.
+        let bf = compile(
+            b"void greet() { printf(\"hi\"); return 5; } int main() { printf(\"%d,\", greet()); printf(\"done\"); }",
+        )
+        .expect("void-value program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"hi0,done");
+    }
+
+    #[test]
+    fn pointer_and_array_params() {
+        let bf = compile(
+            b"int bump(int *p) { *p = *p + 1; return *p; } int main() { int x = 5; int b = bump(&x); printf(\"%d,%d\", b, x); }",
+        )
+        .expect("pointer-param program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"6,6");
+        let bf = compile(
+            b"int sum(int a[], int n) { int s = 0; int i = 0; while (i < n) { s = s + a[i]; i++; } return s; } int main() { int arr[4]; arr[0] = 1; arr[1] = 2; arr[2] = 3; arr[3] = 4; printf(\"%d\", sum(arr, 4)); }",
+        )
+        .expect("array-param program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"10");
+    }
+
+    #[test]
+    fn arguments_evaluate_before_binding() {
+        // Arguments evaluate left-to-right into temporaries before
+        // any parameter is bound, so an argument that assigns a
+        // variable cannot leak into an earlier parameter.
+        let bf = compile(
+            b"int f(int a, int b) { return a; } int main() { int x = 7; int r = f(x, x = 9); printf(\"%d,%d\", r, x); }",
+        )
+        .expect("aliasing program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"7,9");
+    }
+
+    #[test]
+    fn body_local_shadows_parameter() {
+        // A declaration at the top of the body shadows the parameter
+        // of the same name inside its block.
+        let bf = compile(
+            b"int f(int x) { int x = 5; return x; } int main() { printf(\"%d\", f(9)); }",
+        )
+        .expect("shadowing-param program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"5");
     }
 
     #[test]
