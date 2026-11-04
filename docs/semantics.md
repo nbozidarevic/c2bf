@@ -2,8 +2,8 @@
 
 Ground-truth behavior for the transpiler, taken from the Master's thesis
 (`Varijacije`, `Okruženje`, `Sintaksa`, `Testiranje interpretera` chapters).
-Where the implementation deviates from the thesis, the deviation is listed as
-fix-or-pin work for Phase 1.
+Where the implementation deliberately deviates from the thesis or from C,
+the deviation is stated here as defined behavior, pinned by tests.
 
 ## Tape and cells
 
@@ -19,10 +19,12 @@ fix-or-pin work for Phase 1.
   `(char)` of a value at or above 128 still differs from g++ on
   signed-`char` platforms (`(char)250` prints `-6` there, `250`
   here); see the signedness deviation below.
-- `sizeof` is always `1`, since every type is one byte here. This
-  differs from C for `int` (4) and for expressions of `int` type;
-  only `char`-typed uses agree with the g++ oracle, as pinned by
-  the `sizeof` fixture. The operand is unevaluated, as in C.
+- `sizeof` is `1` for scalar operands, since every type is one byte
+  here. This differs from C for `int` (4) and for expressions of
+  `int` type; only `char`-typed uses agree with the g++ oracle, as
+  pinned by the `sizeof` fixture. The exceptions are arrays
+  (element count, below) and string literals (bytes plus the NUL).
+  The operand is unevaluated, as in C.
 - Bitwise `& | ^` operate on bytes bit by bit. `<<` doubles and
   `>>` halves (logical, unsigned), once per unit of the count;
   counts of eight or more give zero. Shift counts at or above the
@@ -57,15 +59,15 @@ fix-or-pin work for Phase 1.
   NUL-terminated (an unterminated array reads on into following
   cells, as in C). `scanf` `%s` reads a whitespace-delimited
   string; into an array it truncates (see below), through a
-  pointer it writes unbounded, as in C. Only
-  constant indices are supported so far; a constant index outside
-  `0..N-1` is a compile error, and a variable index is rejected.
-  `sizeof` an array is its element count (unlike the always-`1`
-  rule for other operands). Variable indices are also supported:
-  `a[i]` loads through a dispatch over the array's range (offsets
-  `0..255` only), and an out-of-range variable index loads zero
-  and stores nowhere — defined here, undefined in C, so the
-  fallback is pinned by unit tests, not by the oracle.
+  pointer it writes unbounded, as in C.
+  Constant indices resolve at compile time: a constant index
+  outside `0..N-1` is a compile error. Variable indices are also
+  supported: `a[i]` loads through a dispatch over the array's
+  range (offsets `0..255` only), and an out-of-range variable
+  index loads zero and stores nowhere — defined here, undefined
+  in C, so the fallback is pinned by unit tests, not by the
+  oracle. `sizeof` an array is its element count (unlike the `1`
+  rule for scalar operands).
 - Pointers: there are no pointer types; a pointer is a byte
   holding a tape index. `&x` is the index of `x`'s cell, `*p`
   loads or stores the cell at the index `p` holds (a dispatch
@@ -83,8 +85,9 @@ fix-or-pin work for Phase 1.
   a subscript's index expression is evaluated before the
   right-hand side; for compound assignment it is evaluated
   after it, as for the other compound forms.
-- Only `char` variables are supported; anything wider needs multi-cell
-  representation (deferred to language expansion).
+- Every value is a single byte; there is no wider or aggregate
+  representation yet (multi-byte integers and structs are deferred
+  to language expansion).
 - Integer literals may be decimal, octal, hex, or binary, with `u`/`l`
   suffixes; values truncate mod 256 like all arithmetic, and 8/9 in an
   octal literal is an error, as in g++.
@@ -121,32 +124,35 @@ fix-or-pin work for Phase 1.
   terminating whitespace is consumed, not pushed back: `%c`
   after `%s` reads the character after the delimiter, unlike
   C. Pinned by the `scanfstr` oracle fixture and unit tests.
-- The thesis specifies addressable memory for any integer index (its reference
-  interpreter uses `map<int, char>`), i.e. negative indices are legal.
-- The original Brainfuck spec defines a minimum of 30,000 cells; transpiled
-  programs need many temporaries, so in practice far more are required.
 
 ## Execution
 
-- All cells start at `0`; the pointer starts at cell `0`.
+- All cells start at `0`; the pointer starts at cell `0`. The tape
+  grows as needed in both directions (the thesis reference
+  interpreter addresses any integer index via `map<int, char>`,
+  including negative ones). The tape starts at 1024 cells, so the
+  30,000-cell minimum in the original Brainfuck spec never binds.
 - `[` skips forward to the matching `]` when the current cell is `0`;
-  `]` jumps back to the matching `[` (unconditionally — the cell is re-tested
-  at `[`, so loop-exit means "current cell is `0`", not "`> 0`").
-- `,` reads one character as its ASCII value; `.` writes the current cell as
-  the character with that ASCII value. All other characters in BF source are
-  ignored (comments must avoid `.` and `,`).
+  `]` jumps back to the matching `[` when the current cell is not
+  `0` (the cell is re-tested at `[`, so loop-exit means "current
+  cell is `0`", not "`> 0`"). Unmatched brackets are runtime
+  errors, reported in execution order, with partial output kept.
+- `,` reads one character as its ASCII value; at end of input the
+  cell is left unchanged. `.` writes the current cell as the
+  character with that ASCII value. All other characters in BF
+  source are ignored (comments must avoid `.` and `,`).
 
-## Known implementation deviations (Phase 1 work)
+## Known implementation deviations
 
-1. `BrainfuckRunner` uses a fixed `char memory[65536]` with `pointer = 0`:
-   negative indices are out-of-bounds (spec: legal), indices past 65535 are
-   out-of-bounds (spec: legal).
-2. `char` signedness is platform-defined; wrap behavior at 127/128 therefore
-   differs from the specified 0–255 wrapping on platforms with signed `char`.
-3. `LOOP_END` resumes the loop while `memory[pointer] > 0`; the spec means
-   `!= 0`, which differs once cells can hold negative values.
-4. End-of-input (`, ` at EOF) and division-by-zero behavior are unspecified;
-   Phase 1 pins and tests them against oracle-defined expectations.
+None remain at the runner level: the Rust runner matches the spec
+on tape growth (unbounded both ways), end-of-input (cell
+unchanged), and the loop test (`!= 0`). The retired C++ runner
+differed on all three (fixed 65536-cell tape, `> 0` loop test);
+those deviations were not mirrored in the port. The deviations
+that remain are source-language ones, stated as defined behavior
+in "Tape and cells" above: division/modulo by zero, `scanf` sign
+and `%s` handling, wrapping single-byte arithmetic, and the
+`sizeof` exceptions.
 
 ## Port notes (retired C++ behaviors)
 
@@ -159,7 +165,7 @@ slice 5f; documented, not mirrored):
    observable output to match.
 2. A missing/unopenable code file spins forever in C++ (`BrainfuckReader`
    only breaks on `eof()`, which a failed-open stream never reports).
-   The Rust CLIs treat it as an empty program instead.
+   The Rust CLI reports `Cannot open code file '...'.` instead.
 
 ## Source language
 
