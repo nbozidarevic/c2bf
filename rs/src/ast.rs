@@ -15,7 +15,7 @@ pub enum External {
     Decl(Decl),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnParam {
     pub name: Vec<u8>,
     /// `true` for a single-`*` pointer parameter.
