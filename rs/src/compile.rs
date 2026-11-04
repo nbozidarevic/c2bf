@@ -2283,7 +2283,7 @@ mod tests {
         crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
         assert_eq!(out, b"42,hi 7");
         let bf = compile(
-            b"int f(unsigned); int f(int a) { return a + 1; } int main() { printf(\"%d\", f(1)); }",
+            b"int f(unsigned int); int f(int a) { return a + 1; } int main() { printf(\"%d\", f(1)); }",
         )
         .expect("spelling-variant prototype compiles");
         let mut out = Vec::new();
