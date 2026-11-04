@@ -15,7 +15,9 @@ const SAMPLES = {
     input: "",
   },
   loop: {
-    src: "int main() {\n  int n, s, i;\n  scanf(\"%d\", &n);\n  s = 0;\n  i = 1;\n  while (i <= n) {\n    s += i;\n    i++;\n  }\n  printf(\"%d\\n\", s);\n}\n",
+    // Bare declarators (`int n;`) are rejected: every declaration
+    // needs an initializer.
+    src: "int main() {\n  int n = 0;\n  int s = 0;\n  int i = 1;\n  scanf(\"%d\", &n);\n  while (i <= n) {\n    s += i;\n    i++;\n  }\n  printf(\"%d\\n\", s);\n}\n",
     input: "5\n",
   },
   strings: {
@@ -27,7 +29,7 @@ const SAMPLES = {
     input: "",
   },
   pointers: {
-    src: "int main() {\n  int x;\n  int *p;\n  x = 41;\n  p = &x;\n  *p = *p + 1;\n  printf(\"%d\\n\", x);\n}\n",
+    src: "int main() {\n  int x = 41;\n  int *p = &x;\n  *p = *p + 1;\n  printf(\"%d\\n\", x);\n}\n",
     input: "",
   },
 };

@@ -22,7 +22,7 @@ assert.match(version(), /^\d+\.\d+\.\d+$/, "version looks like semver");
 const samples = [
   { src: 'int main() { printf("%d\\n", 6 * 7); }', input: "", out: [52, 50, 10] },
   {
-    src: "int main() { int n, s, i; scanf(\"%d\", &n); s = 0; i = 1; while (i <= n) { s += i; i++; } printf(\"%d\\n\", s); }",
+    src: "int main() { int n = 0; int s = 0; int i = 1; scanf(\"%d\", &n); while (i <= n) { s += i; i++; } printf(\"%d\\n\", s); }",
     input: "5\n",
     out: [49, 53, 10],
   },
@@ -37,7 +37,7 @@ const samples = [
     out: [56, 49, 10],
   },
   {
-    src: "int main() { int x; int *p; x = 41; p = &x; *p = *p + 1; printf(\"%d\\n\", x); }",
+    src: "int main() { int x = 41; int *p = &x; *p = *p + 1; printf(\"%d\\n\", x); }",
     input: "",
     out: [52, 50, 10],
   },
