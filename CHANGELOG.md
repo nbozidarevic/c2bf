@@ -197,6 +197,11 @@ below keep the pre-rename names as history.
   calling a prototyped-but-undefined function is a compile
   error. Pinned by the `prototypes` oracle fixture and the
   `function_prototype_*` error fixtures.
+- CLI: `check` validates source by compiling it fully and emits
+  nothing (exit code 0 means valid); `compile -s`/`--stats`
+  prints one `BF bytes: N, cells: M` line to stderr, keeping
+  stdout pure Brainfuck. Pinned by CLI golden cases and unit
+  tests.
 
 ## Phase 5 — Performance
 

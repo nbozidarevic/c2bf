@@ -8,6 +8,7 @@ comes from stdin (`run` requires a file).
 
 Commands:
   compile    Transpile C source to Brainfuck (the default command)
+  check      Validate C source without emitting Brainfuck
   run        Run a Brainfuck program
   format     Pretty-print Brainfuck (-m minifies)
   help       Show this help
@@ -17,3 +18,4 @@ Options:
   -o file    Output file (default stdout)
   -i file    Input file for run (default stdin)
   -m         Minify (format only)
+  -s, --stats  Print BF bytes and cells to stderr (compile only)

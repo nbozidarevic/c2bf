@@ -6,8 +6,8 @@
 //! - The code file is positional or `-c`; output is `-o` (stdout by
 //!   default); run input is `-i` (stdin by default). Without a code
 //!   file, `compile`/`format` read stdin; `run` requires a file.
-//! - `-i` only exists for `run`, `-m` only affects `format`; anything
-//!   else unknown is ignored.
+//! - `-i` only exists for `run`, `-m` only affects `format`, `-s`/
+//!   `--stats` only affects `compile`; anything else unknown is ignored.
 //! - Errors go to stderr with usage, exit 1. Unopenable files are
 //!   errors (the retired C++ CLI spun forever on missing code and
 //!   silently discarded missing input/output — not mirrored).
@@ -21,7 +21,7 @@ use std::process::exit;
 
 use crate::{compile, format, runner};
 
-pub const USAGE: &str = "Usage: c2bf [command] [file] [options]\n\nCompiles by default: `c2bf program.c -o program.bf` transpiles\nprogram.c. Without -o, output goes to stdout; without a file, input\ncomes from stdin (`run` requires a file).\n\nCommands:\n  compile    Transpile C source to Brainfuck (the default command)\n  run        Run a Brainfuck program\n  format     Pretty-print Brainfuck (-m minifies)\n  help       Show this help\n\nOptions:\n  -c file    Code file (same as the positional file)\n  -o file    Output file (default stdout)\n  -i file    Input file for run (default stdin)\n  -m         Minify (format only)\n";
+pub const USAGE: &str = "Usage: c2bf [command] [file] [options]\n\nCompiles by default: `c2bf program.c -o program.bf` transpiles\nprogram.c. Without -o, output goes to stdout; without a file, input\ncomes from stdin (`run` requires a file).\n\nCommands:\n  compile    Transpile C source to Brainfuck (the default command)\n  check      Validate C source without emitting Brainfuck\n  run        Run a Brainfuck program\n  format     Pretty-print Brainfuck (-m minifies)\n  help       Show this help\n\nOptions:\n  -c file    Code file (same as the positional file)\n  -o file    Output file (default stdout)\n  -i file    Input file for run (default stdin)\n  -m         Minify (format only)\n  -s, --stats  Print BF bytes and cells to stderr (compile only)\n";
 
 pub const HEADER: &str = "c2bf \u{2013} C-to-Brainfuck transpiler\n\n";
 
@@ -32,6 +32,7 @@ pub struct Params {
     pub input: Option<String>,
     pub output: Option<String>,
     pub minify: bool,
+    pub stats: bool,
 }
 
 impl Params {
@@ -44,9 +45,9 @@ impl Params {
 }
 
 /// Parse flags for `command`: `-c`/`-o` consume the next arg (missing
-/// value is an error), `-i` only exists for `run`, `-m` is recorded for
-/// every command, bare args are collected as positional files, anything
-/// else is ignored.
+/// value is an error), `-i` only exists for `run`, `-m` and `-s`/
+/// `--stats` are recorded for every command, bare args are collected
+/// as positional files, anything else is ignored.
 pub fn parse_params(command: &str, args: &[String]) -> Result<Params, &'static str> {
     let mut p = Params {
         code: None,
@@ -54,6 +55,7 @@ pub fn parse_params(command: &str, args: &[String]) -> Result<Params, &'static s
         input: None,
         output: None,
         minify: false,
+        stats: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -83,6 +85,7 @@ pub fn parse_params(command: &str, args: &[String]) -> Result<Params, &'static s
                 }
             }
             "-m" => p.minify = true,
+            "-s" | "--stats" => p.stats = true,
             s if s.starts_with('-') => {}
             s => p.positional.push(s.to_string()),
         }
@@ -152,14 +155,33 @@ pub fn open_output(path: Option<&str>) -> Result<Box<dyn Write>, String> {
     }
 }
 
+/// The `--stats` line: emitted Brainfuck bytes (including the
+/// trailing newline the compiler appends) and allocated cells.
+pub fn stats_line(bytes: usize, cells: usize) -> String {
+    format!("BF bytes: {}, cells: {}", bytes, cells)
+}
+
 /// `compile`: C-subset source to Brainfuck. Returns the error message
-/// on failure (the caller reports it with usage).
+/// on failure (the caller reports it with usage). With `--stats`, one
+/// stats line goes to stderr so stdout stays pure Brainfuck.
 pub fn cmd_compile(p: &Params) -> Result<(), String> {
     let src = read_code(p.code_file())?;
-    let bf = compile::compile(&src).map_err(|e| e.to_string())?;
+    let program = compile::compile_program(&src).map_err(|e| e.to_string())?;
+    if p.stats {
+        eprintln!("{}", stats_line(program.code.len(), program.cells));
+    }
     let mut out = open_output(p.output.as_deref())?;
-    let _ = out.write_all(&bf);
+    let _ = out.write_all(&program.code);
     let _ = out.flush();
+    Ok(())
+}
+
+/// `check`: validate C-subset source by compiling it fully (parse and
+/// code generation, so every compile error is caught) and discarding
+/// the output. Success prints nothing; exit code 0 means valid.
+pub fn cmd_check(p: &Params) -> Result<(), String> {
+    let src = read_code(p.code_file())?;
+    compile::compile(&src).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -190,4 +212,35 @@ pub fn cmd_format(p: &Params) -> Result<(), String> {
     format::format(&src, &mut out, p.minify);
     let _ = out.flush();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn stats_flags_parse() {
+        assert!(parse_params("compile", &args(&["-s"])).unwrap().stats);
+        assert!(
+            parse_params("compile", &args(&["--stats"]))
+                .unwrap()
+                .stats
+        );
+        assert!(!parse_params("compile", &args(&[])).unwrap().stats);
+    }
+
+    #[test]
+    fn stats_line_format() {
+        assert_eq!(stats_line(597, 14), "BF bytes: 597, cells: 14");
+    }
+
+    #[test]
+    fn usage_mentions_check_and_stats() {
+        assert!(USAGE.contains("check"));
+        assert!(USAGE.contains("--stats"));
+    }
 }

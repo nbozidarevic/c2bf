@@ -245,6 +245,12 @@ jobs:
           t "format-missing-code" 1 "$F format -c /nonexistent-xyz"
           t "compile-missing-code" 1 "$F compile -c /nonexistent-xyz"
           t "compile-bare-missing" 1 "$F /nonexistent-xyz"
+          t "check-ok" 0 "$F check -c tests/compile/hello_world.c"
+          t "check-bad" 1 "$F check -c tests/differential/compile_errors/function_prototype_undefined.c"
+          t "check-c-missing" 1 "$F check -c"
+          timeout 60 $F compile -c tests/compile/hello_world.c --stats -o /tmp/st.bf 2>/tmp/st.txt || { echo "FAILED: stats"; fail=1; }
+          grep -q '^BF bytes: [0-9]*, cells: [0-9]*$' /tmp/st.txt || { echo "DIFFERS: stats"; fail=1; }
+          cmp -s /tmp/st.bf tests/golden/bf/hello_world.bf || { echo "DIFFERS: stats output"; fail=1; }
           timeout 60 $F run -c tests/run/nested.bf -i tests/run/nested.in -o /tmp/c.o || { echo "FAILED: run-to-file"; fail=1; }
           cmp -s /tmp/c.o tests/run/nested.out || { echo "DIFFERS: run-to-file"; fail=1; }
           timeout 60 $F format -c tests/format/squares.in -o /tmp/c.of || { echo "FAILED: format-to-file"; fail=1; }

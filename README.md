@@ -15,15 +15,17 @@ to stdout; without a code file, source is read from stdin.
 ## Commands
 
 ```
-compile [file] [-o file]        Transpile C source to Brainfuck (default)
+compile [file] [-o file] [-s]  Transpile C source to Brainfuck (default)
+check [file]                   Validate source, emitting nothing
 run [file] [-i file] [-o file]  Run a Brainfuck program
 format [file] [-o file] [-m]    Pretty-print Brainfuck (-m minifies)
 help                            Show help
 ```
 
 The code file may also be given as `-c file`. `run` requires a code
-file; `compile` and `format` fall back to stdin. Errors go to stderr
-with usage; exit code is 1.
+file; `compile`, `check`, and `format` fall back to stdin. Errors go
+to stderr with usage; exit code is 1. `compile -s` (or `--stats`)
+prints one `BF bytes: N, cells: M` line to stderr.
 
 Run a transpiled program, feeding it input:
 
