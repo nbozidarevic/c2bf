@@ -4,11 +4,50 @@ import init, { compile, run, version } from "./pkg/c2bf_wasm.js";
 
 const srcEl = document.getElementById("src");
 const inputEl = document.getElementById("input");
+const sampleEl = document.getElementById("sample");
+
+// Sample programs, one per supported feature area. The sources are
+// duplicated in rs/wasm/smoke.cjs, which asserts each one transpiles
+// and runs to its expected output; keep the two copies in sync.
+const SAMPLES = {
+  arithmetic: {
+    src: "int main() {\n  printf(\"%d\\n\", 6 * 7);\n}\n",
+    input: "",
+  },
+  loop: {
+    src: "int main() {\n  int n, s, i;\n  scanf(\"%d\", &n);\n  s = 0;\n  i = 1;\n  while (i <= n) {\n    s += i;\n    i++;\n  }\n  printf(\"%d\\n\", s);\n}\n",
+    input: "5\n",
+  },
+  strings: {
+    src: "int main() {\n  char s[6] = \"hello\";\n  printf(\"%s, %s!\\n\", s, \"world\");\n}\n",
+    input: "",
+  },
+  functions: {
+    src: "int square(int x) {\n  return x * x;\n}\n\nint main() {\n  printf(\"%d\\n\", square(9));\n}\n",
+    input: "",
+  },
+  pointers: {
+    src: "int main() {\n  int x;\n  int *p;\n  x = 41;\n  p = &x;\n  *p = *p + 1;\n  printf(\"%d\\n\", x);\n}\n",
+    input: "",
+  },
+};
+
+function loadSample() {
+  const sample = SAMPLES[sampleEl.value];
+  srcEl.value = sample.src;
+  inputEl.value = sample.input;
+  bfEl.textContent = "(nothing transpiled yet)";
+  outEl.textContent = "(nothing run yet)";
+}
+
+sampleEl.addEventListener("change", loadSample);
 const bfEl = document.getElementById("bf");
 const outEl = document.getElementById("out");
 const statusEl = document.getElementById("status");
 const compileBtn = document.getElementById("compile");
 const runBtn = document.getElementById("run");
+
+loadSample();
 
 const decoder = new TextDecoder();
 

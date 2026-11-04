@@ -41,6 +41,25 @@ node rs/wasm/smoke.cjs /tmp/c2bf-node-pkg
 
 Both builds and the smoke test run in the `wasm` CI job.
 
+## Build stability
+
+`wasm-pack` is pinned to `v0.15.1` in CI (`ci.yml`, `pages.yml`):
+the install action resolves "latest" nondeterministically (both
+v0.9.1 and v0.15.1 were installed on different runs), and the
+`wasm-opt` step then failed intermittently on the emitted module
+with `Only 1 table definition allowed in MVP` (bundled binaryen
+too old for the `wasm-bindgen` 0.2.130 output). `wasm-opt` is
+therefore disabled in `Cargo.toml` (`[package.metadata.wasm-pack.
+profile.release]`); the demo needs no binaryen optimization. Bump
+the pin deliberately and watch the `wasm` job, rather than letting
+the action float. (A one-off `EXDEV` rename failure while the
+action installed into `~/.cargo/bin` also occurred; it resolved on
+the next run and is treated as a transient installer flake.)
+
+The demo page's sample programs live in `demo/demo.js` and are
+duplicated in `smoke.cjs`, which asserts each one transpiles and
+runs to its expected output; keep the two copies in sync.
+
 ## No npm publishing
 
 No npm package will be published for `c2bf` (owner decision,

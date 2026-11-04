@@ -316,8 +316,13 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      # Pinned: the action resolves "latest" nondeterministically
+      # (v0.9.1 and v0.15.1 were both installed on different runs),
+      # and wasm-opt's bundled binaryen once failed on this module.
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: "v0.15.1"
 
       - name: Unit tests
         run: cargo test --manifest-path rs/wasm/Cargo.toml

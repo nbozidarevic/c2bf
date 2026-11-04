@@ -5,6 +5,19 @@ until the rename to `c2bf` (below); they are `0.1.0` from that
 point, matching tag `v0.1.0`. Entries below are grouped by the
 roadmap phases that produced them.
 
+## Unreleased (towards v0.2.0)
+
+- CLI: `check` command validates C source without emitting
+  Brainfuck; `compile -s`/`--stats` prints one
+  `BF bytes: N, cells: M` line to stderr while stdout stays pure
+  Brainfuck.
+- Demo: sample selector (arithmetic, loop + `scanf`, strings,
+  functions, pointers); every sample is asserted in the Node WASM
+  smoke test.
+- WASM build stability: `wasm-pack` pinned to `v0.15.1` in CI and
+  `wasm-opt` disabled, after nondeterministic "latest" resolution
+  and an intermittent binaryen parse failure.
+
 ## Rename to `c2bf` (Phase 8)
 
 The project was renamed from `freud` to `c2bf` in a single sweep, per

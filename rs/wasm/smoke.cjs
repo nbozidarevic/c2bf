@@ -16,13 +16,40 @@ const { compile, run, format_code, version } = require(path.join(dir, "c2bf_wasm
 
 assert.match(version(), /^\d+\.\d+\.\d+$/, "version looks like semver");
 
-const bf = compile('int main() { printf("%d\\n", 6 * 7); }');
-assert.equal(typeof bf, "string");
-assert.ok(bf.endsWith("\n"), "compile output ends with newline");
-
-const out = run(bf, new Uint8Array(0));
-assert.ok(out instanceof Uint8Array, "run returns bytes");
-assert.deepEqual(Array.from(out), [52, 50, 10], 'run prints "42\\n"');
+// The demo page samples (demo/demo.js SAMPLES), duplicated here so
+// CI proves each one transpiles and runs to its expected output.
+// Keep the two copies in sync.
+const samples = [
+  { src: 'int main() { printf("%d\\n", 6 * 7); }', input: "", out: [52, 50, 10] },
+  {
+    src: "int main() { int n, s, i; scanf(\"%d\", &n); s = 0; i = 1; while (i <= n) { s += i; i++; } printf(\"%d\\n\", s); }",
+    input: "5\n",
+    out: [49, 53, 10],
+  },
+  {
+    src: 'int main() { char s[6] = "hello"; printf("%s, %s!\\n", s, "world"); }',
+    input: "",
+    out: [104, 101, 108, 108, 111, 44, 32, 119, 111, 114, 108, 100, 33, 10],
+  },
+  {
+    src: "int square(int x) { return x * x; } int main() { printf(\"%d\\n\", square(9)); }",
+    input: "",
+    out: [56, 49, 10],
+  },
+  {
+    src: "int main() { int x; int *p; x = 41; p = &x; *p = *p + 1; printf(\"%d\\n\", x); }",
+    input: "",
+    out: [52, 50, 10],
+  },
+];
+for (const sample of samples) {
+  const bf = compile(sample.src);
+  assert.equal(typeof bf, "string");
+  assert.ok(bf.endsWith("\n"), "compile output ends with newline");
+  const out = run(bf, Buffer.from(sample.input));
+  assert.ok(out instanceof Uint8Array, "run returns bytes");
+  assert.deepEqual(Array.from(out), sample.out, `sample prints ${JSON.stringify(sample.out)}`);
+}
 
 assert.throws(
   () => compile("int main( {"),

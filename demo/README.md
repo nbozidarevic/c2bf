@@ -14,5 +14,10 @@ and also on manual dispatch.
 wasm-pack build rs/wasm --target web --out-dir "$PWD/demo/pkg"
 ```
 
+The page offers sample programs (arithmetic, loop + `scanf`,
+strings, functions, pointers) from `demo.js`; the same programs
+are asserted in `rs/wasm/smoke.cjs`, which the `wasm` CI job runs
+against the Node build.
+
 Run the smoke-tested behavior in Node instead with the `nodejs`
 target; see `rs/wasm/README.md`.
