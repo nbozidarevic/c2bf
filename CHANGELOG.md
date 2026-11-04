@@ -21,6 +21,10 @@ roadmap phases that produced them.
   every empty-else site (logic/comparison helpers, guards,
   division, `%s`/`scanf` checks), saving 507,064 BF bytes
   (-4.4%) across the corpus with no fixture growing.
+- Codegen: the `bitwise_fold` early-exit test uses a guard
+  (`negate` + `logical_and`) instead of a multiply, saving
+  2,584 BF bytes on the bitwise fixtures with the rest
+  byte-identical.
 
 ## Rename to `c2bf` (Phase 8)
 

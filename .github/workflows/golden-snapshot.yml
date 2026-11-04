@@ -1,0 +1,43 @@
+# Temporary golden snapshot: regenerate BF goldens with the
+# landed codegen and upload them as an artifact. Never merged
+# as a standing workflow; removed after the snapshot is
+# committed.
+name: golden-snapshot
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release --manifest-path rs/Cargo.toml
+
+      - name: Regenerate BF goldens
+        working-directory: tests
+        run: |
+          BFC=../rs/target/release/bfcompile
+          for f in compile/*.c; do
+            n=${f%.c}; n=${n#compile/}
+            "$BFC" "$f" > "golden/bf/$n.bf"
+          done
+          for f in differential/micro/*.c; do
+            n=${f%.c}; n=${n#differential/micro/}
+            "$BFC" "$f" > "golden/bf/micro_$n.bf"
+          done
+          wc -c golden/bf/*.bf | tail -3
+
+      - name: Upload BF goldens
+        uses: actions/upload-artifact@v4
+        with:
+          name: bf-goldens
+          path: tests/golden/bf/
