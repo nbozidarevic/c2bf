@@ -48,6 +48,7 @@ How the emitted Brainfuck size (bytes) for each golden fixture changed across no
 | Single-dispatch printf %s | `bd5e7b9` | 43 | 10132051 | -1397568 | print_as_string pays the 256-arm dispatch once per site via a hand-rolled do-while loop instead of once per character. strings shrinks 3,036,947 -> 1,639,379 BF bytes (-1,397,568); every other fixture is byte-identical, and allocated cells and runtime footprint are unchanged. |
 | Hand-rolled dispatch arms | `5e92b4d` | 43 | 10077408 | -54643 | Dispatch arms keep the perform_if_else branch shape but share one set of guard cells per dispatch (reclaimed afterwards) and emit the copy loop directly. pointers, strings, functions, and the two order probes shrink by 54,643 BF bytes in total; every other fixture is byte-identical, allocated cells are unchanged, and the runtime footprint shrinks by one cell on the two order probes only. |
 | scanf %s | `91f9161` | 44 | 11463548 | +0 | Whitespace-delimited string input, truncating into arrays and unbounded through pointers. Adds the scanfstr fixture (1,386,140 BF bytes on 219 cells, each input character paying a dispatch store); every other fixture is byte-identical, and allocated cells and runtime footprint are unchanged. |
+| Function prototypes | `961773d` | 45 | 11835130 | +0 | File-scope prototypes with optional parameter names, checked against definitions and earlier prototypes; a prototype alone emits nothing. Adds the prototypes fixture (371,582 BF bytes on 121 cells); every other fixture is byte-identical, and allocated cells and runtime footprint are unchanged. |
 
 ## Sizes by fixture
 
@@ -1120,6 +1121,58 @@ Whitespace-delimited string input, truncating into arrays and unbounded through 
 | `typespec` | 87040 | +0 |
 | `unary` | 93455 | +0 |
 
+### Function prototypes (`961773d`)
+
+File-scope prototypes with optional parameter names, checked against definitions and earlier prototypes; a prototype alone emits nothing. Adds the prototypes fixture (371,582 BF bytes on 121 cells); every other fixture is byte-identical, and allocated cells and runtime footprint are unchanged.
+
+| Fixture | Bytes | Change vs previous |
+|---|---|---|
+| `addition` | 15493 | +0 |
+| `addsub` | 139838 | +0 |
+| `arrays` | 121233 | +0 |
+| `assign` | 278222 | +0 |
+| `bitassign` | 138613 | +0 |
+| `bitwise` | 508390 | +0 |
+| `branch` | 6242 | +0 |
+| `break` | 173494 | +0 |
+| `casts` | 107759 | +0 |
+| `cmp` | 261219 | +0 |
+| `complex` | 81926 | +0 |
+| `continue` | 233382 | +0 |
+| `define` | 61477 | +0 |
+| `div` | 163254 | +0 |
+| `dowhile` | 142908 | +0 |
+| `fordecl` | 69726 | +0 |
+| `functions` | 817764 | +0 |
+| `hello_world` | 597 | +0 |
+| `io` | 67913 | +0 |
+| `literals` | 138053 | +0 |
+| `logic` | 216689 | +0 |
+| `loop` | 54968 | +0 |
+| `micro_order_arith` | 500 | +0 |
+| `micro_order_assign` | 32 | +0 |
+| `micro_order_bitwise` | 5877 | +0 |
+| `micro_order_case` | 38 | +0 |
+| `micro_order_deref` | 348815 | +0 |
+| `micro_order_eq` | 507 | +0 |
+| `micro_order_index` | 415 | +0 |
+| `micro_order_le` | 1662 | +0 |
+| `micro_order_shift` | 363 | +0 |
+| `mod` | 171942 | +0 |
+| `mul` | 125408 | +0 |
+| `multidecl` | 64485 | +0 |
+| `pointers` | 2955444 | +0 |
+| `printfmt` | 162174 | +0 |
+| `printnum` | 369202 | +0 |
+| `prototypes` | 371582 | — |
+| `scanfstr` | 1386140 | +0 |
+| `sizeof` | 62091 | +0 |
+| `strings` | 1616153 | +0 |
+| `switch` | 39825 | +0 |
+| `ternary` | 172820 | +0 |
+| `typespec` | 87040 | +0 |
+| `unary` | 93455 | +0 |
+
 ## Cells allocated (compiler)
 
 Tape cells the compiler's bump allocator reserved for each program (`Memory::allocated_cells` after compilation). Allocation never reuses cells, so this is the static tape footprint: fewer allocated cells means less tape reserved, whether or not execution ever visits them all.
@@ -1457,6 +1510,47 @@ Tape cells the compiler's bump allocator reserved for each program (`Memory::all
 | `pointers` | 438 |
 | `printfmt` | 189 |
 | `printnum` | 328 |
+| `scanfstr` | 219 |
+| `sizeof` | 102 |
+| `strings` | 215 |
+| `switch` | 281 |
+| `ternary` | 237 |
+| `typespec` | 163 |
+| `unary` | 174 |
+
+### Function prototypes (`961773d`)
+
+| Fixture | Cells alloc |
+|---|---|
+| `addition` | 69 |
+| `addsub` | 207 |
+| `arrays` | 194 |
+| `assign` | 302 |
+| `bitassign` | 196 |
+| `bitwise` | 632 |
+| `branch` | 64 |
+| `break` | 183 |
+| `casts` | 141 |
+| `cmp` | 378 |
+| `complex` | 136 |
+| `continue` | 231 |
+| `define` | 103 |
+| `div` | 180 |
+| `dowhile` | 183 |
+| `fordecl` | 107 |
+| `functions` | 275 |
+| `hello_world` | 24 |
+| `io` | 106 |
+| `literals` | 144 |
+| `logic` | 215 |
+| `loop` | 90 |
+| `mod` | 306 |
+| `mul` | 207 |
+| `multidecl` | 115 |
+| `pointers` | 438 |
+| `printfmt` | 189 |
+| `printnum` | 328 |
+| `prototypes` | 121 |
 | `scanfstr` | 219 |
 | `sizeof` | 102 |
 | `strings` | 215 |
@@ -2478,6 +2572,56 @@ Tape cells actually used when each milestone's committed golden program runs wit
 | `pointers` | 438 | 437 | 0 |
 | `printfmt` | 189 | 188 | 0 |
 | `printnum` | 328 | 327 | 0 |
+| `scanfstr` | 193 | 192 | 0 |
+| `sizeof` | 89 | 88 | 0 |
+| `strings` | 215 | 214 | 0 |
+| `switch` | 268 | 267 | 0 |
+| `ternary` | 224 | 223 | 0 |
+| `typespec` | 150 | 149 | 0 |
+| `unary` | 137 | 136 | 0 |
+
+### Function prototypes (`961773d`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 69 | 68 | 0 |
+| `addsub` | 207 | 206 | 0 |
+| `arrays` | 181 | 180 | 0 |
+| `assign` | 289 | 288 | 0 |
+| `bitassign` | 196 | 195 | 0 |
+| `bitwise` | 619 | 618 | 0 |
+| `branch` | 61 | 61 | 0 |
+| `break` | 170 | 169 | 0 |
+| `casts` | 141 | 140 | 0 |
+| `cmp` | 349 | 348 | 0 |
+| `complex` | 136 | 135 | 0 |
+| `continue` | 218 | 217 | 0 |
+| `define` | 90 | 89 | 0 |
+| `div` | 167 | 166 | 0 |
+| `dowhile` | 170 | 169 | 0 |
+| `fordecl` | 94 | 93 | 0 |
+| `functions` | 275 | 274 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 104 | 103 | 0 |
+| `literals` | 124 | 123 | 0 |
+| `logic` | 202 | 201 | 0 |
+| `loop` | 90 | 89 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_bitwise` | 52 | 51 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_deref` | 15 | 14 | 0 |
+| `micro_order_eq` | 16 | 15 | 0 |
+| `micro_order_index` | 11 | 10 | 0 |
+| `micro_order_le` | 22 | 21 | 0 |
+| `micro_order_shift` | 14 | 13 | 0 |
+| `mod` | 293 | 292 | 0 |
+| `mul` | 207 | 206 | 0 |
+| `multidecl` | 102 | 101 | 0 |
+| `pointers` | 438 | 437 | 0 |
+| `printfmt` | 189 | 188 | 0 |
+| `printnum` | 328 | 327 | 0 |
+| `prototypes` | 121 | 120 | 0 |
 | `scanfstr` | 193 | 192 | 0 |
 | `sizeof` | 89 | 88 | 0 |
 | `strings` | 215 | 214 | 0 |

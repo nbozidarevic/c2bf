@@ -201,6 +201,16 @@ MILESTONES = [
         "byte-identical, and allocated cells and runtime footprint "
         "are unchanged.",
     ),
+    (
+        "961773dfa26a3dbcd09ab2942de16a342b9323a9",
+        "Function prototypes",
+        "File-scope prototypes with optional parameter names, "
+        "checked against definitions and earlier prototypes; a "
+        "prototype alone emits nothing. Adds the prototypes "
+        "fixture (371,582 BF bytes on 121 cells); every other "
+        "fixture is byte-identical, and allocated cells and "
+        "runtime footprint are unchanged.",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
