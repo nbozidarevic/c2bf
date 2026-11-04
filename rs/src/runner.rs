@@ -30,31 +30,12 @@ pub const ERR_UNCLOSED_OPEN: &str = "Unbalanced Brainfuck code: unclosed '['";
 const TAPE_INIT: usize = 1024;
 const ORIGIN_INIT: i64 = 512;
 
-/// Tape index for `pointer`, growing the tape like `BrainfuckRunner::cell`.
-/// `touched` is kept the same length as `tape` and marks every cell
-/// this access visits, so the runner can report its footprint.
-fn cell_index(
-    tape: &mut Vec<u8>,
-    touched: &mut Vec<bool>,
-    origin: &mut i64,
-    pointer: i64,
-) -> usize {
-    let index = pointer + *origin;
-    let i = if index < 0 {
-        let need = (-index) as usize;
-        tape.splice(0..0, std::iter::repeat(0).take(need));
-        touched.splice(0..0, std::iter::repeat(false).take(need));
-        *origin += -index;
-        0
-    } else if (index as usize) >= tape.len() {
-        tape.resize((index as usize) * 2 + 1, 0);
-        touched.resize((index as usize) * 2 + 1, false);
-        index as usize
-    } else {
-        index as usize
-    };
-    touched[i] = true;
-    i
+/// Grow the tape for a step right past its end, like
+/// `BrainfuckRunner::cell` (`2*index+1` resize). `touched` is kept
+/// the same length as `tape`.
+fn grow_right(tape: &mut Vec<u8>, touched: &mut Vec<bool>, idx: usize) {
+    tape.resize(idx * 2 + 1, 0);
+    touched.resize(idx * 2 + 1, false);
 }
 
 /// Footprint of a Brainfuck execution (see [`run_with_stats`]).
@@ -121,53 +102,70 @@ pub fn run_with_stats<R: Read, W: Write>(
     let mut output = BufWriter::new(output);
     let mut tape = vec![0u8; TAPE_INIT];
     let mut touched = vec![false; TAPE_INIT];
-    let mut origin: i64 = ORIGIN_INIT;
+    // The tape index is cached and maintained by the motion
+    // commands, so cell accesses pay no bounds math or call: `idx`
+    // is always `pointer + origin` and in range. Growth happens
+    // only on motion: right past the end (same `2*index+1` size
+    // as before) and one zero prepended when stepping left off
+    // the start (a step moves by one, so at most one cell is ever
+    // needed there).
     let mut pointer: i64 = 0;
+    let mut idx: usize = ORIGIN_INIT as usize;
     let mut high_water: i64 = 0;
     let mut low_water: i64 = 0;
     let mut depth: usize = 0;
     let mut pc: usize = 0;
     let mut result = Ok(());
+    let mut b = [0u8; 1];
     while pc < cmds.len() {
         match cmds[pc] {
             b'<' => {
                 pointer -= 1;
                 low_water = low_water.min(pointer);
+                if idx == 0 {
+                    tape.splice(0..0, [0]);
+                    touched.splice(0..0, [false]);
+                } else {
+                    idx -= 1;
+                }
                 pc += 1;
             }
             b'>' => {
                 pointer += 1;
                 high_water = high_water.max(pointer);
+                idx += 1;
+                if idx == tape.len() {
+                    grow_right(&mut tape, &mut touched, idx);
+                }
                 pc += 1;
             }
             b'+' => {
-                let i = cell_index(&mut tape, &mut touched, &mut origin, pointer);
-                tape[i] = tape[i].wrapping_add(1);
+                touched[idx] = true;
+                tape[idx] = tape[idx].wrapping_add(1);
                 pc += 1;
             }
             b'-' => {
-                let i = cell_index(&mut tape, &mut touched, &mut origin, pointer);
-                tape[i] = tape[i].wrapping_sub(1);
+                touched[idx] = true;
+                tape[idx] = tape[idx].wrapping_sub(1);
                 pc += 1;
             }
             b',' => {
-                let mut b = [0u8; 1];
                 // `read_exact` retries on Interrupted; EOF or any other
                 // failure leaves the cell unchanged, like `get` failing.
                 if input.read_exact(&mut b).is_ok() {
-                    let i = cell_index(&mut tape, &mut touched, &mut origin, pointer);
-                    tape[i] = b[0];
+                    touched[idx] = true;
+                    tape[idx] = b[0];
                 }
                 pc += 1;
             }
             b'.' => {
-                let i = cell_index(&mut tape, &mut touched, &mut origin, pointer);
-                let _ = output.write_all(&tape[i..i + 1]);
+                touched[idx] = true;
+                let _ = output.write_all(&tape[idx..idx + 1]);
                 pc += 1;
             }
             b'[' => {
-                let i = cell_index(&mut tape, &mut touched, &mut origin, pointer);
-                if tape[i] == 0 {
+                touched[idx] = true;
+                if tape[idx] == 0 {
                     let target = jumps[pc];
                     if target == usize::MAX {
                         // C++ spins here; report instead (see above).
@@ -187,8 +185,8 @@ pub fn run_with_stats<R: Read, W: Write>(
                     break;
                 }
                 depth -= 1;
-                let i = cell_index(&mut tape, &mut touched, &mut origin, pointer);
-                if tape[i] != 0 {
+                touched[idx] = true;
+                if tape[idx] != 0 {
                     pc = target;
                 } else {
                     pc += 1;
@@ -262,6 +260,14 @@ mod tests {
     fn far_positive_growth() {
         let code = ">".repeat(2000) + "+.";
         assert_eq!(run_str(&code, b"").unwrap(), vec![1]);
+    }
+
+    #[test]
+    fn oscillation_across_origin_keeps_values() {
+        // Two cells left of the origin keep their values across a
+        // return to the origin: exercises prepend growth and the
+        // cached tape index.
+        assert_eq!(run_str("<+<+>>+.<.", b"").unwrap(), vec![1, 1]);
     }
 
     #[test]
