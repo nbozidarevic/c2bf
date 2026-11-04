@@ -249,6 +249,9 @@ impl<'a> Parser<'a> {
             if self.at_ident() {
                 let name = self.next_tok().text;
                 if self.at_punct(b"(") {
+                    if self.after_param_list_is_semicolon() {
+                        return Ok(External::FuncDecl(self.parse_funcdecl(spec, name)?));
+                    }
                     return Ok(External::FuncDef(self.parse_funcdef(spec, name)?));
                 }
             }
@@ -258,7 +261,39 @@ impl<'a> Parser<'a> {
         self.fail("expected declaration or function definition".to_string())
     }
 
-    fn parse_funcdef(&mut self, spec: Vec<u8>, name: Vec<u8>) -> Result<FuncDef, ParseError> {
+    /// Whether the token after the parameter list starting at the
+    /// current `(` is a `;`: the list closes a prototype rather
+    /// than opening a definition. The scan counts parentheses, so
+    /// array sizes in parentheses do not confuse it; the cursor
+    /// does not move.
+    fn after_param_list_is_semicolon(&self) -> bool {
+        let mut depth = 0i32;
+        let mut k = 0isize;
+        loop {
+            let t = self.peek_at(k);
+            if t.kind == Kind::End {
+                return false;
+            }
+            if t.kind == Kind::Punct {
+                if t.text.as_slice() == b"(" {
+                    depth += 1;
+                } else if t.text.as_slice() == b")" {
+                    depth -= 1;
+                    if depth == 0 {
+                        let after = self.peek_at(k + 1);
+                        return after.kind == Kind::Punct && after.text.as_slice() == b";";
+                    }
+                }
+            }
+            k += 1;
+        }
+    }
+
+    /// Parse a parameter list, parentheses included. Definitions
+    /// require a name per parameter; prototypes allow unnamed
+    /// parameters (empty name) but still reject a second `*` and
+    /// anything that is not a type, a name, or a list punctuator.
+    fn parse_params(&mut self, allow_unnamed: bool) -> Result<Vec<FnParam>, ParseError> {
         self.expect_punct(b"(", "'('")?;
         let mut params = Vec::new();
         if !self.at_punct(b")") {
@@ -278,7 +313,15 @@ impl<'a> Parser<'a> {
                     } else {
                         false
                     };
-                    let name = self.expect_ident("parameter name")?.text;
+                    let name = if allow_unnamed
+                        && (self.at_punct(b",")
+                            || self.at_punct(b")")
+                            || self.at_punct(b"["))
+                    {
+                        Vec::new()
+                    } else {
+                        self.expect_ident("parameter name")?.text
+                    };
                     // An array parameter decays to a pointer; the
                     // size, when present, is parsed and discarded.
                     let mut array = false;
@@ -303,12 +346,27 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect_punct(b")", "')'")?;
+        Ok(params)
+    }
+
+    fn parse_funcdef(&mut self, spec: Vec<u8>, name: Vec<u8>) -> Result<FuncDef, ParseError> {
+        let params = self.parse_params(false)?;
         let body = self.parse_compound()?;
         Ok(FuncDef {
             name,
             is_void: spec.as_slice() == b"void",
             params,
             body,
+        })
+    }
+
+    fn parse_funcdecl(&mut self, spec: Vec<u8>, name: Vec<u8>) -> Result<FuncDecl, ParseError> {
+        let params = self.parse_params(true)?;
+        self.expect_punct(b";", "';'")?;
+        Ok(FuncDecl {
+            name,
+            is_void: spec.as_slice() == b"void",
+            params,
         })
     }
 
@@ -1305,6 +1363,63 @@ mod tests {
             "int f(int a, char *p, char s[], int t[4]) { }",
             "(tu (funcdef f (params (param a) (param p (pointer)) (param s (array)) (param t (array))) (compound)))",
         );
+    }
+
+    #[test]
+    fn prototypes_parse() {
+        assert_sexp(
+            "int f(int a, char *p);",
+            "(tu (funcdecl f (params (param a) (param p (pointer)))))",
+        );
+        assert_sexp(
+            "int f(int, char *);",
+            "(tu (funcdecl f (params (param) (param (pointer)))))",
+        );
+        assert_sexp("int f(void);", "(tu (funcdecl f))");
+        assert_sexp("int f();", "(tu (funcdecl f))");
+        assert_sexp(
+            "int f(char s[], int t[4]);",
+            "(tu (funcdecl f (params (param s (array)) (param t (array)))))",
+        );
+        // Parentheses in an array size do not confuse the
+        // prototype/definition scan.
+        assert_sexp(
+            "int f(char s[(1)]); int main() { return 0; }",
+            "(tu (funcdecl f (params (param s (array)))) (funcdef main (compound (return (int 0)))))",
+        );
+    }
+
+    #[test]
+    fn prototype_errors() {
+        // A second `*` still fails at the parameter name.
+        match parse(b"int f(int **p);") {
+            Err(e) => assert!(
+                e.msg.contains("parameter name"),
+                "unexpected error: {}",
+                e.msg
+            ),
+            Ok(_) => panic!("double-pointer prototype accepted"),
+        }
+        // A variadic prototype is rejected: `...` does not
+        // start a parameter type.
+        match parse(b"int f(int, ...);") {
+            Err(e) => assert!(
+                e.msg.contains("parameter type"),
+                "unexpected error: {}",
+                e.msg
+            ),
+            Ok(_) => panic!("variadic prototype accepted"),
+        }
+        // Prototypes are file-scope only: in a block this is a
+        // declaration, and `(` cannot follow a declarator name.
+        match parse(b"int main() { int f(int); return 0; }") {
+            Err(e) => assert!(
+                e.msg.contains("';'"),
+                "unexpected error: {}",
+                e.msg
+            ),
+            Ok(_) => panic!("block-scope prototype accepted"),
+        }
     }
 
     #[test]

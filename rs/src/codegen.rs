@@ -34,6 +34,30 @@ pub struct ExpandedFunction {
     pub body: Block,
 }
 
+/// A function signature, from a prototype (or, for comparison, a
+/// definition): void-ness plus per-parameter pointer/array flags.
+/// Parameter names are ignored, as in C; all type spellings denote
+/// one byte here, so only the flags are compared.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FuncSig {
+    pub is_void: bool,
+    pub params: Vec<FnParam>,
+}
+
+impl FuncSig {
+    /// Whether two signatures agree: same void-ness, same parameter
+    /// count, same pointer/array flags per parameter.
+    pub fn matches(&self, other: &FuncSig) -> bool {
+        self.is_void == other.is_void
+            && self.params.len() == other.params.len()
+            && self
+                .params
+                .iter()
+                .zip(other.params.iter())
+                .all(|(a, b)| a.pointer == b.pointer && a.array == b.array)
+    }
+}
+
 /// Code emitter: cell allocator, output bytes, tracked data pointer.
 #[derive(Debug, Default)]
 pub struct Emitter {
@@ -46,6 +70,10 @@ pub struct Emitter {
     /// `compile_program` before any code is emitted; a call expands
     /// the shared definition inline.
     pub(crate) functions: HashMap<Vec<u8>, Rc<ExpandedFunction>>,
+    /// Prototypes (forward declarations), keyed by function name,
+    /// registered in `compile_program` before any code is emitted;
+    /// a call to a prototyped-but-undefined function is an error.
+    pub(crate) prototypes: HashMap<Vec<u8>, Rc<FuncSig>>,
     /// Names of functions whose expansion is in progress; a cycle
     /// here is a recursive call, which inline expansion cannot do.
     pub(crate) expanding: Vec<Vec<u8>>,

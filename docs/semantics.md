@@ -201,8 +201,18 @@ call site.
   value; a value returned from a `void` function is ignored, and
   a `void` call used as a value yields zero. `return` in `main`
   stays a no-op, as before: the operand is not compiled.
-- No prototypes or forward declarations, no function pointers, no
-  arrays or pointers returned by value beyond the byte model.
+- Prototypes (forward declarations) are file-scope only, with
+  optional parameter names: `int f(int);` declares `f` without a
+  body and emits nothing. A prototype must agree with its
+  definition and with any earlier prototype: same void-ness,
+  same parameter count, same pointer/array flags per parameter;
+  parameter names and type spellings may differ (all spellings
+  denote one byte). Repeated compatible prototypes are allowed;
+  a conflicting one is a compile error. Calling a function with
+  only a prototype is a compile error (there is no body to
+  expand); an uncalled prototype compiles. No function pointers,
+  no arrays or pointers returned by value beyond the byte model
+  (a pointer return type, `char *f()`, does not parse).
 - Declarations are lexically scoped: a declaration in a nested
   block shadows an outer one (each gets its own cells). A
   declaration at the top level of a function body may not reuse

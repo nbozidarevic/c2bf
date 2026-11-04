@@ -191,6 +191,12 @@ below keep the pre-rename names as history.
   back (a defined deviation; `%c` after `%s` reads the next
   character). Pinned by the `scanfstr` oracle fixture and the
   `scanf_string_not_address` error fixture.
+- Function prototypes (forward declarations, file-scope only,
+  optional parameter names): repeated compatible prototypes are
+  allowed, conflicting signatures are compile errors, and
+  calling a prototyped-but-undefined function is a compile
+  error. Pinned by the `prototypes` oracle fixture and the
+  `function_prototype_*` error fixtures.
 
 ## Phase 5 — Performance
 

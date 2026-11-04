@@ -16,8 +16,8 @@
 //!   C++ crashes with `bad_cast`).
 //! - Too few format arguments are rejected (the C++ reads out of bounds).
 
-use crate::ast::{Block, BlockItem, Decl, Expr, External, FnParam, ForDecl, ForInit, FuncDef, InitDecl, Stmt};
-use crate::codegen::{CompileError, Emitter, ExpandedFunction};
+use crate::ast::{Block, BlockItem, Decl, Expr, External, FnParam, ForDecl, ForInit, FuncDecl, FuncDef, InitDecl, Stmt};
+use crate::codegen::{CompileError, Emitter, ExpandedFunction, FuncSig};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use crate::parser;
@@ -379,6 +379,55 @@ impl<'a> Renamer<'a> {
 /// parameter"; gcc: "redeclared as different kind of symbol").
 /// Shadowing a parameter inside a nested block or a `for`
 /// initializer stays legal and keeps its own cells.
+/// Check a prototype's signature: duplicate parameter names are
+/// an error (unnamed parameters carry no name and cannot collide),
+/// and it must agree with any definition or earlier prototype of
+/// the same name. Parameter names may differ between a prototype
+/// and its definition; only the signature is compared.
+fn check_prototype(
+    em: &Emitter,
+    d: &FuncDecl,
+) -> Result<FuncSig, CompileError> {
+    let mut seen: Vec<&[u8]> = Vec::with_capacity(d.params.len());
+    for p in &d.params {
+        if p.name.is_empty() {
+            continue;
+        }
+        if seen.contains(&p.name.as_slice()) {
+            return Err(err(format!(
+                "duplicate parameter name '{}'",
+                String::from_utf8_lossy(&p.name)
+            )));
+        }
+        seen.push(&p.name);
+    }
+    let sig = FuncSig {
+        is_void: d.is_void,
+        params: d.params.clone(),
+    };
+    if let Some(def) = em.functions.get(&d.name) {
+        let def_sig = FuncSig {
+            is_void: def.is_void,
+            params: def.params.clone(),
+        };
+        if !sig.matches(&def_sig) {
+            return Err(err(format!(
+                "conflicting prototype for function '{}'",
+                String::from_utf8_lossy(&d.name)
+            )));
+        }
+    }
+    if let Some(old) = em.prototypes.get(&d.name) {
+        if !sig.matches(old) {
+            return Err(err(format!(
+                "conflicting prototype for function '{}'",
+                String::from_utf8_lossy(&d.name)
+            )));
+        }
+    }
+    Ok(sig)
+}
+
 fn rename_function(f: &FuncDef) -> Result<ExpandedFunction, CompileError> {
     // Snapshot the parameter names before the body is walked: a
     // later top-level declaration may reuse an earlier one's name
@@ -450,6 +499,9 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
     // Scope-rename and register every function definition first, so
     // calls may refer to functions defined later in the file and
     // duplicate definitions are rejected before any code is emitted.
+    // Prototypes register in the same pass and are checked against
+    // definitions and earlier prototypes; a prototype alone emits
+    // nothing.
     // Non-`main` definitions are never emitted directly; they expand
     // inline at their call sites. File-scope definitions are
     // checked in the same pass: a duplicate initialized definition
@@ -466,6 +518,18 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
         match item {
             External::FuncDef(f) => {
                 let expanded = rename_function(f)?;
+                let def_sig = FuncSig {
+                    is_void: expanded.is_void,
+                    params: expanded.params.clone(),
+                };
+                if let Some(proto) = em.prototypes.get(&f.name) {
+                    if !def_sig.matches(proto) {
+                        return Err(err(format!(
+                            "conflicting prototype for function '{}'",
+                            String::from_utf8_lossy(&f.name)
+                        )));
+                    }
+                }
                 if em
                     .functions
                     .insert(f.name.clone(), Rc::new(expanded))
@@ -473,6 +537,10 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
                 {
                     return Err(err("duplicate function definition"));
                 }
+            }
+            External::FuncDecl(d) => {
+                let sig = check_prototype(&em, d)?;
+                em.prototypes.insert(d.name.clone(), Rc::new(sig));
             }
             External::Decl(d) => {
                 for init in &d.inits {
@@ -505,6 +573,9 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
                     em.compile_block(&main_def.body)?;
                 }
             }
+            // Prototypes emit nothing; they only register a
+            // signature, checked in the first pass above.
+            External::FuncDecl(_) => {}
             External::Decl(d) => {
                 em.compile_decl(d)?;
             }
@@ -1816,6 +1887,24 @@ impl Emitter {
             );
             return self.expand_call(name, &def, args);
         }
+        // A prototype without a definition has no body to expand:
+        // the arity is checked against the prototype first (same
+        // message as for definitions), then the missing
+        // definition is reported. Calls to names with neither a
+        // definition nor a prototype keep the existing
+        // "Unsupported postfix expression" error below.
+        if let Some(proto) = self.prototypes.get(name) {
+            if args.len() != proto.params.len() {
+                return Err(err(format!(
+                    "wrong number of arguments to function '{}'",
+                    String::from_utf8_lossy(name)
+                )));
+            }
+            return Err(err(format!(
+                "call to undefined function '{}'",
+                String::from_utf8_lossy(name)
+            )));
+        }
         let is_printf = match name {
             b"printf" => true,
             b"scanf" => false,
@@ -2178,6 +2267,87 @@ mod tests {
             "unexpected error: {}",
             err.msg
         );
+    }
+
+    #[test]
+    fn prototypes_allow_calls_and_ignore_names() {
+        // A prototype before the definition, with a different
+        // parameter name and an unnamed/void/spelling variants,
+        // plus a redundant prototype after a definition. A
+        // prototype alone, never called, emits nothing.
+        let bf = compile(
+            b"int dbl(int v); void greet(void); int add(int, int); int dbl(int x) { return x * 2; } int add(int a, int b) { return a + b; } int add(int, int); void greet(void) { printf(\"hi \"); } int main() { printf(\"%d,\", dbl(21)); greet(); printf(\"%d\", add(3, 4)); }",
+        )
+        .expect("prototype program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"42,hi 7");
+        let bf = compile(
+            b"int f(unsigned); int f(int a) { return a + 1; } int main() { printf(\"%d\", f(1)); }",
+        )
+        .expect("spelling-variant prototype compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"2");
+        let bf = compile(
+            b"int f(int); int main() { printf(\"ok\"); }",
+        )
+        .expect("uncalled prototype compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"ok");
+        let bf = compile(
+            b"int main(); int main() { printf(\"ok\"); }",
+        )
+        .expect("main prototype compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"ok");
+    }
+
+    #[test]
+    fn prototype_signature_conflicts_rejected() {
+        let cases: &[(&[u8], &str)] = &[
+            (
+                b"int f(int); int f(int a, int b) { return 0; } int main() {}",
+                "conflicting prototype for function 'f'",
+            ),
+            (
+                b"void f(); int f() { return 0; } int main() {}",
+                "conflicting prototype for function 'f'",
+            ),
+            (
+                b"int f(int); int f(char *p) { return 0; } int main() {}",
+                "conflicting prototype for function 'f'",
+            ),
+            (
+                b"int f(int); int f(char s[]) { return 0; } int main() {}",
+                "conflicting prototype for function 'f'",
+            ),
+            (
+                b"int f(int); int f(int, int); int main() {}",
+                "conflicting prototype for function 'f'",
+            ),
+            (
+                b"int f(int a) { return a; } int f(int, int); int main() {}",
+                "conflicting prototype for function 'f'",
+            ),
+            (
+                b"int f(int a, int a); int main() {}",
+                "duplicate parameter name 'a'",
+            ),
+            (
+                b"int f(int); int main() { printf(\"%d\", f(1)); }",
+                "call to undefined function 'f'",
+            ),
+            (
+                b"int f(int); int main() { f(1, 2); }",
+                "wrong number of arguments to function 'f'",
+            ),
+        ];
+        for (src, want) in cases {
+            assert_eq!(compile(src).unwrap_err().msg, *want, "for {:?}", src);
+        }
     }
 
     #[test]

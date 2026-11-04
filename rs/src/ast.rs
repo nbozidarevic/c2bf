@@ -11,6 +11,7 @@ pub struct TranslationUnit(pub Vec<External>);
 #[derive(Debug)]
 pub enum External {
     FuncDef(FuncDef),
+    FuncDecl(FuncDecl),
     Decl(Decl),
 }
 
@@ -33,6 +34,16 @@ pub struct FuncDef {
     pub is_void: bool,
     pub params: Vec<FnParam>,
     pub body: Block,
+}
+
+/// A function prototype (forward declaration): a signature with
+/// no body. Parameter names are optional; an unnamed parameter
+/// keeps an empty name. Prototypes are file-scope only.
+#[derive(Debug)]
+pub struct FuncDecl {
+    pub name: Vec<u8>,
+    pub is_void: bool,
+    pub params: Vec<FnParam>,
 }
 
 #[derive(Debug)]
@@ -205,32 +216,51 @@ pub fn dump_tu(tu: &TranslationUnit, out: &mut Vec<u8>) {
     close(out);
 }
 
+/// Serialize a parameter list: `(params (param <name> ...) ...)`.
+/// An unnamed prototype parameter dumps as `(param ...)` with no
+/// name, so `(param)` alone is an unnamed scalar parameter.
+fn dump_params(params: &[FnParam], out: &mut Vec<u8>) {
+    open(out, "params");
+    for p in params {
+        out.push(b' ');
+        if p.name.is_empty() {
+            open(out, "param");
+        } else {
+            open_text(out, "param", &p.name);
+        }
+        if p.pointer {
+            out.push(b' ');
+            open(out, "pointer");
+            close(out);
+        }
+        if p.array {
+            out.push(b' ');
+            open(out, "array");
+            close(out);
+        }
+        close(out);
+    }
+    close(out);
+}
+
 fn dump_external(e: &External, out: &mut Vec<u8>) {
     match e {
         External::FuncDef(f) => {
             open_text(out, "funcdef", &f.name);
             if !f.params.is_empty() {
                 out.push(b' ');
-                open(out, "params");
-                for p in &f.params {
-                    out.push(b' ');
-                    open_text(out, "param", &p.name);
-                    if p.pointer {
-                        out.push(b' ');
-                        open(out, "pointer");
-                        close(out);
-                    }
-                    if p.array {
-                        out.push(b' ');
-                        open(out, "array");
-                        close(out);
-                    }
-                    close(out);
-                }
-                close(out);
+                dump_params(&f.params, out);
             }
             out.push(b' ');
             dump_block(&f.body, out);
+            close(out);
+        }
+        External::FuncDecl(d) => {
+            open_text(out, "funcdecl", &d.name);
+            if !d.params.is_empty() {
+                out.push(b' ');
+                dump_params(&d.params, out);
+            }
             close(out);
         }
         External::Decl(d) => dump_decl(d, out),
