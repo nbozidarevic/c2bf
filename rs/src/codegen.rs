@@ -601,9 +601,12 @@ impl Emitter {
                 };
                 em.accumulate_bit(bit, result, place)?;
                 em.double_in_place(place);
+                // The early-exit test is a guard (negate +
+                // logical_and) instead of a multiply of two 0/1
+                // cells: same value, no drain-loop machinery.
                 let zero_a = em.negate(ac)?;
                 let zero_b = em.negate(bc)?;
-                let both_zero = em.multiply_values(zero_a, zero_b);
+                let both_zero = em.logical_and(zero_a, zero_b)?;
                 em.perform_if(both_zero, |em| {
                     em.set_value(counter, 0);
                     Ok(())
