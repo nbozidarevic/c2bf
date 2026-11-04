@@ -254,7 +254,12 @@ impl<'a> Parser<'a> {
         let Some(at) = at else {
             return Ok(Spec::plain(words.join(&b' ')));
         };
-        if words.iter().filter(|w| self.typedefs.contains_key(w)).count() > 1 {
+        if words
+            .iter()
+            .filter(|w| self.typedefs.contains_key(w.as_slice()))
+            .count()
+            > 1
+        {
             return self.fail("multiple typedef names in one specifier".to_string());
         }
         for (i, w) in words.iter().enumerate() {
