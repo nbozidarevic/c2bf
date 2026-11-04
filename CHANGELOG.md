@@ -25,6 +25,12 @@ roadmap phases that produced them.
   (`negate` + `logical_and`) instead of a multiply, saving
   2,584 BF bytes on the bitwise fixtures with the rest
   byte-identical.
+- Language: `typedef` aliases (file-scope only, resolved at
+  parse time), including pointer/array aliases, chained aliases,
+  and alias spellings in parameters, return types, and
+  prototypes; function signatures now also compare pointer
+  returns. Runner: cached tape index, ~9.5% faster in a
+  within-run A/B (geomean over 41 bench cases).
 
 ## Rename to `c2bf` (Phase 8)
 

@@ -4,6 +4,8 @@
 //! accepted language, same tree shapes (see `tests/differential/SPEC.md`),
 //! same error messages and positions.
 
+use std::collections::HashMap;
+
 use crate::ast::*;
 use crate::token::{Kind, Tok, TokenError, tokenize};
 
@@ -63,6 +65,63 @@ fn is_op_in(text: &[u8], ops: &[&[u8]]) -> bool {
     ops.iter().any(|op| *op == text)
 }
 
+/// Value of an integer-literal token, mirroring the twin in
+/// `compile.rs` (`int_literal_value`): suffixes stripped, radix
+/// from prefix, saturating. Only used for typedef array sizes,
+/// which must be integer literals.
+fn int_text_value(text: &[u8]) -> i32 {
+    let mut s = text;
+    while matches!(s.last(), Some(b'u' | b'U' | b'l' | b'L')) {
+        s = &s[..s.len() - 1];
+    }
+    let (radix, digits): (i64, &[u8]) = if s.starts_with(b"0x") || s.starts_with(b"0X") {
+        (16, &s[2..])
+    } else if s.starts_with(b"0b") || s.starts_with(b"0B") {
+        (2, &s[2..])
+    } else if s.len() > 1 && s[0] == b'0' {
+        (8, s)
+    } else {
+        (10, s)
+    };
+    let mut v: i64 = 0;
+    for &c in digits {
+        let d = match c {
+            b'0'..=b'9' => (c - b'0') as i64,
+            b'a'..=b'f' => (c - b'a' + 10) as i64,
+            b'A'..=b'F' => (c - b'A' + 10) as i64,
+            _ => 0,
+        };
+        v = v.saturating_mul(radix).saturating_add(d);
+    }
+    v.clamp(i32::MIN as i64, i32::MAX as i64) as i32
+}
+
+/// A parsed type specifier: joined words plus declarator flags
+/// contributed by a typedef name in first position (a pointer or
+/// array alias). Plain specifiers carry no flags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Spec {
+    words: Vec<u8>,
+    pointer: bool,
+    array_len: Option<i32>,
+    array_unsized: bool,
+}
+
+impl Spec {
+    fn plain(words: Vec<u8>) -> Self {
+        Spec {
+            words,
+            pointer: false,
+            array_len: None,
+            array_unsized: false,
+        }
+    }
+
+    fn is_array(&self) -> bool {
+        self.array_len.is_some() || self.array_unsized
+    }
+}
+
 fn desc(t: &Tok) -> String {
     if t.kind == Kind::End {
         "end of file".to_string()
@@ -84,11 +143,19 @@ fn is_lvalue(e: &Expr) -> bool {
 struct Parser<'a> {
     t: &'a [Tok],
     p: usize,
+    /// File-scope typedefs visible from their definition onward
+    /// (source order). Block-scoped typedefs are rejected, so no
+    /// scope stack is needed; see `docs/semantics.md`.
+    typedefs: HashMap<Vec<u8>, TypedefDecl>,
 }
 
 impl<'a> Parser<'a> {
     fn new(t: &'a [Tok]) -> Self {
-        Parser { t, p: 0 }
+        Parser {
+            t,
+            p: 0,
+            typedefs: HashMap::new(),
+        }
     }
 
     fn peek_at(&self, k: isize) -> &Tok {
@@ -129,15 +196,19 @@ impl<'a> Parser<'a> {
     }
 
     /// Whether the next tokens can start a declaration specifier:
-    /// a type keyword, or an identifier followed by a type keyword
-    /// or another identifier (a one-word specifier, or the first
-    /// word of a multi-word one).
+    /// a type keyword, a typedef name (even alone, as an unnamed
+    /// parameter's type), or an identifier followed by a type
+    /// keyword or another identifier (a one-word specifier, or the
+    /// first word of a multi-word one).
     fn at_spec_start(&self) -> bool {
         if self.is_type_tok() {
             return true;
         }
         if !self.at_ident() {
             return false;
+        }
+        if self.typedefs.contains_key(&self.peek().text) {
+            return true;
         }
         let n = self.peek_at(1);
         (n.kind == Kind::Kw && is_op_in(&n.text, &TYPE_KWS)) || n.kind == Kind::Ident
@@ -149,10 +220,18 @@ impl<'a> Parser<'a> {
     /// follows it, so a declarator named like a qualifier
     /// (`int long = 1;`) keeps its name: the qualifier before `=`
     /// is not swallowed into the specifier.
-    fn parse_spec(&mut self) -> Vec<u8> {
+    ///
+    /// A typedef name in the specifier expands to its aliased
+    /// specifier plus declarator flags. Qualifiers may precede or
+    /// follow the name (`const T`, `T const`); any other word
+    /// beside the name is an error, as is a typedef name anywhere
+    /// but the specifier's head.
+    fn parse_spec(&mut self) -> Result<Spec, ParseError> {
         let mut words = vec![self.next_tok().text];
         while (self.is_type_tok()
-            || (self.at_ident() && is_qualifier(&self.peek().text)))
+            || (self.at_ident()
+                && (is_qualifier(&self.peek().text)
+                    || self.typedefs.contains_key(&self.peek().text))))
             && {
                 let n = self.peek_at(1);
                 (n.kind == Kind::Kw && is_op_in(&n.text, &TYPE_KWS))
@@ -161,7 +240,43 @@ impl<'a> Parser<'a> {
         {
             words.push(self.next_tok().text);
         }
-        words.join(&b' ')
+        self.resolve_spec(words)
+    }
+
+    /// Expand a typedef name in the collected specifier words.
+    /// `words` holds the raw words `parse_spec` collected; at most
+    /// one may be a typedef name, and every other word must be a
+    /// qualifier.
+    fn resolve_spec(&self, words: Vec<Vec<u8>>) -> Result<Spec, ParseError> {
+        let at = words
+            .iter()
+            .position(|w| self.typedefs.contains_key(w));
+        let Some(at) = at else {
+            return Ok(Spec::plain(words.join(&b' ')));
+        };
+        if words.iter().filter(|w| self.typedefs.contains_key(w)).count() > 1 {
+            return self.fail("multiple typedef names in one specifier".to_string());
+        }
+        for (i, w) in words.iter().enumerate() {
+            if i != at && !is_qualifier(w) {
+                return self.fail(
+                    "unexpected specifier beside a typedef name".to_string(),
+                );
+            }
+        }
+        let alias = &self.typedefs[&words[at]];
+        let mut spec_words: Vec<Vec<u8>> = alias.spec.split(|&b| b == b' ').map(|w| w.to_vec()).collect();
+        for (i, w) in words.iter().enumerate() {
+            if i != at {
+                spec_words.push(w.clone());
+            }
+        }
+        Ok(Spec {
+            words: spec_words.join(&b' '),
+            pointer: alias.pointer,
+            array_len: alias.array_len,
+            array_unsized: alias.array_unsized,
+        })
     }
 
     fn next_tok(&mut self) -> Tok {
@@ -243,9 +358,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_external(&mut self) -> Result<External, ParseError> {
+        if self.at_ident() && self.peek().text.as_slice() == b"typedef" {
+            return self.parse_typedef_declaration();
+        }
         if self.at_spec_start() {
             let mark = self.p;
-            let spec = self.parse_spec();
+            let spec = self.parse_spec()?;
             if self.at_ident() {
                 let name = self.next_tok().text;
                 if self.at_punct(b"(") {
@@ -259,6 +377,77 @@ impl<'a> Parser<'a> {
             return Ok(External::Decl(self.parse_declaration()?));
         }
         self.fail("expected declaration or function definition".to_string())
+    }
+
+    /// Parse a file-scope `typedef` declaration (the `typedef`
+    /// keyword itself is still ahead): one declarator, no
+    /// initializer, no comma list. The alias is registered for
+    /// uses later in the file; redefining a name to a different
+    /// expansion is an error, an identical redefinition is allowed.
+    fn parse_typedef_declaration(&mut self) -> Result<External, ParseError> {
+        self.next_tok(); // `typedef`
+        let spec = self.parse_spec()?;
+        let mut pointer = false;
+        if self.at_punct(b"*") {
+            self.next_tok();
+            pointer = true;
+        }
+        if spec.pointer && pointer {
+            return self.fail("pointer to pointer is not supported".to_string());
+        }
+        pointer |= spec.pointer;
+        let name = self.expect_ident("declarator name")?.text;
+        let (mut array_len, mut array_unsized) = (spec.array_len, spec.array_unsized);
+        if self.at_punct(b"[") {
+            if array_len.is_some() || array_unsized {
+                return self.fail(
+                    "multi-dimensional arrays are not supported".to_string(),
+                );
+            }
+            self.next_tok();
+            if self.at_punct(b"]") {
+                array_unsized = true;
+            } else {
+                let len_expr = self.parse_assignment()?;
+                let Expr::Int(bytes) = len_expr else {
+                    return self.fail(
+                        "array size must be an integer literal".to_string(),
+                    );
+                };
+                let len = int_text_value(&bytes);
+                if len <= 0 {
+                    return self.fail("array size must be positive".to_string());
+                }
+                array_len = Some(len);
+            }
+            self.expect_punct(b"]", "']'")?;
+        }
+        if self.at_punct(b"=") {
+            return self.fail("typedef declarators take no initializer".to_string());
+        }
+        if self.at_punct(b",") {
+            return self.fail(
+                "multiple typedef declarators are not supported".to_string(),
+            );
+        }
+        self.expect_punct(b";", "';'")?;
+        let decl = TypedefDecl {
+            name: name.clone(),
+            spec: spec.words,
+            pointer,
+            array_len,
+            array_unsized,
+        };
+        if let Some(old) = self.typedefs.get(&name) {
+            if *old != decl {
+                return self.fail(format!(
+                    "conflicting typedef for '{}'",
+                    String::from_utf8_lossy(&name)
+                ));
+            }
+        }
+        self.typedefs.insert(name, decl.clone());
+        Ok(External::Typedef(decl))
     }
 
     /// Whether the token after the parameter list starting at the
@@ -304,7 +493,7 @@ impl<'a> Parser<'a> {
                     if !self.at_spec_start() {
                         return self.fail("expected parameter type".to_string());
                     }
-                    let spec = self.parse_spec();
+                    let spec = self.parse_spec()?;
                     // An unnamed parameter ends the specifier at
                     // `,`/`)`, but the specifier joiner only swallows
                     // a following type word when another word follows
@@ -313,17 +502,22 @@ impl<'a> Parser<'a> {
                     // (`unsigned`) when the type word itself is
                     // last. A lone qualifier followed by a type
                     // keyword is the whole specifier here.
-                    if is_qualifier(&spec) && self.is_type_tok() {
+                    if is_qualifier(&spec.words) && self.is_type_tok() {
                         self.next_tok();
                     }
                     // One `*` makes a pointer parameter; a second
-                    // `*` fails at the name.
-                    let pointer = if self.at_punct(b"*") {
+                    // `*` fails at the name. A pointer typedef may
+                    // not combine with `*`.
+                    let mut pointer = spec.pointer;
+                    if self.at_punct(b"*") {
+                        if pointer {
+                            return self.fail(
+                                "pointer to pointer is not supported".to_string(),
+                            );
+                        }
                         self.next_tok();
-                        true
-                    } else {
-                        false
-                    };
+                        pointer = true;
+                    }
                     let name = if allow_unnamed
                         && (self.at_punct(b",")
                             || self.at_punct(b")")
@@ -335,8 +529,14 @@ impl<'a> Parser<'a> {
                     };
                     // An array parameter decays to a pointer; the
                     // size, when present, is parsed and discarded.
-                    let mut array = false;
+                    // An array typedef may not combine with `[]`.
+                    let mut array = spec.is_array();
                     if self.at_punct(b"[") {
+                        if array {
+                            return self.fail(
+                                "multi-dimensional arrays are not supported".to_string(),
+                            );
+                        }
                         self.next_tok();
                         if !self.at_punct(b"]") {
                             let _ = self.parse_assignment()?;
@@ -360,58 +560,79 @@ impl<'a> Parser<'a> {
         Ok(params)
     }
 
-    fn parse_funcdef(&mut self, spec: Vec<u8>, name: Vec<u8>) -> Result<FuncDef, ParseError> {
+    fn parse_funcdef(&mut self, spec: Spec, name: Vec<u8>) -> Result<FuncDef, ParseError> {
         let params = self.parse_params(false)?;
         let body = self.parse_compound()?;
         Ok(FuncDef {
             name,
-            is_void: spec.as_slice() == b"void",
+            is_void: spec.words.as_slice() == b"void" && !spec.pointer,
+            returns_pointer: spec.pointer,
             params,
             body,
         })
     }
 
-    fn parse_funcdecl(&mut self, spec: Vec<u8>, name: Vec<u8>) -> Result<FuncDecl, ParseError> {
+    fn parse_funcdecl(&mut self, spec: Spec, name: Vec<u8>) -> Result<FuncDecl, ParseError> {
         let params = self.parse_params(true)?;
         self.expect_punct(b";", "';'")?;
         Ok(FuncDecl {
             name,
-            is_void: spec.as_slice() == b"void",
+            is_void: spec.words.as_slice() == b"void" && !spec.pointer,
+            returns_pointer: spec.pointer,
             params,
         })
     }
 
     fn parse_declaration(&mut self) -> Result<Decl, ParseError> {
+        if self.at_ident() && self.peek().text.as_slice() == b"typedef" {
+            return self.fail(
+                "typedef declarations are only allowed at file scope".to_string(),
+            );
+        }
         let spec = if self.is_type_tok() || self.at_ident() {
-            self.parse_spec()
+            self.parse_spec()?
         } else {
             return self.fail("expected type name".to_string());
         };
         let mut inits = Vec::new();
         if !self.at_punct(b";") {
-            inits.push(self.parse_init_declarator()?);
+            inits.push(self.parse_init_declarator(&spec)?);
             while self.at_punct(b",") {
                 self.next_tok();
-                inits.push(self.parse_init_declarator()?);
+                inits.push(self.parse_init_declarator(&spec)?);
             }
         }
         self.expect_punct(b";", "';'")?;
-        Ok(Decl { spec, inits })
+        Ok(Decl {
+            spec: spec.words,
+            inits,
+        })
     }
 
-    fn parse_init_declarator(&mut self) -> Result<InitDecl, ParseError> {
+    fn parse_init_declarator(&mut self, base: &Spec) -> Result<InitDecl, ParseError> {
         // One `*` makes a pointer declarator (`char *p`); a second
-        // `*` fails at the name, so `char **p` is rejected.
-        let pointer = if self.at_punct(b"*") {
+        // `*` fails at the name, so `char **p` is rejected. A
+        // pointer typedef may not combine with `*`, and an array
+        // typedef may not combine with `[]`.
+        let mut pointer = base.pointer;
+        if self.at_punct(b"*") {
+            if pointer {
+                return self.fail("pointer to pointer is not supported".to_string());
+            }
             self.next_tok();
-            true
-        } else {
-            false
-        };
+            pointer = true;
+        }
         let name = self.expect_ident("declarator name")?.text;
-        let mut array_len = None;
-        let mut array_unsized = false;
+        let mut array_len = base
+            .array_len
+            .map(|len| Expr::Int(len.to_string().into_bytes()));
+        let mut array_unsized = base.array_unsized;
         if self.at_punct(b"[") {
+            if array_len.is_some() || array_unsized {
+                return self.fail(
+                    "multi-dimensional arrays are not supported".to_string(),
+                );
+            }
             self.next_tok();
             if self.at_punct(b"]") {
                 // `name[]`: sized only by a string initializer.
@@ -579,7 +800,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_for_declaration(&mut self) -> Result<ForDecl, ParseError> {
-        let spec = self.parse_spec();
+        let spec = self.parse_spec()?;
+        if spec.pointer || spec.is_array() {
+            return self.fail(
+                "pointer and array typedefs are not supported in for declarations"
+                    .to_string(),
+            );
+        }
+        let spec = spec.words;
         if self.at_ident() {
             let name = self.next_tok().text;
             if self.at_punct(b"=") {
@@ -1471,6 +1699,73 @@ mod tests {
             "int f() { a |= b ^= c; }",
             "(tu (funcdef f (compound (exprstmt (assign |= (ident a) (assign ^= (ident b) (ident c)))))))",
         );
+    }
+
+    #[test]
+    fn typedefs_parse() {
+        assert_sexp(
+            "typedef int MyInt; int main() { MyInt a = 5; }",
+            "(tu (typedef MyInt int) (funcdef main (compound (decl int (initdecl a (int 5))))))",
+        );
+        assert_sexp(
+            "typedef int *PInt; typedef char Arr[3]; typedef PInt PP; int main() { PInt p = 0; Arr s = \"hi\"; }",
+            "(tu (typedef PInt int (pointer)) (typedef Arr char (int 3)) (typedef PP int (pointer)) (funcdef main (compound (decl int (initdecl p (pointer) (int 0))) (decl char (initdecl s (int 3) (string hi))))))",
+        );
+        assert_sexp(
+            "typedef unsigned int U; U f(U x) { return x; } int main() { return f(7); }",
+            "(tu (typedef U unsigned int) (funcdef f (params (param x)) (compound (return (ident x)))) (funcdef main (compound (return (call (ident f) (int 7))))))",
+        );
+        assert_sexp(
+            "typedef int *P; int f(P);",
+            "(tu (typedef P int (pointer)) (funcdecl f (params (param (pointer)))))",
+        );
+        // An identical redefinition is allowed.
+        assert_sexp(
+            "typedef int T; typedef int T; int main() { T a = 1; }",
+            "(tu (typedef T int) (typedef T int) (funcdef main (compound (decl int (initdecl a (int 1))))))",
+        );
+        // Qualifiers may precede or follow the typedef name.
+        assert_sexp(
+            "typedef int T; const T a = 1; T const b = 2;",
+            "(tu (typedef T int) (decl int const (initdecl a (int 1))) (decl int const (initdecl b (int 2))))",
+        );
+    }
+
+    #[test]
+    fn typedef_errors() {
+        let cases: &[(&str, &str)] = &[
+            (
+                "typedef int T; typedef char T;",
+                "conflicting typedef for 'T'",
+            ),
+            (
+                "int main() { typedef int T; return 0; }",
+                "only allowed at file scope",
+            ),
+            ("typedef int T = 1;", "take no initializer"),
+            ("typedef int A, B;", "multiple typedef declarators"),
+            ("typedef int *P; P *q;", "pointer to pointer"),
+            ("typedef char A[3]; A b[2];", "multi-dimensional arrays"),
+            ("typedef char A[n];", "array size must be an integer literal"),
+            ("typedef char A[0];", "array size must be positive"),
+            ("typedef int T; int T x;", "beside a typedef name"),
+            (
+                "typedef int *P; int main() { for (P p = 0;;) { } return 0; }",
+                "not supported in for declarations",
+            ),
+        ];
+        for (src, want) in cases {
+            match parse(src.as_bytes()) {
+                Err(e) => assert!(
+                    e.msg.contains(want),
+                    "for {:?}: got error {:?}, want {:?}",
+                    src,
+                    e.msg,
+                    want
+                ),
+                Ok(_) => panic!("accepted {:?}", src),
+            }
+        }
     }
 
     #[test]

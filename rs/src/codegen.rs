@@ -30,25 +30,30 @@ use std::rc::Rc;
 #[derive(Debug)]
 pub struct ExpandedFunction {
     pub is_void: bool,
+    pub returns_pointer: bool,
     pub params: Vec<FnParam>,
     pub body: Block,
 }
 
 /// A function signature, from a prototype (or, for comparison, a
-/// definition): void-ness plus per-parameter pointer/array flags.
-/// Parameter names are ignored, as in C; all type spellings denote
-/// one byte here, so only the flags are compared.
+/// definition): void-ness, pointer return, plus per-parameter
+/// pointer/array flags. Parameter names are ignored, as in C; all
+/// type spellings denote one byte here, so only the flags are
+/// compared.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FuncSig {
     pub is_void: bool,
+    pub returns_pointer: bool,
     pub params: Vec<FnParam>,
 }
 
 impl FuncSig {
-    /// Whether two signatures agree: same void-ness, same parameter
-    /// count, same pointer/array flags per parameter.
+    /// Whether two signatures agree: same void-ness, same pointer
+    /// return, same parameter count, same pointer/array flags per
+    /// parameter.
     pub fn matches(&self, other: &FuncSig) -> bool {
         self.is_void == other.is_void
+            && self.returns_pointer == other.returns_pointer
             && self.params.len() == other.params.len()
             && self
                 .params

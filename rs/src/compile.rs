@@ -403,11 +403,13 @@ fn check_prototype(
     }
     let sig = FuncSig {
         is_void: d.is_void,
+        returns_pointer: d.returns_pointer,
         params: d.params.clone(),
     };
     if let Some(def) = em.functions.get(&d.name) {
         let def_sig = FuncSig {
             is_void: def.is_void,
+            returns_pointer: def.returns_pointer,
             params: def.params.clone(),
         };
         if !sig.matches(&def_sig) {
@@ -472,6 +474,7 @@ fn rename_function(f: &FuncDef) -> Result<ExpandedFunction, CompileError> {
     let body = renamer.rename_block(&f.body)?;
     Ok(ExpandedFunction {
         is_void: f.is_void,
+        returns_pointer: f.returns_pointer,
         params,
         body,
     })
@@ -520,6 +523,7 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
                 let expanded = rename_function(f)?;
                 let def_sig = FuncSig {
                     is_void: expanded.is_void,
+                    returns_pointer: expanded.returns_pointer,
                     params: expanded.params.clone(),
                 };
                 if let Some(proto) = em.prototypes.get(&f.name) {
@@ -542,6 +546,9 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
                 let sig = check_prototype(&em, d)?;
                 em.prototypes.insert(d.name.clone(), Rc::new(sig));
             }
+            // Typedefs are resolved at parse time; a typedef item
+            // emits nothing.
+            External::Typedef(_) => {}
             External::Decl(d) => {
                 for init in &d.inits {
                     let is_array = init.array_len.is_some() || init.array_unsized;
@@ -573,9 +580,11 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
                     em.compile_block(&main_def.body)?;
                 }
             }
-            // Prototypes emit nothing; they only register a
-            // signature, checked in the first pass above.
+            // Prototypes and typedefs emit nothing; prototypes
+            // only register a signature, checked in the first pass
+            // above.
             External::FuncDecl(_) => {}
+            External::Typedef(_) => {}
             External::Decl(d) => {
                 em.compile_decl(d)?;
             }
@@ -2339,6 +2348,85 @@ mod tests {
         ];
         for (src, want) in cases {
             assert_eq!(compile(src).unwrap_err().msg, *want, "for {:?}", src);
+        }
+    }
+
+    #[test]
+    fn typedefs_compile_and_run() {
+        let bf = compile(
+            b"typedef int MyInt; typedef MyInt Alias; typedef unsigned int U; \
+              typedef int *PInt; typedef char Arr[4]; \
+              MyInt twice(MyInt x) { return x + x; } \
+              int main() { \
+                MyInt a = 21; Alias c = 1; U b = 3; \
+                PInt p = &a; Arr s = \"hi\"; \
+                *p = twice(a); \
+                printf(\"%d,%d,%s,%d\", a + b, *p, s, c); \
+              }",
+        )
+        .expect("typedef program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"45,42,hi,1");
+    }
+
+    #[test]
+    fn typedef_prototype_signatures() {
+        // A prototype spelled through aliases agrees with a
+        // definition spelled directly, and vice versa.
+        let bf = compile(
+            b"typedef int MyInt; MyInt f(MyInt); \
+              int f(int x) { return x; } \
+              int main() { printf(\"%d\", f(3)); }",
+        )
+        .expect("alias prototype compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"3");
+        // A pointer return spelled through an alias conflicts
+        // with a scalar definition.
+        let err = compile(
+            b"typedef int *P; P f(int); int f(int x) { return x; } int main() {}",
+        )
+        .expect_err("pointer-return conflict");
+        assert_eq!(err.msg, "conflicting prototype for function 'f'");
+    }
+
+    #[test]
+    fn typedef_pointer_return_runs() {
+        // A pointer return spelled through an alias is usable:
+        // the callee returns an address byte, the caller derefs it.
+        let bf = compile(
+            b"typedef int *P; P get(int *q) { return q; } \
+              int main() { int x = 65; printf(\"%d\", *get(&x)); }",
+        )
+        .expect("pointer-return program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"65");
+    }
+
+    #[test]
+    fn typedef_errors_rejected() {
+        let cases: &[(&[u8], &str)] = &[
+            (
+                b"typedef int T; typedef char T; int main() {}",
+                "conflicting typedef for 'T'",
+            ),
+            (
+                b"int main() { typedef int T; return 0; }",
+                "only allowed at file scope",
+            ),
+        ];
+        for (src, want) in cases {
+            let err = compile(src).expect_err("typedef error");
+            assert!(
+                err.msg.contains(want),
+                "for {:?}: got {:?}, want {:?}",
+                src,
+                err.msg,
+                want
+            );
         }
     }
 

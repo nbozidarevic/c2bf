@@ -211,14 +211,15 @@ call site.
   optional parameter names: `int f(int);` declares `f` without a
   body and emits nothing. A prototype must agree with its
   definition and with any earlier prototype: same void-ness,
-  same parameter count, same pointer/array flags per parameter;
-  parameter names and type spellings may differ (all spellings
-  denote one byte). Repeated compatible prototypes are allowed;
-  a conflicting one is a compile error. Calling a function with
-  only a prototype is a compile error (there is no body to
-  expand); an uncalled prototype compiles. No function pointers,
-  no arrays or pointers returned by value beyond the byte model
-  (a pointer return type, `char *f()`, does not parse).
+  same pointer return, same parameter count, same pointer/array
+  flags per parameter; parameter names and type spellings may
+  differ (all spellings denote one byte). Repeated compatible
+  prototypes are allowed; a conflicting one is a compile error.
+  Calling a function with only a prototype is a compile error
+  (there is no body to expand); an uncalled prototype compiles.
+  No function pointers. A direct pointer return declarator
+  (`char *f()`) does not parse yet; a pointer return spelled
+  through a typedef alias does (see Typedefs).
 - Declarations are lexically scoped: a declaration in a nested
   block shadows an outer one (each gets its own cells). A
   declaration at the top level of a function body may not reuse
@@ -241,3 +242,39 @@ call site.
   tentative-definition question (legal in C, an error in C++) does
   not arise: every duplicate this compiler can express is
   initialized, and both compilers reject those.
+
+## Typedefs
+
+`typedef` aliases a type spelling for later uses. Aliases are
+resolved at parse time: a use expands to the aliased specifier
+plus the alias's pointer/array flags, and the alias itself emits
+nothing.
+
+- Declarations are file-scope only; a `typedef` inside a function
+  body is a parse error (like prototypes). An alias is visible
+  from its definition onward, in source order; uses before the
+  definition treat the name as an opaque specifier word, as any
+  unknown word pair already does. A typedef name does not hide
+  behind a variable of the same name: the alias always wins in
+  specifier position, a documented deviation from C scoping.
+- One declarator per declaration, no initializer, no comma list.
+  The declarator may add `*` or `[]` to a scalar alias; adding
+  `*` to a pointer alias or `[]` to an array alias is an error
+  (pointer-to-pointer and multi-dimensional arrays are
+  unsupported). Chained aliases (`typedef MyInt Alias;`) expand
+  transitively. Qualifiers may precede or follow the alias name
+  (`const T`, `T const`); any other specifier word beside an
+  alias name is an error.
+- Array aliases carry an integer-literal size, checked at the
+  definition (`typedef char A[3];`), or are unsized (`typedef
+  char S[];`, sized by a string initializer at each use).
+  Aliases work in every specifier position that takes a plain
+  specifier: variable declarations, function parameters
+  (including unnamed ones), function return types (including
+  pointer returns), and prototypes. They are not expanded in
+  casts or `sizeof` type operands, which only recognize built-in
+  specifier words.
+- Redefining an alias to an identical expansion is allowed;
+  redefining it to a different expansion is a parse error.
+  Pointer and array aliases are not supported as `for`
+  declarations.

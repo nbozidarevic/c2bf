@@ -13,6 +13,7 @@ pub enum External {
     FuncDef(FuncDef),
     FuncDecl(FuncDecl),
     Decl(Decl),
+    Typedef(TypedefDecl),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +33,10 @@ pub struct FuncDef {
     /// other return types) because a `void` call used as a value
     /// must yield zero rather than a returned value.
     pub is_void: bool,
+    /// `true` when the function returns a pointer (a byte holding
+    /// a tape index). Set by a `*` return declarator or by a
+    /// pointer typedef as the return type.
+    pub returns_pointer: bool,
     pub params: Vec<FnParam>,
     pub body: Block,
 }
@@ -43,7 +48,24 @@ pub struct FuncDef {
 pub struct FuncDecl {
     pub name: Vec<u8>,
     pub is_void: bool,
+    pub returns_pointer: bool,
     pub params: Vec<FnParam>,
+}
+
+/// A file-scope type alias (`typedef`), resolved at parse time:
+/// uses expand to the aliased specifier plus declarator flags.
+/// See `docs/semantics.md` for scope and redefinition rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypedefDecl {
+    pub name: Vec<u8>,
+    /// Space-joined aliased specifier words (`int`,
+    /// `unsigned int`).
+    pub spec: Vec<u8>,
+    pub pointer: bool,
+    /// Sized array alias: element count, evaluated at definition
+    /// (array sizes must be integer literals, as for arrays).
+    pub array_len: Option<i32>,
+    pub array_unsized: bool,
 }
 
 #[derive(Debug)]
@@ -264,6 +286,27 @@ fn dump_external(e: &External, out: &mut Vec<u8>) {
             close(out);
         }
         External::Decl(d) => dump_decl(d, out),
+        External::Typedef(t) => {
+            open_text(out, "typedef", &t.name);
+            out.push(b' ');
+            escape_into(out, &t.spec);
+            if t.pointer {
+                out.push(b' ');
+                open(out, "pointer");
+                close(out);
+            }
+            if let Some(len) = t.array_len {
+                out.push(b' ');
+                open_text(out, "int", len.to_string().as_bytes());
+                close(out);
+            }
+            if t.array_unsized {
+                out.push(b' ');
+                open(out, "unsized");
+                close(out);
+            }
+            close(out);
+        }
     }
 }
 
