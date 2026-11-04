@@ -369,11 +369,7 @@ impl Emitter {
         // `a >= 0`, which is always true, and subtracted zero
         // forever. `b` is preserved by the branch, so
         // `mod_values` can still read it afterwards.
-        self.perform_if_else(
-            b,
-            |em| em.divide_loop(a_copy, result, b),
-            |_| Ok(()),
-        )?;
+        self.perform_if(b, |em| em.divide_loop(a_copy, result, b))?;
         Ok(result)
     }
 
@@ -568,14 +564,10 @@ impl Emitter {
     /// `multiply_values` and adding the product: the bit is only
     /// ever `0` or `1`, so the multiply's loop is pure overhead.
     fn accumulate_bit(&mut self, bit: i32, result: i32, place: i32) -> Result<(), CompileError> {
-        self.perform_if_else(
-            bit,
-            |em| {
-                em.add_copy_to(place, result);
-                Ok(())
-            },
-            |_| Ok(()),
-        )
+        self.perform_if(bit, |em| {
+            em.add_copy_to(place, result);
+            Ok(())
+        })
     }
 
     /// `result = a <op> b` in a fresh cell, for a bitwise `op`.
@@ -612,14 +604,10 @@ impl Emitter {
                 let zero_a = em.negate(ac)?;
                 let zero_b = em.negate(bc)?;
                 let both_zero = em.multiply_values(zero_a, zero_b);
-                em.perform_if_else(
-                    both_zero,
-                    |em| {
-                        em.set_value(counter, 0);
-                        Ok(())
-                    },
-                    |_| Ok(()),
-                )?;
+                em.perform_if(both_zero, |em| {
+                    em.set_value(counter, 0);
+                    Ok(())
+                })?;
                 Ok(())
             },
         )?;
@@ -707,63 +695,39 @@ impl Emitter {
         self.move_pointer(a_copy);
         self.emit("]");
         let not_a = self.negate(a_copy)?;
-        self.perform_if_else(
-            not_a,
-            |em| {
-                let not_b = em.negate(b_copy)?;
-                em.perform_if_else(
-                    not_b,
-                    |em| {
-                        em.set_value(result, 1);
-                        Ok(())
-                    },
-                    |_| Ok(()),
-                )
-            },
-            |_| Ok(()),
-        )?;
+        self.perform_if(not_a, |em| {
+            let not_b = em.negate(b_copy)?;
+            em.perform_if(not_b, |em| {
+                em.set_value(result, 1);
+                Ok(())
+            })
+        })?;
         Ok(result)
     }
 
     /// `result = (a && b)` in a fresh cell (`logicalAnd`).
     pub fn logical_and(&mut self, a: i32, b: i32) -> Result<i32, CompileError> {
         let result = self.const_value(0);
-        self.perform_if_else(
-            a,
-            |em| {
-                em.perform_if_else(
-                    b,
-                    |em| {
-                        em.set_value(result, 1);
-                        Ok(())
-                    },
-                    |_| Ok(()),
-                )
-            },
-            |_| Ok(()),
-        )?;
+        self.perform_if(a, |em| {
+            em.perform_if(b, |em| {
+                em.set_value(result, 1);
+                Ok(())
+            })
+        })?;
         Ok(result)
     }
 
     /// `result = (a || b)` in a fresh cell (`logicalOr`).
     pub fn logical_or(&mut self, a: i32, b: i32) -> Result<i32, CompileError> {
         let result = self.const_value(0);
-        self.perform_if_else(
-            a,
-            |em| {
-                em.set_value(result, 1);
-                Ok(())
-            },
-            |_| Ok(()),
-        )?;
-        self.perform_if_else(
-            b,
-            |em| {
-                em.set_value(result, 1);
-                Ok(())
-            },
-            |_| Ok(()),
-        )?;
+        self.perform_if(a, |em| {
+            em.set_value(result, 1);
+            Ok(())
+        })?;
+        self.perform_if(b, |em| {
+            em.set_value(result, 1);
+            Ok(())
+        })?;
         Ok(result)
     }
 
@@ -786,14 +750,10 @@ impl Emitter {
         )?;
         let not_a = self.negate(a_copy)?;
         let cond = self.logical_and(not_a, b_copy)?;
-        self.perform_if_else(
-            cond,
-            |em| {
-                em.set_value(result, 1);
-                Ok(())
-            },
-            |_| Ok(()),
-        )?;
+        self.perform_if(cond, |em| {
+            em.set_value(result, 1);
+            Ok(())
+        })?;
         Ok(result)
     }
 
@@ -816,6 +776,30 @@ impl Emitter {
     pub fn greater_than_or_equal(&mut self, a: i32, b: i32) -> Result<i32, CompileError> {
         let lt = self.less_than(a, b)?;
         self.negate(lt)
+    }
+
+    /// If on `expression`, with no else branch.
+    ///
+    /// SPIKE: same guard shape as [`Emitter::perform_if_else`] but
+    /// without the else loop or its `else_value` cell: when the
+    /// else branch is empty, the else loop only zeroes a dead
+    /// temporary. Callers with a non-empty else keep
+    /// `perform_if_else`.
+    pub fn perform_if(
+        &mut self,
+        expression: i32,
+        mut iff: impl FnMut(&mut Self) -> Result<(), CompileError>,
+    ) -> Result<(), CompileError> {
+        let checkpoint = self.checkpoint();
+        let if_value = self.duplicate_value(expression);
+        self.move_pointer(if_value);
+        self.emit("[");
+        self.set_value(if_value, 0);
+        iff(self)?;
+        self.move_pointer(if_value);
+        self.emit("]");
+        self.release_temps(checkpoint);
+        Ok(())
     }
 
     /// If/else on `expression` (`performIfElse`).
@@ -1224,16 +1208,12 @@ impl Emitter {
                         em.move_value(q, digit);
                         let glyph = em.add_values(digit, zero_char);
                         let is_letter = em.greater_than(digit, nine)?;
-                        em.perform_if_else(
-                            is_letter,
-                            |em| {
-                                let d = em.subtract_values(digit, ten);
-                                let g = em.add_values(d, a_char);
-                                em.move_value(g, glyph);
-                                Ok(())
-                            },
-                            |_| Ok(()),
-                        )?;
+                        em.perform_if(is_letter, |em| {
+                            let d = em.subtract_values(digit, ten);
+                            let g = em.add_values(d, a_char);
+                            em.move_value(g, glyph);
+                            Ok(())
+                        })?;
                         em.print_as_char(glyph);
                         let scaled = em.multiply_values(digit, helper);
                         let rest = em.subtract_values(a_copy, scaled);
@@ -1272,16 +1252,12 @@ impl Emitter {
         let loaded = self.load_through(cur)?;
         self.copy_value(loaded, ch);
         let one = self.const_value(1);
-        self.perform_if_else(
-            ch,
-            |em| {
-                em.print_as_char(ch);
-                let next = em.add_values(cur, one);
-                em.copy_value(next, cur);
-                Ok(())
-            },
-            |_| Ok(()),
-        )?;
+        self.perform_if(ch, |em| {
+            em.print_as_char(ch);
+            let next = em.add_values(cur, one);
+            em.copy_value(next, cur);
+            Ok(())
+        })?;
         self.move_pointer(ch);
         self.emit("]");
         self.release_temps(checkpoint);
@@ -1320,14 +1296,10 @@ impl Emitter {
             },
             |em| {
                 let is_minus = em.is_equal(reader, minus)?;
-                em.perform_if_else(
-                    is_minus,
-                    |em| {
-                        em.set_value(negative, 1);
-                        Ok(())
-                    },
-                    |_| Ok(()),
-                )?;
+                em.perform_if(is_minus, |em| {
+                    em.set_value(negative, 1);
+                    Ok(())
+                })?;
                 em.move_pointer(reader);
                 em.emit(",");
                 Ok(())
@@ -1354,16 +1326,12 @@ impl Emitter {
             },
         )?;
         // Apply the sign, if one was seen: 0 - result, wrapping.
-        self.perform_if_else(
-            negative,
-            |em| {
-                let zero_value = em.const_value(0);
-                let negated = em.subtract_values(zero_value, result);
-                em.move_value(negated, result);
-                Ok(())
-            },
-            |_| Ok(()),
-        )?;
+        self.perform_if(negative, |em| {
+            let zero_value = em.const_value(0);
+            let negated = em.subtract_values(zero_value, result);
+            em.move_value(negated, result);
+            Ok(())
+        })?;
         self.move_value(result, a);
         Ok(())
     }
@@ -1461,14 +1429,10 @@ impl Emitter {
                 )
             },
         )?;
-        self.perform_if_else(
-            seen,
-            |em| {
-                em.store_to_cells(offset, &cells, zero)?;
-                Ok(())
-            },
-            |_| Ok(()),
-        )
+        self.perform_if(seen, |em| {
+            em.store_to_cells(offset, &cells, zero)?;
+            Ok(())
+        })
     }
 
     /// Read a whitespace-delimited string (`scanf %s`) through the
@@ -1538,21 +1502,17 @@ impl Emitter {
                 )
             },
         )?;
-        self.perform_if_else(
-            seen,
-            |em| {
-                em.perform_if_else(
-                    full,
-                    |_| Ok(()),
-                    |em| {
-                        em.store_through(cur, zero)?;
-                        Ok(())
-                    },
-                )?;
-                Ok(())
-            },
-            |_| Ok(()),
-        )
+        self.perform_if(seen, |em| {
+            em.perform_if_else(
+                full,
+                |_| Ok(()),
+                |em| {
+                    em.store_through(cur, zero)?;
+                    Ok(())
+                },
+            )?;
+            Ok(())
+        })
     }
 
     /// Print the constant byte `c` (`printChar`).
@@ -1916,6 +1876,21 @@ mod tests {
         assert_eq!(run_cell(&mut em, cell), 5);
         let (mut em, cell) = build(2);
         assert_eq!(run_cell(&mut em, cell), 6);
+    }
+
+    #[test]
+    fn perform_if_runs_then_only_when_nonzero() {
+        for (cond_value, want) in [(0u8, 0u8), (1, 7), (255, 7)] {
+            let mut em = Emitter::new();
+            let cond = em.const_value(cond_value);
+            let result = em.const_value(0);
+            em.perform_if(cond, |em| {
+                em.set_value(result, 7);
+                Ok(())
+            })
+            .unwrap();
+            assert_eq!(run_cell(&mut em, result), want, "cond {cond_value}");
+        }
     }
 
     #[test]

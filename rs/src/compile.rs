@@ -1071,11 +1071,7 @@ impl Emitter {
         if let Some(&flag) = self.break_stack.last() {
             if flag >= 0 {
                 let nb = self.negate(flag)?;
-                return self.perform_if_else(
-                    nb,
-                    |em| em.compile_stmt_guarded_continue(s),
-                    |_| Ok(()),
-                );
+                return self.perform_if(nb, |em| em.compile_stmt_guarded_continue(s));
             }
         }
         self.compile_stmt_guarded_continue(s)
@@ -1087,7 +1083,7 @@ impl Emitter {
         if let Some(&flag) = self.continue_stack.last() {
             if flag >= 0 {
                 let nc = self.negate(flag)?;
-                return self.perform_if_else(nc, |em| em.compile_stmt(s), |_| Ok(()));
+                return self.perform_if(nc, |em| em.compile_stmt(s));
             }
         }
         self.compile_stmt(s)
@@ -1098,11 +1094,7 @@ impl Emitter {
         if let Some(&flag) = self.break_stack.last() {
             if flag >= 0 {
                 let nb = self.negate(flag)?;
-                return self.perform_if_else(
-                    nb,
-                    |em| em.compile_decl_guarded_continue(d),
-                    |_| Ok(()),
-                );
+                return self.perform_if(nb, |em| em.compile_decl_guarded_continue(d));
             }
         }
         self.compile_decl_guarded_continue(d)
@@ -1113,7 +1105,7 @@ impl Emitter {
         if let Some(&flag) = self.continue_stack.last() {
             if flag >= 0 {
                 let nc = self.negate(flag)?;
-                return self.perform_if_else(nc, |em| em.compile_decl(d), |_| Ok(()));
+                return self.perform_if(nc, |em| em.compile_decl(d));
             }
         }
         self.compile_decl(d)
@@ -1197,7 +1189,7 @@ impl Emitter {
         match self.return_context {
             Some((flag, _)) => {
                 let nr = self.negate(flag)?;
-                self.perform_if_else(nr, |em| f(em), |_| Ok(()))
+                self.perform_if(nr, |em| f(em))
             }
             None => f(self),
         }

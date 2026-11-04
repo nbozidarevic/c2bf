@@ -17,6 +17,10 @@ roadmap phases that produced them.
 - WASM build stability: `wasm-pack` pinned to `v0.15.1` in CI and
   `wasm-opt` disabled, after nondeterministic "latest" resolution
   and an intermittent binaryen parse failure.
+- Codegen: then-only `perform_if` replaces `perform_if_else` at
+  every empty-else site (logic/comparison helpers, guards,
+  division, `%s`/`scanf` checks), saving 507,064 BF bytes
+  (-4.4%) across the corpus with no fixture growing.
 
 ## Rename to `c2bf` (Phase 8)
 
