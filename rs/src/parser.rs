@@ -304,7 +304,18 @@ impl<'a> Parser<'a> {
                     if !self.at_spec_start() {
                         return self.fail("expected parameter type".to_string());
                     }
-                    self.parse_spec();
+                    let spec = self.parse_spec();
+                    // An unnamed parameter ends the specifier at
+                    // `,`/`)`, but the specifier joiner only swallows
+                    // a following type word when another word follows
+                    // it (so `int long = 1` keeps `long` as the
+                    // declarator name), leaving a bare qualifier
+                    // (`unsigned`) when the type word itself is
+                    // last. A lone qualifier followed by a type
+                    // keyword is the whole specifier here.
+                    if is_qualifier(&spec) && self.is_type_tok() {
+                        self.next_tok();
+                    }
                     // One `*` makes a pointer parameter; a second
                     // `*` fails at the name.
                     let pointer = if self.at_punct(b"*") {
