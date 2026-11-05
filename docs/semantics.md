@@ -138,6 +138,20 @@ the deviation is stated here as defined behavior, pinned by tests.
   terminating whitespace is consumed, not pushed back: `%c`
   after `%s` reads the character after the delimiter, unlike
   C. Pinned by the `scanfstr` oracle fixture and unit tests.
+- `printf` supports `%d`, `%u`, `%o`, `%x`, `%X`, `%c`, `%s`,
+  and `%%`; `scanf` supports `%d`, `%u`, `%o`, `%x`, `%i`,
+  `%c`, and `%s`. Length modifiers (`hh`, `h`, `ll`, `l`, `j`,
+  `z`, `t`) are accepted and ignored in both — every value is
+  one byte. Flags, field widths, and precisions are rejected,
+  as are float conversions and `%p`/`%n`. `scanf` also supports
+  assignment suppression (`%*d`, `%*s`, ...): the conversion is
+  read and discarded and consumes no argument. `%i` detects its
+  base: a `0x`/`0X` prefix reads hex, a leading `0` reads octal,
+  otherwise decimal; `%x` accepts an optional `0x` prefix.
+  `%o` reads octal digits only. `%i` on `09` yields `0` as in C,
+  but the `9` is consumed here (C leaves it unread), so fixtures
+  avoid that shape. Pinned by the `formats` oracle fixture and
+  unit tests.
 
 ## Execution
 
@@ -164,9 +178,9 @@ unchanged), and the loop test (`!= 0`). The retired C++ runner
 differed on all three (fixed 65536-cell tape, `> 0` loop test);
 those deviations were not mirrored in the port. The deviations
 that remain are source-language ones, stated as defined behavior
-in "Tape and cells" above: division/modulo by zero, `scanf` sign
-and `%s` handling, wrapping single-byte arithmetic, and the
-`sizeof` exceptions.
+in "Tape and cells" above: division/modulo by zero, `scanf` sign,
+base-prefix, and `%s` handling, wrapping single-byte arithmetic,
+and the `sizeof` exceptions.
 
 ## Port notes (retired C++ behaviors)
 

@@ -113,6 +113,18 @@ impl std::fmt::Display for CompileError {
 
 impl std::error::Error for CompileError {}
 
+/// Bound cells for `scan_digit`, allocated once per reader.
+struct DigitBounds {
+    zero: i32,
+    nine: i32,
+    ten: i32,
+    sixteen: i32,
+    lo_a: i32,
+    lo_f: i32,
+    hi_a: i32,
+    hi_f: i32,
+}
+
 impl Emitter {
     /// Fresh emitter; data pointer starts at cell 0.
     pub fn new() -> Self {
@@ -1181,30 +1193,53 @@ impl Emitter {
     }
 
     /// Print cell `a` as a lowercase hexadecimal number (`%x`).
-    ///
-    /// Same place-value shape as [`Self::print_as_number`] with base 16.
-    /// Bytes need at most two hex digits, so the place loop runs while
-    /// the digit exceeds 15 (one division): `helper` only ever reaches
-    /// 16, and never wraps through 256 the way a second multiply would.
     pub fn print_as_hex(&mut self, a: i32) -> Result<(), CompileError> {
+        self.print_as_radix(a, 16, b'a', true)
+    }
+
+    /// Print cell `a` as an uppercase hexadecimal number (`%X`).
+    pub fn print_as_hex_upper(&mut self, a: i32) -> Result<(), CompileError> {
+        self.print_as_radix(a, 16, b'A', true)
+    }
+
+    /// Print cell `a` as an octal number (`%o`).
+    pub fn print_as_octal(&mut self, a: i32) -> Result<(), CompileError> {
+        self.print_as_radix(a, 8, b'a', false)
+    }
+
+    /// Print cell `a` in base `base`, with the place-value shape of
+    /// [`Self::print_as_number`]. Bytes need at most two hex digits
+    /// (three octal), so the place loop runs while the digit exceeds
+    /// `base - 1`: `helper` only ever reaches `base`, and never
+    /// wraps through 256 the way a second multiply would. When
+    /// `letters` is set, digits above 9 print from `letter`
+    /// (`a` or `A`); otherwise digits never exceed 9 and the
+    /// letter branch is not emitted.
+    fn print_as_radix(
+        &mut self,
+        a: i32,
+        base: u8,
+        letter: u8,
+        letters: bool,
+    ) -> Result<(), CompileError> {
         let a_copy = self.duplicate_value(a);
         let digit = self.duplicate_value(a);
         let helper = self.const_value(1);
         let zero_char = self.const_value(b'0');
         let nine = self.const_value(9);
         let ten = self.const_value(10);
-        let fifteen = self.const_value(15);
-        let sixteen = self.const_value(16);
-        let a_char = self.const_value(b'a');
+        let base_top = self.const_value(base - 1);
+        let radix = self.const_value(base);
+        let letter_char = self.const_value(letter);
         self.perform_if_else(
             a,
             |em| {
                 em.perform_while(
-                    |em| Ok(em.greater_than(digit, fifteen)?),
+                    |em| Ok(em.greater_than(digit, base_top)?),
                     |em| {
-                        let q = em.divide_values_unchecked(digit, sixteen)?;
+                        let q = em.divide_values_unchecked(digit, radix)?;
                         em.move_value(q, digit);
-                        let h = em.multiply_values(helper, sixteen);
+                        let h = em.multiply_values(helper, radix);
                         em.move_value(h, helper);
                         Ok(())
                     },
@@ -1215,18 +1250,20 @@ impl Emitter {
                         let q = em.divide_values_unchecked(a_copy, helper)?;
                         em.move_value(q, digit);
                         let glyph = em.add_values(digit, zero_char);
-                        let is_letter = em.greater_than(digit, nine)?;
-                        em.perform_if(is_letter, |em| {
-                            let d = em.subtract_values(digit, ten);
-                            let g = em.add_values(d, a_char);
-                            em.move_value(g, glyph);
-                            Ok(())
-                        })?;
+                        if letters {
+                            let is_letter = em.greater_than(digit, nine)?;
+                            em.perform_if(is_letter, |em| {
+                                let d = em.subtract_values(digit, ten);
+                                let g = em.add_values(d, letter_char);
+                                em.move_value(g, glyph);
+                                Ok(())
+                            })?;
+                        }
                         em.print_as_char(glyph);
                         let scaled = em.multiply_values(digit, helper);
                         let rest = em.subtract_values(a_copy, scaled);
                         em.move_value(rest, a_copy);
-                        let q = em.divide_values_unchecked(helper, sixteen)?;
+                        let q = em.divide_values_unchecked(helper, radix)?;
                         em.move_value(q, helper);
                         Ok(())
                     },
@@ -1342,6 +1379,197 @@ impl Emitter {
         })?;
         self.move_value(result, a);
         Ok(())
+    }
+
+    /// Bases for the non-decimal `scanf` conversions (`%o`, `%x`,
+    /// `%i`). `%d` and `%u` keep the decimal reader above, whose
+    /// emission is pinned by the goldens.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum NumericBase {
+        Oct,
+        Hex,
+        Auto,
+    }
+
+    /// Read a number in a non-decimal base into cell `a` (`scanf`
+    /// `%o`, `%x`, `%i`): the decimal reader's shape, with a
+    /// base-aware digit test. `%x` and `%i` accept an optional
+    /// `0x`/`0X` prefix after the skipped characters (and an
+    /// optional sign, as for `%d`); `%i` without a prefix reads
+    /// octal after a leading `0`, decimal otherwise. The base is
+    /// held in a cell for `%i` (10, 8, or 16 by prefix) and a
+    /// constant cell otherwise. As for `%d`, characters before
+    /// the first digit are skipped (a `-` records the sign), the
+    /// terminating character is consumed, and a `-` negates with
+    /// wrapping.
+    pub fn read_as_number_base(
+        &mut self,
+        a: i32,
+        base: NumericBase,
+    ) -> Result<(), CompileError> {
+        let reader = self.const_value(0);
+        let result = self.const_value(0);
+        let zero_cell = self.const_value(0);
+        let bounds = DigitBounds {
+            zero: self.const_value(b'0'),
+            nine: self.const_value(b'9'),
+            ten: self.const_value(10),
+            sixteen: self.const_value(16),
+            lo_a: self.const_value(b'a'),
+            lo_f: self.const_value(b'f'),
+            hi_a: self.const_value(b'A'),
+            hi_f: self.const_value(b'F'),
+        };
+        let minus = self.const_value(b'-');
+        let negative = self.const_value(0);
+        let base_cell = match base {
+            NumericBase::Oct => self.const_value(8),
+            NumericBase::Hex => self.const_value(16),
+            NumericBase::Auto => self.const_value(10),
+        };
+        self.move_pointer(reader);
+        self.emit(",");
+        // Skip until a digit for the current base starts the
+        // number (decimal digits for `%i` before any prefix is
+        // seen; the prefix check below runs first for `%x`).
+        self.perform_while(
+            |em| {
+                let (_, valid) = em.scan_digit(reader, base_cell, &bounds)?;
+                Ok(em.is_equal(valid, zero_cell)?)
+            },
+            |em| {
+                let is_minus = em.is_equal(reader, minus)?;
+                em.perform_if(is_minus, |em| {
+                    em.set_value(negative, 1);
+                    Ok(())
+                })?;
+                em.move_pointer(reader);
+                em.emit(",");
+                Ok(())
+            },
+        )?;
+        // An optional `0x` prefix: a leading `0` is consumed and
+        // the next character decides. For `%i`, a following octal
+        // digit instead selects base 8; any other following
+        // character leaves base 10 with that character as the
+        // first digit-loop input (the dropped `0` cannot change
+        // the value).
+        // Set when a `%i` `0` prefix is followed by neither
+        // `x` nor an octal digit: the value is 0 and the digit
+        // loop must not run (C would leave the peeked character
+        // unread; here it is consumed, like every other `scanf`
+        // terminator).
+        let prefix_done = self.const_value(0);
+        if base != NumericBase::Oct {
+            let x_lo = self.const_value(b'x');
+            let x_hi = self.const_value(b'X');
+            let seven = self.const_value(b'7');
+            let is_zero = self.is_equal(reader, bounds.zero)?;
+            self.perform_if(is_zero, |em| {
+                em.move_pointer(reader);
+                em.emit(",");
+                let is_x_lo = em.is_equal(reader, x_lo)?;
+                let is_x_hi = em.is_equal(reader, x_hi)?;
+                let is_x = em.logical_or(is_x_lo, is_x_hi)?;
+                em.perform_if(is_x, |em| {
+                    em.move_pointer(reader);
+                    em.emit(",");
+                    if base == NumericBase::Auto {
+                        em.set_value(base_cell, 16);
+                    }
+                    Ok(())
+                })?;
+                if base == NumericBase::Auto {
+                    let not_x = em.is_equal(is_x, zero_cell)?;
+                    let ge_zero = em.greater_than_or_equal(reader, bounds.zero)?;
+                    let le_seven = em.less_than_or_equal(reader, seven)?;
+                    let oct_digit = em.logical_and(ge_zero, le_seven)?;
+                    let is_oct = em.logical_and(not_x, oct_digit)?;
+                    em.perform_if(is_oct, |em| {
+                        em.set_value(base_cell, 8);
+                        Ok(())
+                    })?;
+                    let not_oct = em.is_equal(is_oct, zero_cell)?;
+                    let done = em.logical_and(not_x, not_oct)?;
+                    em.perform_if(done, |em| {
+                        em.set_value(prefix_done, 1);
+                        Ok(())
+                    })?;
+                }
+                Ok(())
+            })?;
+        }
+        // Digits accumulate as `result = result * base + value`;
+        // the condition recomputes the digit, as the decimal
+        // reader recomputes its digit in the loop body.
+        self.perform_while(
+            |em| {
+                let (_, valid) = em.scan_digit(reader, base_cell, &bounds)?;
+                let not_done = em.is_equal(prefix_done, zero_cell)?;
+                Ok(em.logical_and(valid, not_done)?)
+            },
+            |em| {
+                let (value, _) = em.scan_digit(reader, base_cell, &bounds)?;
+                let shifted = em.multiply_values(result, base_cell);
+                let acc = em.add_values(value, shifted);
+                em.move_value(acc, result);
+                em.move_pointer(reader);
+                em.emit(",");
+                Ok(())
+            },
+        )?;
+        self.perform_if(negative, |em| {
+            let zero_value = em.const_value(0);
+            let negated = em.subtract_values(zero_value, result);
+            em.move_value(negated, result);
+            Ok(())
+        })?;
+        self.move_value(result, a);
+        Ok(())
+    }
+
+    /// Value and validity of the digit in `reader` for the base
+    /// held in `base_cell`: decimal digits below the base, plus
+    /// hex letters when the base is 16. Returns `(value, valid)`
+    /// cells, with `valid` 0 or 1. Called once for the loop
+    /// condition and once for the body, so the computation is
+    /// re-emitted; the bound cells in `bounds` are allocated
+    /// once by the caller.
+    fn scan_digit(
+        &mut self,
+        reader: i32,
+        base_cell: i32,
+        bounds: &DigitBounds,
+    ) -> Result<(i32, i32), CompileError> {
+        let ge_zero = self.greater_than_or_equal(reader, bounds.zero)?;
+        let le_nine = self.less_than_or_equal(reader, bounds.nine)?;
+        let dec_digit = self.logical_and(ge_zero, le_nine)?;
+        let dec_val = self.subtract_values(reader, bounds.zero);
+        let ge_lo = self.greater_than_or_equal(reader, bounds.lo_a)?;
+        let le_lo = self.less_than_or_equal(reader, bounds.lo_f)?;
+        let lo_digit = self.logical_and(ge_lo, le_lo)?;
+        let lo_val = self.add_values(
+            self.subtract_values(reader, bounds.lo_a),
+            bounds.ten,
+        );
+        let ge_hi = self.greater_than_or_equal(reader, bounds.hi_a)?;
+        let le_hi = self.less_than_or_equal(reader, bounds.hi_f)?;
+        let hi_digit = self.logical_and(ge_hi, le_hi)?;
+        let hi_val = self.add_values(
+            self.subtract_values(reader, bounds.hi_a),
+            bounds.ten,
+        );
+        let m1 = self.multiply_values(dec_val, dec_digit);
+        let m2 = self.multiply_values(lo_val, lo_digit);
+        let m3 = self.multiply_values(hi_val, hi_digit);
+        let value = self.add_values(self.add_values(m1, m2), m3);
+        let lt_base = self.less_than(value, base_cell)?;
+        let dec_ok = self.logical_and(dec_digit, lt_base)?;
+        let is16 = self.is_equal(base_cell, bounds.sixteen)?;
+        let letter = self.logical_or(lo_digit, hi_digit)?;
+        let letter_ok = self.logical_and(is16, letter)?;
+        let valid = self.logical_or(dec_ok, letter_ok)?;
+        Ok((value, valid))
     }
 
     /// Whether `cell` holds a C whitespace byte: 9..13 or 32.

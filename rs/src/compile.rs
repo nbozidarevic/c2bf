@@ -17,7 +17,7 @@
 //! - Too few format arguments are rejected (the C++ reads out of bounds).
 
 use crate::ast::{Block, BlockItem, Decl, Expr, External, FnParam, ForDecl, ForInit, FuncDecl, FuncDef, InitDecl, Stmt};
-use crate::codegen::{CompileError, Emitter, ExpandedFunction, FuncSig};
+use crate::codegen::{CompileError, Emitter, ExpandedFunction, FuncSig, NumericBase};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use crate::parser;
@@ -97,6 +97,13 @@ enum ScanfTarget {
     Cell(i32),
     Through(i32),
     Bounded { base: i32, len: usize },
+}
+
+/// A `scanf` scalar conversion for `read_scanf_scalar`.
+enum ScanfConv {
+    Char,
+    Decimal,
+    Based(NumericBase),
 }
 
 /// Scoped renaming: rebuilds one function definition with every
@@ -1931,30 +1938,67 @@ impl Emitter {
         }
     }
 
-    /// Read one `scanf` value (`%c` or `%d`) into a destination:
-    /// directly for a static cell (a bounded range writes its
-    /// first cell, as before), through dispatch for a runtime
-    /// address.
-    fn read_into_target(&mut self, target: ScanfTarget, is_char: bool) -> Result<(), CompileError> {
-        match target {
-            ScanfTarget::Cell(cell) | ScanfTarget::Bounded { base: cell, .. } => {
-                if is_char {
-                    self.read_as_char(cell);
-                } else {
-                    self.read_as_number(cell)?;
-                }
-                Ok(())
+    /// Read one `scanf` scalar into a destination: directly for
+    /// a static cell (a bounded range writes its first cell, as
+    /// before), through dispatch for a runtime address. `None`
+    /// reads a character (`%c`); `Some` reads a based number
+    /// (`%o`/`%x`/`%i`). Decimal (`%d`/`%u`) uses
+    /// `read_decimal_into_target` instead, keeping the decimal
+    /// reader whose emission is pinned by the goldens.
+    fn read_into_target(
+        &mut self,
+        target: ScanfTarget,
+        base: Option<NumericBase>,
+    ) -> Result<(), CompileError> {
+        let read = |em: &mut Self, cell: i32| -> Result<(), CompileError> {
+            match base {
+                None => Ok(em.read_as_char(cell)),
+                Some(b) => em.read_as_number_base(cell, b),
             }
+        };
+        match target {
+            ScanfTarget::Cell(cell) | ScanfTarget::Bounded { base: cell, .. } => read(self, cell),
             ScanfTarget::Through(addr) => {
                 let tmp = self.const_value(0);
-                if is_char {
-                    self.read_as_char(tmp);
-                } else {
-                    self.read_as_number(tmp)?;
-                }
+                read(self, tmp)?;
                 self.store_through(addr, tmp)?;
                 Ok(())
             }
+        }
+    }
+
+    /// Read one decimal `scanf` value (`%d`/`%u`) into a
+    /// destination, on the decimal reader.
+    fn read_decimal_into_target(&mut self, target: ScanfTarget) -> Result<(), CompileError> {
+        match target {
+            ScanfTarget::Cell(cell) | ScanfTarget::Bounded { base: cell, .. } => {
+                self.read_as_number(cell)
+            }
+            ScanfTarget::Through(addr) => {
+                let tmp = self.const_value(0);
+                self.read_as_number(tmp)?;
+                self.store_through(addr, tmp)?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Read one `scanf` scalar conversion into `target`, or into
+    /// a scratch cell whose value is discarded when `target` is
+    /// `None` (assignment suppression).
+    fn read_scanf_scalar(
+        &mut self,
+        target: Option<ScanfTarget>,
+        conv: ScanfConv,
+    ) -> Result<(), CompileError> {
+        let dest = match target {
+            Some(t) => t,
+            None => ScanfTarget::Cell(self.const_value(0)),
+        };
+        match conv {
+            ScanfConv::Char => self.read_into_target(dest, None),
+            ScanfConv::Decimal => self.read_decimal_into_target(dest),
+            ScanfConv::Based(b) => self.read_into_target(dest, Some(b)),
         }
     }
 
@@ -2042,14 +2086,22 @@ impl Emitter {
                         // argument, so `%%` prints a literal `%` without
                         // consuming one. `%u` prints the same digits
                         // as `%d` (values are bytes, never negative);
-                        // `%x` prints lowercase hex.
+                        // `%x`/`%X` print hex, `%o` octal. Length
+                        // modifiers are skipped (every value is one
+                        // byte); flags, widths, and precisions still
+                        // fail below.
+                        skip_length_modifiers(format, &mut i);
                         match format.get(i).copied() {
                             Some(b'%') => self.print_char(b'%'),
-                            Some(spec @ (b'c' | b'd' | b'u' | b'x' | b's')) => {
+                            Some(
+                                spec @ (b'c' | b'd' | b'u' | b'x' | b'X' | b'o' | b's'),
+                            ) => {
                                 let cell = next_format_arg(&vals, &mut next_var)?;
                                 match spec {
                                     b'c' => self.print_as_char(cell),
                                     b'x' => self.print_as_hex(cell)?,
+                                    b'X' => self.print_as_hex_upper(cell)?,
+                                    b'o' => self.print_as_octal(cell)?,
                                     b's' => self.print_as_string(cell)?,
                                     _ => self.print_as_number(cell)?,
                                 }
@@ -2063,20 +2115,59 @@ impl Emitter {
                 match c {
                     b'%' => {
                         i += 1;
-                        let target = next_scanf_target(&targets, &mut next_var)?;
+                        // Assignment suppression (`%*d`): convert and
+                        // discard, consuming no target. Length
+                        // modifiers are skipped, as for `printf`.
+                        let suppressed = if format.get(i).copied() == Some(b'*') {
+                            i += 1;
+                            true
+                        } else {
+                            false
+                        };
+                        skip_length_modifiers(format, &mut i);
+                        let target = if suppressed {
+                            None
+                        } else {
+                            Some(next_scanf_target(&targets, &mut next_var)?)
+                        };
                         match format.get(i).copied() {
-                            Some(b'c') => self.read_into_target(target, true)?,
-                            Some(b'd') => self.read_into_target(target, false)?,
+                            Some(b'c') => {
+                                self.read_scanf_scalar(target, ScanfConv::Char)?
+                            }
+                            Some(b'd') | Some(b'u') => {
+                                self.read_scanf_scalar(target, ScanfConv::Decimal)?
+                            }
+                            Some(b'o') => self.read_scanf_scalar(
+                                target,
+                                ScanfConv::Based(NumericBase::Oct),
+                            )?,
+                            Some(b'x') => self.read_scanf_scalar(
+                                target,
+                                ScanfConv::Based(NumericBase::Hex),
+                            )?,
+                            Some(b'i') => self.read_scanf_scalar(
+                                target,
+                                ScanfConv::Based(NumericBase::Auto),
+                            )?,
                             Some(b's') => match target {
-                                ScanfTarget::Bounded { base, len } => {
+                                Some(ScanfTarget::Bounded { base, len }) => {
                                     self.read_as_string_bounded(base, len)?
                                 }
-                                ScanfTarget::Cell(cell) => {
+                                Some(ScanfTarget::Cell(cell)) => {
                                     let addr = self.address_const(cell)?;
                                     self.read_as_string_through(addr)?;
                                 }
-                                ScanfTarget::Through(addr) => {
-                                    self.read_as_string_through(addr)?
+                                Some(ScanfTarget::Through(addr)) => {
+                                    self.read_as_string_through(addr)?;
+                                }
+                                // Discard into anonymous scratch: the
+                                // bounded read truncates and drops
+                                // the rest of the token, as for an
+                                // array, and the cells are never
+                                // reclaimed.
+                                None => {
+                                    let base = self.memory.alloc_anon_array(256);
+                                    self.read_as_string_bounded(base, 256)?;
                                 }
                             },
                             _ => return Err(err("Unexpected scanf format")),
@@ -2251,6 +2342,23 @@ fn block_may_return(b: &Block) -> bool {
         BlockItem::Stmt(s) => stmt_may_return(s),
         BlockItem::Decl(_) => false,
     })
+}
+
+/// Skip a length modifier (`hh`, `h`, `ll`, `l`, `j`, `z`, `t`)
+/// in a format string, advancing `i` past it. Lengths are no-ops
+/// here (every value is one byte); flags, widths, and precisions
+/// are not skipped and still fail as unexpected specifiers.
+fn skip_length_modifiers(format: &[u8], i: &mut usize) {
+    match format.get(*i).copied() {
+        Some(c @ (b'h' | b'l')) => {
+            *i += 1;
+            if format.get(*i).copied() == Some(c) {
+                *i += 1;
+            }
+        }
+        Some(b'j' | b'z' | b't') => *i += 1,
+        _ => {}
+    }
 }
 
 fn next_format_arg(vals: &[i32], next: &mut usize) -> Result<i32, CompileError> {
@@ -3296,6 +3404,96 @@ mod tests {
         let mut input = std::io::Cursor::new(b"-7\n");
         crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
         assert_eq!(out, b"249");
+    }
+
+    #[test]
+    fn io_formats_compile_and_run() {
+        // Octal and uppercase-hex printing, plus skipped length
+        // modifiers (every value is one byte).
+        let bf = compile(
+            b"int main() { printf(\"%o,%o,%o,%o,%X,%X,%X,%X,%ld,%hhd,%o\", 0, 7, 8, 255, 0, 10, 171, 255, 42, 200, 64); }",
+        )
+        .expect("octal/hex print compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"0,7,10,377,0,A,AB,FF,42,200,100");
+        // Based `scanf` conversions, including `0x` prefixes,
+        // `%i` base detection, and signs.
+        let bf = compile(
+            b"int main() { int a = 0, b = 0, c = 0, d = 0, e = 0, f = 0, g = 0; \
+              scanf(\"%x %o %i %i %i %x %u\", &a, &b, &c, &d, &e, &f, &g); \
+              printf(\"%d,%d,%d,%d,%d,%d,%d\", a, b, c, d, e, f, g); }",
+        )
+        .expect("based scanf compiles");
+        let mut out = Vec::new();
+        let mut input = std::io::Cursor::new(b"ff 77 010 0x1f 0 -0x10 -5\n");
+        crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+        assert_eq!(out, b"255,63,8,31,0,240,251");
+        // `%i` on `09` reads the value C reads (0): the peeked
+        // `9` is consumed here, unlike C, so no conversion
+        // follows it in this check.
+        let bf = compile(
+            b"int main() { int a = 0; scanf(\"%i\", &a); printf(\"%d\", a); }",
+        )
+        .expect("auto-base prefix compiles");
+        let mut out = Vec::new();
+        let mut input = std::io::Cursor::new(b"09\n");
+        crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+        assert_eq!(out, b"0");
+        // Uppercase hex letters and a negative octal value.
+        let bf = compile(
+            b"int main() { int a = 0, b = 0; scanf(\"%x %o\", &a, &b); printf(\"%d,%d\", a, b); }",
+        )
+        .expect("uppercase scanf compiles");
+        let mut out = Vec::new();
+        let mut input = std::io::Cursor::new(b"AB -17\n");
+        crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+        assert_eq!(out, b"171,241");
+        // Length modifiers on `scanf`, and assignment
+        // suppression for numbers and strings.
+        let bf = compile(
+            b"int main() { int a = 0, b = 0; scanf(\"%ld %hhd\", &a, &b); printf(\"%d,%d\", a, b); }",
+        )
+        .expect("modifier scanf compiles");
+        let mut out = Vec::new();
+        let mut input = std::io::Cursor::new(b"12 34\n");
+        crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+        assert_eq!(out, b"12,34");
+        let bf = compile(
+            b"int main() { int a = 0; char buf[6]; scanf(\"%*d %d %*s %s\", &a, buf); printf(\"%d,%s\", a, buf); }",
+        )
+        .expect("suppression scanf compiles");
+        let mut out = Vec::new();
+        let mut input = std::io::Cursor::new(b"99 42 junk hello\n");
+        crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+        assert_eq!(out, b"42,hello");
+    }
+
+    #[test]
+    fn io_format_errors() {
+        let cases: &[(&[u8], &str)] = &[
+            (b"int main() { printf(\"%5d\", 1); }", "Unexpected printf format"),
+            (b"int main() { printf(\"%e\", 1); }", "Unexpected printf format"),
+            (b"int main() { printf(\"%p\", 1); }", "Unexpected printf format"),
+            (
+                b"int main() { int a; scanf(\"%5d\", &a); }",
+                "Unexpected scanf format",
+            ),
+            (
+                b"int main() { int a; scanf(\"%e\", &a); }",
+                "Unexpected scanf format",
+            ),
+            (
+                b"int main() { int a; scanf(\"x\", &a); }",
+                "Unexpected scanf format",
+            ),
+        ];
+        for (src, want) in cases {
+            match compile(src) {
+                Err(e) => assert_eq!(e.msg, *want, "for {:?}", src),
+                Ok(_) => panic!("accepted {:?}", src),
+            }
+        }
     }
 
     #[test]

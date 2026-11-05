@@ -13,6 +13,10 @@ when and how versions change.
   zero fill, unsized sizing by count, one-string lists as string
   initializers) and one-element lists for scalar and `for`
   declarators; empty, nested, and designated lists are errors.
+- I/O: `printf` `%o`/`%X` and `scanf` `%o`/`%x`/`%i`/`%u`
+  (base detection and `0x` prefixes), length modifiers in both,
+  and `scanf` assignment suppression (`%*...`); flags, widths,
+  and precisions are still rejected.
 
 ## v0.2.0
 
