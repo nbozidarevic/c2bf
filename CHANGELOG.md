@@ -7,6 +7,13 @@ below, matching tag `v0.2.0`. Entries below are grouped by the
 roadmap phases that produced them. See `docs/versioning.md` for
 when and how versions change.
 
+## Unreleased
+
+- Language: braced initializer lists for arrays (in-order fill,
+  zero fill, unsized sizing by count, one-string lists as string
+  initializers) and one-element lists for scalar and `for`
+  declarators; empty, nested, and designated lists are errors.
+
 ## v0.2.0
 
 - CLI: `check` command validates C source without emitting

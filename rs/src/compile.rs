@@ -370,6 +370,13 @@ impl<'a> Renamer<'a> {
                 index: Box::new(self.rename_expr(index)?),
             }),
             Expr::Paren(e) => Ok(Expr::Paren(Box::new(self.rename_expr(e)?))),
+            Expr::InitList(es) => {
+                let mut out = Vec::with_capacity(es.len());
+                for e in es {
+                    out.push(self.rename_expr(e)?);
+                }
+                Ok(Expr::InitList(out))
+            }
             Expr::Int(s) => Ok(Expr::Int(s.clone())),
             Expr::Char(s) => Ok(Expr::Char(s.clone())),
             Expr::StringLit { cooked, raw } => Ok(Expr::StringLit {
@@ -661,26 +668,56 @@ impl Emitter {
             if init.pointer {
                 self.memory.mark_pointer(&init.name);
             }
-            let src = self.compile_expr(e)?;
+            let src = self.compile_scalar_init(e)?;
             self.copy_value(src, dest);
         }
         Ok(())
     }
 
+    /// Cell for a scalar declarator initializer (`int x = {5}`):
+    /// a plain expression compiles directly; a braced list must
+    /// hold exactly one element.
+    fn compile_scalar_init(&mut self, e: &Expr) -> Result<i32, CompileError> {
+        match e {
+            Expr::InitList(elems) => {
+                if elems.len() != 1 {
+                    return Err(err(
+                        "scalar initializer list must contain exactly one element",
+                    ));
+                }
+                self.compile_expr(&elems[0])
+            }
+            _ => self.compile_expr(e),
+        }
+    }
+
     /// Compile an array declaration: reserve consecutive cells and
     /// clear them, so elements start at zero (unlike C's indeterminate
     /// values; the tape starts zeroed, but a reclaimed index could
-    /// otherwise carry a stale temporary). Arrays take no
-    /// initializer; the size must be a positive integer literal.
-    /// Redeclaring the same array with the same size re-clears it.
+    /// otherwise carry a stale temporary). The size must be a
+    /// positive integer literal. Redeclaring the same array with
+    /// the same size re-clears it.
     fn compile_array_decl(&mut self, init: &InitDecl) -> Result<(), CompileError> {
         if self.memory.has_var(&init.name) {
             return Err(err("cannot redeclare a variable as an array"));
         }
         // A string initializer fills the elements (plus a NUL when
-        // it fits); any other initializer is rejected, as before.
+        // it fits); a braced list fills them in order, zero-filling
+        // the rest; any other initializer is rejected, as before.
+        // A list holding exactly one string literal is a string
+        // initializer (`char a[] = {"hi"}`), sized with its NUL.
+        let mut list_init: Option<&Vec<Expr>> = None;
         let string_init = match &init.init {
             Some(Expr::StringLit { cooked, .. }) => Some(cooked.clone()),
+            Some(Expr::InitList(elems)) => {
+                match elems.as_slice() {
+                    [Expr::StringLit { cooked, .. }] => Some(cooked.clone()),
+                    _ => {
+                        list_init = Some(elems);
+                        None
+                    }
+                }
+            }
             Some(_) if init.array_unsized => {
                 return Err(err("unsized array requires a string initializer"));
             }
@@ -690,9 +727,17 @@ impl Emitter {
         let len = if init.array_unsized {
             match &string_init {
                 Some(cooked) => cooked.len() + 1,
-                None => {
-                    return Err(err("unsized array requires a string initializer"));
-                }
+                None => match list_init {
+                    Some(elems) => {
+                        if elems.is_empty() {
+                            return Err(err("array size must be positive"));
+                        }
+                        elems.len()
+                    }
+                    None => {
+                        return Err(err("unsized array requires a string initializer"));
+                    }
+                },
             }
         } else {
             let len_expr = init.array_len.as_ref().expect("array declarator");
@@ -709,13 +754,34 @@ impl Emitter {
                     return Err(err("string initializer is too long"));
                 }
             }
+            if let Some(elems) = list_init {
+                if elems.len() > len {
+                    return Err(err("initializer list is too long"));
+                }
+            }
             len
         };
         // Fill the elements: string bytes plus zero fill (a NUL
-        // terminator when it fits), or plain clearing. Setting every
-        // element covers clearing, so the string path needs no
-        // separate pass.
-        let fill = |em: &mut Self, base: i32| {
+        // terminator when it fits), list elements in source order
+        // plus zero fill, or plain clearing. Setting every element
+        // covers clearing, so the string path needs no separate
+        // pass. List elements evaluate left to right, as written.
+        let fill = |em: &mut Self, base: i32| -> Result<(), CompileError> {
+            if let Some(elems) = list_init {
+                for (offset, elem) in elems.iter().enumerate() {
+                    if matches!(elem, Expr::InitList(_)) {
+                        return Err(err(
+                            "nested initializer lists are not supported",
+                        ));
+                    }
+                    let src = em.compile_expr(elem)?;
+                    em.copy_value(src, base + offset as i32);
+                }
+                for cell in base + elems.len() as i32..base + len as i32 {
+                    em.set_value(cell, 0);
+                }
+                return Ok(());
+            }
             for cell in base..base + len as i32 {
                 let offset = (cell - base) as usize;
                 let value = string_init
@@ -724,16 +790,17 @@ impl Emitter {
                     .unwrap_or(0);
                 em.set_value(cell, value);
             }
+            Ok(())
         };
         if let Some((base, old_len)) = self.memory.array_info(&init.name) {
             if old_len != len {
                 return Err(err("array size mismatch on redeclaration"));
             }
-            fill(self, base);
+            fill(self, base)?;
             return Ok(());
         }
         let base = self.memory.alloc_array(&init.name, len);
-        fill(self, base);
+        fill(self, base)?;
         Ok(())
     }
 
@@ -1411,7 +1478,7 @@ impl Emitter {
             Some(e) => e,
         };
         let dest = self.memory.var_cell(name);
-        let src = self.compile_expr(e)?;
+        let src = self.compile_scalar_init(e)?;
         self.copy_value(src, dest);
         Ok(())
     }
@@ -1567,6 +1634,11 @@ impl Emitter {
             // address of its anonymous storage (the format
             // argument of printf/scanf never reaches here).
             Expr::StringLit { cooked, .. } => self.string_value(cooked),
+            // Lists only reach here outside a declarator (the
+            // parser only builds them in initializer position).
+            Expr::InitList(_) => Err(err(
+                "initializer lists are only allowed in declarations",
+            )),
             Expr::Paren(e) => self.compile_expr(e),
             Expr::Comma(es) => {
                 debug_assert!(!es.is_empty());
@@ -3013,6 +3085,85 @@ mod tests {
         let mut out = Vec::new();
         crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
         assert_eq!(out, b"2000");
+    }
+
+    #[test]
+    fn braced_initializers_compile_and_run() {
+        // Sized lists zero-fill; unsized lists size by count;
+        // elements may be arbitrary expressions evaluated in
+        // source order; a one-string list is a string init.
+        let bf = compile(
+            b"char g[4] = {1, 2}; char h[] = {3, 4, 5}; char s[] = {\"hi\"}; \
+              int main() { \
+                int x = {7}; \
+                char a[3] = {x, x + 1, 0}; \
+                char t[] = {'a', 'b'}; \
+                printf(\"%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d\", \
+                  g[0], g[1], g[2], g[3], h[0], h[2], x, a[1], s, t[0], t[1]); \
+              }",
+        )
+        .expect("braced program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"1,2,0,0,3,5,7,8,hi,97,98");
+        // Lists rename inside function bodies: elements may name
+        // parameters and locals.
+        let bf = compile(
+            b"int f(int q) { int a[2] = {q, q + 1}; return a[0] + a[1]; } \
+              int main() { printf(\"%d\", f(10)); }",
+        )
+        .expect("braced function compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"21");
+        // A `for` scalar declarator takes a one-element list.
+        let bf = compile(
+            b"int main() { int s = 0; for (int i = {3}; i > 0; i = i - 1) { s = s + i; } printf(\"%d\", s); }",
+        )
+        .expect("braced for-decl compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"6");
+        // Redeclaring with a list re-fills the elements.
+        let bf = compile(
+            b"int main() { char a[2] = {1, 2}; a[0] = 9; char a[2] = {3, 4}; printf(\"%d%d\", a[0], a[1]); }",
+        )
+        .expect("redeclared list compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"34");
+    }
+
+    #[test]
+    fn braced_initializer_errors() {
+        let cases: &[(&[u8], &str)] = &[
+            (
+                b"int main() { char a[2] = {1, 2, 3}; }",
+                "initializer list is too long",
+            ),
+            (
+                b"int main() { int x = {1, 2}; }",
+                "scalar initializer list must contain exactly one element",
+            ),
+            (
+                b"int main() { for (int i = {1, 2};;) { } return 0; }",
+                "scalar initializer list must contain exactly one element",
+            ),
+            (
+                b"int main() { char a[] = 5; }",
+                "unsized array requires a string initializer",
+            ),
+            (
+                b"int main() { char a[2] = 5; }",
+                "array initializers are not supported",
+            ),
+        ];
+        for (src, want) in cases {
+            match compile(src) {
+                Err(e) => assert_eq!(e.msg, *want, "for {:?}", src),
+                Ok(_) => panic!("accepted {:?}", src),
+            }
+        }
     }
 
     #[test]

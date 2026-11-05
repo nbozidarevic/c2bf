@@ -202,6 +202,10 @@ pub enum Expr {
         index: Box<Expr>,
     },
     Paren(Box<Expr>),
+    /// Braced initializer list `{1, 2}`. Only a declarator
+    /// initializer (or a `for` scalar declarator) may hold one;
+    /// any other position is a compile error.
+    InitList(Vec<Expr>),
     Int(Vec<u8>),
     Char(Vec<u8>),
     StringLit {
@@ -561,6 +565,14 @@ fn dump_expr(e: &Expr, out: &mut Vec<u8>) {
             open(out, "paren");
             out.push(b' ');
             dump_expr(e, out);
+            close(out);
+        }
+        Expr::InitList(es) => {
+            open(out, "initlist");
+            for x in es {
+                out.push(b' ');
+                dump_expr(x, out);
+            }
             close(out);
         }
         Expr::Int(t) => {

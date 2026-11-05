@@ -48,8 +48,19 @@ the deviation is stated here as defined behavior, pinned by tests.
 - Arrays: `char a[N]` reserves `N` consecutive cells, named by
   the array and cleared at the declaration, so elements start at
   zero (C leaves them indeterminate). The size must be a positive
-  integer literal, braced initializers and multi-dimensional
-  arrays are rejected, and an array must be declared before use.
+  integer literal, multi-dimensional arrays are rejected, and an
+  array must be declared before use.
+  A braced initializer list fills an array in order
+  (`char a[3] = {1, 2}`, zero fill after the last element; more
+  elements than the size is a compile error), and sizes an
+  unsized array by the element count (`char a[] = {1, 2}` has 2
+  elements and no NUL, unlike a string initializer). Elements
+  are arbitrary expressions evaluated left to right; a list
+  holding exactly one string literal is a string initializer
+  (`char a[] = {"hi"}`). Empty, nested, and designated
+  initializer lists are parse errors. A scalar declarator may
+  take a one-element braced list (`int x = {5};`, including a
+  `for` declarator); any other scalar list is a compile error.
   A string literal may initialize an array (`char a[N] = "hi"`,
   bytes plus zero fill, a NUL when it fits; `char a[] = "hi"`
   sizes itself to the bytes plus the NUL), and a string literal

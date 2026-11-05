@@ -990,6 +990,42 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Parse a braced initializer list, with the `{` ahead:
+    /// `{e, e, ...}`, with an optional trailing comma. An empty
+    /// list, a nested list, and designated initializers (`[i] =`
+    /// or `.name =`) are parse errors: only flat lists of value
+    /// expressions are supported.
+    fn parse_init_list(&mut self) -> Result<Expr, ParseError> {
+        self.expect_punct(b"{", "'{'")?;
+        if self.at_punct(b"}") {
+            return self.fail("empty initializer list is not supported".to_string());
+        }
+        let mut elems = Vec::new();
+        loop {
+            if self.at_punct(b"{") {
+                return self.fail(
+                    "nested initializer lists are not supported".to_string(),
+                );
+            }
+            if self.at_punct(b"[") || self.at_punct(b".") {
+                return self.fail(
+                    "designated initializers are not supported".to_string(),
+                );
+            }
+            elems.push(self.parse_assignment()?);
+            if self.at_punct(b",") {
+                self.next_tok();
+                if self.at_punct(b"}") {
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+        self.expect_punct(b"}", "'}'")?;
+        Ok(Expr::InitList(elems))
+    }
+
     fn parse_init_declarator(&mut self, base: &Spec) -> Result<InitDecl, ParseError> {
         // One `*` makes a pointer declarator (`char *p`); a second
         // `*` fails at the name, so `char **p` is rejected. A
@@ -1027,13 +1063,13 @@ impl<'a> Parser<'a> {
             }
             self.expect_punct(b"]", "']'")?;
         }
-        let is_array = array_len.is_some() || array_unsized;
         let init = if self.at_punct(b"=") {
             self.next_tok();
-            if is_array && self.at_punct(b"{") {
-                return self.fail("array initializers are not supported".to_string());
+            if self.at_punct(b"{") {
+                Some(self.parse_init_list()?)
+            } else {
+                Some(self.parse_assignment()?)
             }
-            Some(self.parse_assignment()?)
         } else {
             None
         };
@@ -1215,7 +1251,11 @@ impl<'a> Parser<'a> {
             self.declare_name(&name);
             if self.at_punct(b"=") {
                 self.next_tok();
-                let init = self.parse_assignment()?;
+                let init = if self.at_punct(b"{") {
+                    self.parse_init_list()?
+                } else {
+                    self.parse_assignment()?
+                };
                 return Ok(ForDecl {
                     spec,
                     name: Some(name),
@@ -1947,6 +1987,32 @@ mod tests {
             "int f() { char t[] = \"hi\"; int a[]; }",
             "(tu (funcdef f (compound (decl char (initdecl t (unsized) (string hi))) (decl int (initdecl a (unsized))))))",
         );
+    }
+
+    #[test]
+    fn braced_initializer_lists_parse() {
+        assert_sexp(
+            "int a[3] = {1, 2, 3};",
+            "(tu (decl int (initdecl a (int 3) (initlist (int 1) (int 2) (int 3)))))",
+        );
+        assert_sexp(
+            "int f() { char s[] = {'h', 'i', 0}; int x = {5}; int y = {1,}; }",
+            "(tu (funcdef f (compound (decl char (initdecl s (unsized) (initlist (char 'h') (char 'i') (int 0)))) (decl int (initdecl x (initlist (int 5)))) (decl int (initdecl y (initlist (int 1)))))))",
+        );
+        // A braced list is an initializer, not an expression.
+        for src in [
+            "int a[2] = {};",
+            "int a[2] = {{1}, 2};",
+            "int a[3] = {[1] = 5};",
+            "int main() { int x; x = {1}; return 0; }",
+            "int main() { return {1}; }",
+        ] {
+            assert!(
+                parse(src.as_bytes()).is_err(),
+                "accepted {:?}",
+                src
+            );
+        }
     }
 
     #[test]
