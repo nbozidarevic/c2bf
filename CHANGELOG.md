@@ -31,6 +31,10 @@ roadmap phases that produced them.
   prototypes; function signatures now also compare pointer
   returns. Runner: cached tape index, ~9.5% faster in a
   within-run A/B (geomean over 41 bench cases).
+- Language: `enum` definitions (file-scope only) with constant
+  enumerator expressions, substituted at parse time, including
+  shadowing by declared names; out-of-range values wrap like
+  every byte value.
 
 ## Rename to `c2bf` (Phase 8)
 

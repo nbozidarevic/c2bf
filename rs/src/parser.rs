@@ -4,7 +4,7 @@
 //! accepted language, same tree shapes (see `tests/differential/SPEC.md`),
 //! same error messages and positions.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::*;
 use crate::token::{Kind, Tok, TokenError, tokenize};
@@ -96,6 +96,118 @@ fn int_text_value(text: &[u8]) -> i32 {
     v.clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
 
+/// Value of a character literal's raw text (including quotes),
+/// for enumerator values: one plain character, or a simple escape
+/// (`\n`, `\t`, `\r`, `\\`, `\'`, `\"`, `\0`, octal, `\x` hex).
+/// Returns `None` for an empty or malformed literal.
+fn char_text_value(text: &[u8]) -> Option<i32> {
+    if text.len() < 3 || text[0] != b'\'' || text[text.len() - 1] != b'\'' {
+        return None;
+    }
+    let inner = &text[1..text.len() - 1];
+    if inner.is_empty() {
+        return None;
+    }
+    if inner[0] != b'\\' {
+        return inner.first().map(|&c| c as i32);
+    }
+    if inner.len() < 2 {
+        return None;
+    }
+    let value = match inner[1] {
+        b'n' => b'\n',
+        b't' => b'\t',
+        b'r' => b'\r',
+        b'0'..=b'7' => {
+            // Octal escape: up to three digits.
+            let mut v: i32 = 0;
+            for &c in inner[1..].iter().take(3) {
+                if !matches!(c, b'0'..=b'7') {
+                    break;
+                }
+                v = v * 8 + (c - b'0') as i32;
+            }
+            return Some(v);
+        }
+        b'x' => {
+            let mut v: i32 = 0;
+            for &c in inner[2..].iter() {
+                let d = match c {
+                    b'0'..=b'9' => (c - b'0') as i32,
+                    b'a'..=b'f' => (c - b'a' + 10) as i32,
+                    b'A'..=b'F' => (c - b'A' + 10) as i32,
+                    _ => break,
+                };
+                v = v * 16 + d;
+            }
+            return Some(v);
+        }
+        b'a' => 7,
+        b'b' => 8,
+        b'f' => 12,
+        b'v' => 11,
+        c => c,
+    };
+    Some(value as i32)
+}
+
+/// Value of a constant expression, for enumerator initializers:
+/// integer/character literals, enumerator names, parentheses,
+/// casts, and arithmetic/bitwise/comparison operators over
+/// constant operands, wrapping like the byte model's `i32`
+/// arithmetic. Anything else (calls, variables, assignments,
+/// division or modulo by zero) is not constant and yields `None`.
+fn eval_const(e: &Expr, consts: &HashMap<Vec<u8>, i32>) -> Option<i32> {
+    match e {
+        Expr::Int(bytes) => Some(int_text_value(bytes)),
+        Expr::Char(bytes) => char_text_value(bytes),
+        Expr::Ident(name) => consts.get(name).copied(),
+        Expr::Paren(inner) => eval_const(inner, consts),
+        Expr::Cast { e, .. } => eval_const(e, consts),
+        Expr::Ternary { cond, then, els } => {
+            let c = eval_const(cond, consts)?;
+            eval_const(if c != 0 { then } else { els }, consts)
+        }
+        Expr::Comma(exprs) => exprs.last().and_then(|e| eval_const(e, consts)),
+        Expr::Unary { op, e } => {
+            let v = eval_const(e, consts)?;
+            match op.as_slice() {
+                b"-" => Some(v.wrapping_neg()),
+                b"+" => Some(v),
+                b"~" => Some(!v),
+                b"!" => Some(i32::from(v == 0)),
+                _ => None,
+            }
+        }
+        Expr::BinOp { op, l, r } => {
+            let a = eval_const(l, consts)?;
+            let b = eval_const(r, consts)?;
+            Some(match op.as_slice() {
+                b"+" => a.wrapping_add(b),
+                b"-" => a.wrapping_sub(b),
+                b"*" => a.wrapping_mul(b),
+                b"/" => a.checked_div(b)?,
+                b"%" => a.checked_rem(b)?,
+                b"<<" => a.wrapping_shl(b as u32),
+                b">>" => a.wrapping_shr(b as u32),
+                b"&" => a & b,
+                b"|" => a | b,
+                b"^" => a ^ b,
+                b"==" => i32::from(a == b),
+                b"!=" => i32::from(a != b),
+                b"<" => i32::from(a < b),
+                b"<=" => i32::from(a <= b),
+                b">" => i32::from(a > b),
+                b">=" => i32::from(a >= b),
+                b"&&" => i32::from(a != 0 && b != 0),
+                b"||" => i32::from(a != 0 || b != 0),
+                _ => return None,
+            })
+        }
+        _ => None,
+    }
+}
+
 /// A parsed type specifier: joined words plus declarator flags
 /// contributed by a typedef name in first position (a pointer or
 /// array alias). Plain specifiers carry no flags.
@@ -147,6 +259,15 @@ struct Parser<'a> {
     /// (source order). Block-scoped typedefs are rejected, so no
     /// scope stack is needed; see `docs/semantics.md`.
     typedefs: HashMap<Vec<u8>, TypedefDecl>,
+    /// Enumerator constants visible from their definition onward
+    /// (source order). File-scope only, like typedefs.
+    enum_consts: HashMap<Vec<u8>, i32>,
+    /// Declared names per enclosing scope, innermost last: the
+    /// file scope, then each compound, parameter, and `for` scope.
+    /// Used only to decide whether an identifier in expression
+    /// position is a declared name (kept as an identifier) or an
+    /// enumerator (substituted with its value).
+    scopes: Vec<HashSet<Vec<u8>>>,
 }
 
 impl<'a> Parser<'a> {
@@ -155,6 +276,20 @@ impl<'a> Parser<'a> {
             t,
             p: 0,
             typedefs: HashMap::new(),
+            enum_consts: HashMap::new(),
+            scopes: vec![HashSet::new()],
+        }
+    }
+
+    /// Whether `name` is declared in any enclosing scope.
+    fn is_declared(&self, name: &[u8]) -> bool {
+        self.scopes.iter().rev().any(|s| s.contains(name))
+    }
+
+    /// Record `name` in the innermost scope.
+    fn declare_name(&mut self, name: &[u8]) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.to_vec());
         }
     }
 
@@ -366,6 +501,9 @@ impl<'a> Parser<'a> {
         if self.at_ident() && self.peek().text.as_slice() == b"typedef" {
             return self.parse_typedef_declaration();
         }
+        if self.at_ident() && self.peek().text.as_slice() == b"enum" {
+            return self.parse_enum_declaration();
+        }
         if self.at_spec_start() {
             let mark = self.p;
             let spec = self.parse_spec()?;
@@ -453,6 +591,92 @@ impl<'a> Parser<'a> {
         }
         self.typedefs.insert(name, decl.clone());
         Ok(External::Typedef(decl))
+    }
+
+    /// Parse a file-scope `enum` declaration (the `enum` keyword
+    /// itself is still ahead): an optional tag, an optional
+    /// enumerator list, and optional declarators. Enumerator
+    /// values register in `enum_consts` for later uses; the
+    /// declaration itself becomes an ordinary `Decl` (with no
+    /// initializers when there are no declarators), which emits
+    /// nothing. A definition with no enumerators is rejected, as
+    /// is a duplicate enumerator name.
+    fn parse_enum_declaration(&mut self) -> Result<External, ParseError> {
+        self.next_tok(); // `enum`
+        let mut spec_words = vec![b"enum".to_vec()];
+        if self.at_ident() {
+            spec_words.push(self.next_tok().text);
+        }
+        if self.at_punct(b"{") {
+            self.next_tok();
+            let mut next = 0i32;
+            loop {
+                let name = self.expect_ident("enumerator name")?.text;
+                let value = if self.at_punct(b"=") {
+                    self.next_tok();
+                    let e = self.parse_assignment()?;
+                    match eval_const(&e, &self.enum_consts) {
+                        Some(v) => v,
+                        None => {
+                            return self.fail(
+                                "enumerator value must be a constant expression"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                } else {
+                    next
+                };
+                if self.enum_consts.contains_key(&name) {
+                    return self.fail(format!(
+                        "duplicate enumerator '{}'",
+                        String::from_utf8_lossy(&name)
+                    ));
+                }
+                self.enum_consts.insert(name, value);
+                next = value.wrapping_add(1);
+                if self.at_punct(b",") {
+                    self.next_tok();
+                    if self.at_punct(b"}") {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+            self.expect_punct(b"}", "'}'")?;
+        }
+        let spec = Spec::plain(spec_words.join(&b" "));
+        if self.at_ident()
+            && self.peek_at(1).kind == Kind::Punct
+            && self.peek_at(1).text == b"("
+        {
+            let name = self.next_tok().text;
+            if self.after_param_list_is_semicolon() {
+                let d = self.parse_funcdecl(spec, name)?;
+                return Ok(External::FuncDecl(d));
+            }
+            let f = self.parse_funcdef(spec, name)?;
+            return Ok(External::FuncDef(f));
+        }
+        if self.at_punct(b";") {
+            self.next_tok();
+            return Ok(External::Decl(Decl {
+                spec: spec.words,
+                inits: Vec::new(),
+            }));
+        }
+        let mut inits = Vec::new();
+        inits.push(self.parse_init_declarator(&spec)?);
+        while self.at_punct(b",") {
+            self.next_tok();
+            inits.push(self.parse_init_declarator(&spec)?);
+        }
+        self.expect_punct(b";", "';'")?;
+        Ok(External::Decl(Decl {
+            spec: spec.words,
+            inits,
+        }))
     }
 
     /// Whether the token after the parameter list starting at the
@@ -567,7 +791,21 @@ impl<'a> Parser<'a> {
 
     fn parse_funcdef(&mut self, spec: Spec, name: Vec<u8>) -> Result<FuncDef, ParseError> {
         let params = self.parse_params(false)?;
+        // The function name lives in the file scope (so a later
+        // call to it is not mistaken for an enumerator), and the
+        // parameters live in their own scope enclosing the body.
+        if let Some(file) = self.scopes.first_mut() {
+            file.insert(name.clone());
+        }
+        let mut param_scope = HashSet::new();
+        for p in &params {
+            if !p.name.is_empty() {
+                param_scope.insert(p.name.clone());
+            }
+        }
+        self.scopes.push(param_scope);
         let body = self.parse_compound()?;
+        self.scopes.pop();
         Ok(FuncDef {
             name,
             is_void: spec.words.as_slice() == b"void" && !spec.pointer,
@@ -578,6 +816,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_funcdecl(&mut self, spec: Spec, name: Vec<u8>) -> Result<FuncDecl, ParseError> {
+        if let Some(file) = self.scopes.first_mut() {
+            file.insert(name.clone());
+        }
         let params = self.parse_params(true)?;
         self.expect_punct(b";", "';'")?;
         Ok(FuncDecl {
@@ -599,6 +840,16 @@ impl<'a> Parser<'a> {
         } else {
             return self.fail("expected type name".to_string());
         };
+        if spec.words.as_slice() == b"enum"
+            && ((self.at_ident()
+                && self.peek_at(1).kind == Kind::Punct
+                && self.peek_at(1).text == b"{")
+                || self.at_punct(b"{"))
+        {
+            return self.fail(
+                "enum definitions are only allowed at file scope".to_string(),
+            );
+        }
         let mut inits = Vec::new();
         if !self.at_punct(b";") {
             inits.push(self.parse_init_declarator(&spec)?);
@@ -628,6 +879,10 @@ impl<'a> Parser<'a> {
             pointer = true;
         }
         let name = self.expect_ident("declarator name")?.text;
+        // The name is in scope from here, including in its own
+        // initializer, so a use of the name there is the variable,
+        // not an enumerator of the same name.
+        self.declare_name(&name);
         let mut array_len = base
             .array_len
             .map(|len| Expr::Int(len.to_string().into_bytes()));
@@ -696,6 +951,7 @@ impl<'a> Parser<'a> {
 
     fn parse_compound(&mut self) -> Result<Block, ParseError> {
         self.expect_punct(b"{", "'{'")?;
+        self.scopes.push(HashSet::new());
         let mut items = Vec::new();
         while !self.at_punct(b"}") {
             if self.at_end() {
@@ -704,6 +960,7 @@ impl<'a> Parser<'a> {
             items.push(self.parse_block_item()?);
         }
         self.next_tok();
+        self.scopes.pop();
         Ok(Block(items))
     }
 
@@ -775,6 +1032,9 @@ impl<'a> Parser<'a> {
         }
         self.expect_kw(b"for", "'for'")?;
         self.expect_punct(b"(", "'('")?;
+        // A `for` declaration's scope covers the condition,
+        // update, and body.
+        self.scopes.push(HashSet::new());
         let init = if self.at_spec_start() {
             ForInit::Decl(self.parse_for_declaration()?)
         } else if self.at_punct(b";") {
@@ -796,6 +1056,7 @@ impl<'a> Parser<'a> {
         };
         self.expect_punct(b")", "')'")?;
         let body = self.parse_statement()?;
+        self.scopes.pop();
         Ok(Stmt::For {
             init,
             cond,
@@ -815,6 +1076,7 @@ impl<'a> Parser<'a> {
         let spec = spec.words;
         if self.at_ident() {
             let name = self.next_tok().text;
+            self.declare_name(&name);
             if self.at_punct(b"=") {
                 self.next_tok();
                 let init = self.parse_assignment()?;
@@ -1227,6 +1489,13 @@ impl<'a> Parser<'a> {
             }
             Kind::Ident => {
                 self.next_tok();
+                // An enumerator name substitutes its value, unless
+                // a declared name shadows it in an enclosing scope.
+                if !self.is_declared(&t.text) {
+                    if let Some(&value) = self.enum_consts.get(&t.text) {
+                        return Ok(Expr::Int(value.to_string().into_bytes()));
+                    }
+                }
                 Ok(Expr::Ident(t.text))
             }
             Kind::String => {
@@ -1757,6 +2026,65 @@ mod tests {
             (
                 "typedef int *P; int main() { for (P p = 0;;) { } return 0; }",
                 "not supported in for declarations",
+            ),
+        ];
+        for (src, want) in cases {
+            match parse(src.as_bytes()) {
+                Err(e) => assert!(
+                    e.msg.contains(want),
+                    "for {:?}: got error {:?}, want {:?}",
+                    src,
+                    e.msg,
+                    want
+                ),
+                Ok(_) => panic!("accepted {:?}", src),
+            }
+        }
+    }
+
+    #[test]
+    fn enums_parse() {
+        assert_sexp(
+            "enum Color { RED, GREEN = 5, BLUE }; int main() { printf(\"%d,%d,%d\", RED, GREEN, BLUE); }",
+            "(tu (decl enum Color) (funcdef main (compound (exprstmt (call (ident printf) (string %d,%d,%d) (int 0) (int 5) (int 6))))))",
+        );
+        assert_sexp(
+            "enum { A = 'a', B = A + 1, C, }; enum State state = C; int main() { return 0; }",
+            "(tu (decl enum) (decl enum State (initdecl state (int 99))) (funcdef main (compound (return (int 0)))))",
+        );
+        // A declared name shadows an enumerator in its scope.
+        assert_sexp(
+            "enum { RED }; int main() { int RED = 5; printf(\"%d\", RED); }",
+            "(tu (decl enum) (funcdef main (compound (decl int (initdecl RED (int 5))) (exprstmt (call (ident printf) (string %d) (ident RED))))))",
+        );
+        // An enum return type still parses as a function.
+        assert_sexp(
+            "enum Color f() { return 1; }",
+            "(tu (funcdef f (compound (return (int 1)))))",
+        );
+    }
+
+    #[test]
+    fn enum_errors() {
+        let cases: &[(&str, &str)] = &[
+            ("enum { A }; enum { A };", "duplicate enumerator 'A'"),
+            ("enum { A, A };", "duplicate enumerator 'A'"),
+            (
+                "int x = 1; enum { A = x };",
+                "must be a constant expression",
+            ),
+            (
+                "enum { A = f() };",
+                "must be a constant expression",
+            ),
+            (
+                "enum { A = 1 / 0 };",
+                "must be a constant expression",
+            ),
+            ("enum { };", "enumerator name"),
+            (
+                "int main() { enum Color { RED }; return 0; }",
+                "only allowed at file scope",
             ),
         ];
         for (src, want) in cases {

@@ -278,3 +278,37 @@ nothing.
   redefining it to a different expansion is a parse error.
   Pointer and array aliases are not supported as `for`
   declarations.
+
+## Enums
+
+`enum` defines named integer constants. Definitions are
+file-scope only (like typedefs and prototypes); `enum Tag` as a
+specifier word works anywhere, including in blocks.
+
+- `enum Color { RED, GREEN = 5, BLUE };` defines `RED` as 0,
+  `GREEN` as 5, and `BLUE` as 6 (each uninitialized enumerator
+  takes the previous value plus one, starting at 0). The tag is
+  optional (`enum { A, B };`), a trailing comma is allowed, and
+  a definition with no enumerators is an error. An `enum`
+  declaration may also declare variables (`enum Color c =
+  BLUE;`), use an enum type as a function return type, or stand
+  alone as a forward tag declaration (`enum Color;`, which
+  defines nothing).
+- Enumerator values are constant expressions: integer and
+  character literals, earlier enumerators, parentheses, casts,
+  and arithmetic/bitwise/comparison operators over constants.
+  Anything else (variables, calls, division by zero) is a parse
+  error. A duplicate enumerator name — in one list or across
+  lists — is a parse error.
+- Uses substitute the value at parse time, so an enumerator
+  needs no storage: `case RED:` labels, initializers, and
+  ordinary expressions all see the constant. Values are bytes
+  like every value here: a value outside 0..255 wraps (a
+  negative value wraps to 255), unlike the g++ oracle, so
+  out-of-range values are pinned by unit tests, not fixtures.
+- A declared name shadows an enumerator in its scope: a local
+  variable, parameter, or `for` declarator of the same name is
+  used as a variable while in scope, and the enumerator is
+  visible again after the scope ends. Uses before any
+  definition treat the name as an opaque specifier word, as any
+  unknown word pair already does.

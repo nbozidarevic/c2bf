@@ -35,6 +35,14 @@ fn int_literal_value(text: &[u8]) -> i32 {
     while matches!(s.last(), Some(b'u' | b'U' | b'l' | b'L')) {
         s = &s[..s.len() - 1];
     }
+    // A leading `-` only ever reaches here from parser-substituted
+    // enumerator values (ordinary `-1` is a unary minus node); the
+    // magnitude clamps to 2^31 so `-2147483648` is exact.
+    let (negative, s) = if s.starts_with(b"-") {
+        (true, &s[1..])
+    } else {
+        (false, s)
+    };
     let (radix, digits): (i64, &[u8]) = if s.starts_with(b"0x") || s.starts_with(b"0X")
     {
         (16, &s[2..])
@@ -55,7 +63,11 @@ fn int_literal_value(text: &[u8]) -> i32 {
         };
         v = v.saturating_mul(radix).saturating_add(d);
     }
-    v.clamp(i32::MIN as i64, i32::MAX as i64) as i32
+    if negative {
+        (-v.clamp(0, -(i32::MIN as i64))) as i32
+    } else {
+        v.clamp(i32::MIN as i64, i32::MAX as i64) as i32
+    }
 }
 
 /// What a subscript base names: an array or a pointer variable.
@@ -2404,6 +2416,59 @@ mod tests {
         let mut out = Vec::new();
         crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
         assert_eq!(out, b"65");
+    }
+
+    #[test]
+    fn enums_compile_and_run() {
+        let bf = compile(
+            b"enum Color { RED, GREEN = 5, BLUE }; \
+              enum { A = 'a', B = A + 1 }; \
+              enum State { IDLE, RUNNING }; \
+              enum State state = RUNNING; \
+              int main() { \
+                enum Color c = BLUE; \
+                int x = A; \
+                printf(\"%d,%d,%d,%d,%d\", RED, GREEN, BLUE, x, state); \
+                switch (c) { \
+                  case RED: printf(\"R\"); break; \
+                  case BLUE: printf(\"B\"); break; \
+                  default: printf(\"?\"); break; \
+                } \
+              }",
+        )
+        .expect("enum program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"0,5,6,97,1B");
+    }
+
+    #[test]
+    fn enum_negative_and_overflow_wrap() {
+        // Enumerator values are bytes like every value here: a
+        // negative value wraps to 255 and 300 wraps to 44,
+        // unlike the g++ oracle, so this is pinned by a unit
+        // test, not a fixture.
+        let bf = compile(b"enum { NEG = -1, BIG = 300 }; int main() { printf(\"%d,%d\", NEG, BIG); }")
+            .expect("enum program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"255,44");
+    }
+
+    #[test]
+    fn enum_shadowing_uses_declared_name() {
+        // A nested block's RED shadows the enumerator while the
+        // block lasts; after it, the enumerator is visible again.
+        let bf = compile(
+            b"enum { RED }; int main() { \
+                { int RED = 9; printf(\"%d,\", RED); } \
+                printf(\"%d\", RED); \
+              }",
+        )
+        .expect("shadowing program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"9,0");
     }
 
     #[test]
