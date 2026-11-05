@@ -567,22 +567,23 @@ impl<'a> Parser<'a> {
         if self.at_spec_start() {
             let mark = self.p;
             let mut spec = self.parse_spec()?;
+            // A `*` before the name and a `(` after it is a
+            // pointer-returning function declarator (`char
+            // *f()`); a `*` anywhere else belongs to the
+            // declaration below, so only take it when a name
+            // and a `(` follow. A second `*` is a pointer to
+            // a pointer and stays an error there.
+            if !spec.pointer
+                && self.at_punct(b"*")
+                && self.peek_at(1).kind == Kind::Ident
+                && self.peek_at(2).kind == Kind::Punct
+                && self.peek_at(2).text == b"("
+            {
+                self.next_tok();
+                spec.pointer = true;
+            }
             if self.at_ident() {
                 let name = self.next_tok().text;
-                // A `*` directly before the parameter list is a
-                // pointer-returning function declarator
-                // (`char *f()`); a `*` anywhere else belongs to
-                // the declaration below, so only take it when a
-                // `(` follows. A second `*` is a pointer to a
-                // pointer and stays an error there.
-                if !spec.pointer
-                    && self.at_punct(b"*")
-                    && self.peek_at(1).kind == Kind::Punct
-                    && self.peek_at(1).text == b"("
-                {
-                    self.next_tok();
-                    spec.pointer = true;
-                }
                 if self.at_punct(b"(") {
                     if self.after_param_list_is_semicolon() {
                         return Ok(External::FuncDecl(self.parse_funcdecl(spec, name)?));
@@ -725,7 +726,17 @@ impl<'a> Parser<'a> {
             }
             self.expect_punct(b"}", "'}'")?;
         }
-        let spec = Spec::plain(spec_words.join(&b' '));
+        let mut spec = Spec::plain(spec_words.join(&b' '));
+        // As in `parse_external`: `enum Tag *f()` is a
+        // pointer-returning function.
+        if self.at_punct(b"*")
+            && self.peek_at(1).kind == Kind::Ident
+            && self.peek_at(2).kind == Kind::Punct
+            && self.peek_at(2).text == b"("
+        {
+            self.next_tok();
+            spec.pointer = true;
+        }
         if self.at_ident()
             && self.peek_at(1).kind == Kind::Punct
             && self.peek_at(1).text == b"("
