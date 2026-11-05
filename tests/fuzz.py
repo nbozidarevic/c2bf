@@ -31,7 +31,16 @@ import subprocess
 import sys
 import tempfile
 
-C2BF_BIN = os.environ.get("C2BF_BIN", "../rs/target/release/c2bf")
+# Absolute at import: run_seed executes c2bf with cwd set to a temp
+# dir, so a path relative to the invoking directory would resolve
+# inside that temp dir instead. The default is anchored at this
+# script (tests/../rs/...), so it works from any cwd; an explicit
+# C2BF_BIN keeps the usual cwd-relative meaning.
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_DEFAULT_BIN = os.path.normpath(os.path.join(
+    _SCRIPT_DIR, "..", "rs", "target", "release", "c2bf"))
+_RAW_BIN = os.environ.get("C2BF_BIN")
+C2BF_BIN = os.path.abspath(_RAW_BIN) if _RAW_BIN else _DEFAULT_BIN
 TIMEOUT = 15
 
 
