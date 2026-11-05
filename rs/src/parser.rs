@@ -2040,12 +2040,9 @@ mod tests {
             17,
             "expected declarator name, found '*'",
         );
-        assert_err(
-            "int f() { int a[2] = {1, 2}; }",
-            1,
-            22,
-            "array initializers are not supported",
-        );
+        // `int a[2] = {1, 2};` used to be rejected here; braced
+        // initializers are supported now, and the list-shape
+        // errors live in `braced_initializer_lists_parse`.
     }
 
     #[test]
