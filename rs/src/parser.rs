@@ -646,7 +646,7 @@ impl<'a> Parser<'a> {
             }
             self.expect_punct(b"}", "'}'")?;
         }
-        let spec = Spec::plain(spec_words.join(&b" "));
+        let spec = Spec::plain(spec_words.join(&b' '));
         if self.at_ident()
             && self.peek_at(1).kind == Kind::Punct
             && self.peek_at(1).text == b"("
