@@ -375,6 +375,20 @@ impl<'a> Parser<'a> {
         {
             words.push(self.next_tok().text);
         }
+        // An `enum` specifier takes a tag: `enum Color x`. The tag
+        // is a plain identifier, so the joiner above leaves it;
+        // consume it here unless a `{` follows (an enum definition,
+        // handled by `parse_enum_declaration` at file scope and
+        // rejected in blocks by the caller).
+        if words.len() == 1
+            && words[0].as_slice() == b"enum"
+            && self.at_ident()
+        {
+            let after = self.peek_at(1);
+            if !(after.kind == Kind::Punct && after.text == b"{") {
+                words.push(self.next_tok().text);
+            }
+        }
         self.resolve_spec(words)
     }
 
