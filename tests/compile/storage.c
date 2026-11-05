@@ -10,7 +10,7 @@ static int get(void) {
 
 int main() {
   register int r = 3;
-  auto int a = 4;
+  int a = 4;
   printf("%d,%d,%d,%d\n", counter, shared, get(), r + a);
   return 0;
 }

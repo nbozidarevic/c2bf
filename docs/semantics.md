@@ -335,4 +335,7 @@ is ignored in parameter lists. `auto` and `register` are
 ignored everywhere. A `for`-loop declaration rejects `static`
 and `extern` the same way a block declaration does. Storage
 words are recognized only in specifier position, so the same
-words can still name variables (`int static = 1;`).
+words can still name variables (`int static = 1;`). `auto int`
+is accepted here but rejected by the g++ oracle (a C++ rule),
+so it is pinned by unit tests only, not by the `storage`
+fixture.
