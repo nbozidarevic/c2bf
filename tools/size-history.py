@@ -225,6 +225,17 @@ MILESTONES = [
         "footprints re-measured with the cached-index runner "
         "reproduce every prior entry exactly.",
     ),
+    (
+        "72a356f19b644a5546ad792e33a8d976fd026f2f",
+        "Braced initializers + I/O formats",
+        "Braced initializer lists and the new I/O conversions add "
+        "no new emission for old programs: all 49 existing "
+        "fixtures are byte-identical, with allocated cells and "
+        "runtime footprints unchanged. Adds two fixtures: "
+        "braceinit (292,759 BF bytes on 209 cells) and formats "
+        "(3,099,121 BF bytes on 715 cells, dominated by the "
+        "based `scanf` readers).",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
