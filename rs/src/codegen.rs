@@ -113,6 +113,16 @@ impl std::fmt::Display for CompileError {
 
 impl std::error::Error for CompileError {}
 
+/// Bases for the non-decimal `scanf` conversions (`%o`, `%x`,
+/// `%i`). `%d` and `%u` keep the decimal reader above, whose
+/// emission is pinned by the goldens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumericBase {
+    Oct,
+    Hex,
+    Auto,
+}
+
 /// Bound cells for `scan_digit`, allocated once per reader.
 struct DigitBounds {
     zero: i32,
@@ -1381,16 +1391,6 @@ impl Emitter {
         Ok(())
     }
 
-    /// Bases for the non-decimal `scanf` conversions (`%o`, `%x`,
-    /// `%i`). `%d` and `%u` keep the decimal reader above, whose
-    /// emission is pinned by the goldens.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum NumericBase {
-        Oct,
-        Hex,
-        Auto,
-    }
-
     /// Read a number in a non-decimal base into cell `a` (`scanf`
     /// `%o`, `%x`, `%i`): the decimal reader's shape, with a
     /// base-aware digit test. `%x` and `%i` accept an optional
@@ -1548,21 +1548,18 @@ impl Emitter {
         let ge_lo = self.greater_than_or_equal(reader, bounds.lo_a)?;
         let le_lo = self.less_than_or_equal(reader, bounds.lo_f)?;
         let lo_digit = self.logical_and(ge_lo, le_lo)?;
-        let lo_val = self.add_values(
-            self.subtract_values(reader, bounds.lo_a),
-            bounds.ten,
-        );
+        let lo_diff = self.subtract_values(reader, bounds.lo_a);
+        let lo_val = self.add_values(lo_diff, bounds.ten);
         let ge_hi = self.greater_than_or_equal(reader, bounds.hi_a)?;
         let le_hi = self.less_than_or_equal(reader, bounds.hi_f)?;
         let hi_digit = self.logical_and(ge_hi, le_hi)?;
-        let hi_val = self.add_values(
-            self.subtract_values(reader, bounds.hi_a),
-            bounds.ten,
-        );
+        let hi_diff = self.subtract_values(reader, bounds.hi_a);
+        let hi_val = self.add_values(hi_diff, bounds.ten);
         let m1 = self.multiply_values(dec_val, dec_digit);
         let m2 = self.multiply_values(lo_val, lo_digit);
         let m3 = self.multiply_values(hi_val, hi_digit);
-        let value = self.add_values(self.add_values(m1, m2), m3);
+        let m12 = self.add_values(m1, m2);
+        let value = self.add_values(m12, m3);
         let lt_base = self.less_than(value, base_cell)?;
         let dec_ok = self.logical_and(dec_digit, lt_base)?;
         let is16 = self.is_equal(base_cell, bounds.sixteen)?;
