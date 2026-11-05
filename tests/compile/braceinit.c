@@ -10,7 +10,7 @@ int sum2(int q) {
 
 int main() {
   int x = {7};
-  char a[3] = {x, x + 1, 0};
+  int a[3] = {x, x + 1, 0};
   char t[] = {'a', 'b'};
   char s[] = {"hi"};
   printf("%d,%d,%d,%d,%d,%d,%d,%d,%s,%d,%d,%d\n", g[0], g[1], g[2], g[3],

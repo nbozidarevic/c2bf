@@ -58,7 +58,10 @@ the deviation is stated here as defined behavior, pinned by tests.
   are arbitrary expressions evaluated left to right; a list
   holding exactly one string literal is a string initializer
   (`char a[] = {"hi"}`). Empty, nested, and designated
-  initializer lists are parse errors. A scalar declarator may
+  initializer lists are parse errors. An `int` expression into a
+  `char` array narrows, which the Clang C++ oracle rejects in a
+  list, so fixtures avoid that shape; the byte model itself
+  truncates, as unit tests pin. A scalar declarator may
   take a one-element braced list (`int x = {5};`, including a
   `for` declarator); any other scalar list is a compile error.
   A string literal may initialize an array (`char a[N] = "hi"`,
