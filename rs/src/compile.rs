@@ -3476,15 +3476,15 @@ mod tests {
             (b"int main() { printf(\"%e\", 1); }", "Unexpected printf format"),
             (b"int main() { printf(\"%p\", 1); }", "Unexpected printf format"),
             (
-                b"int main() { int a; scanf(\"%5d\", &a); }",
+                b"int main() { int a = 0; scanf(\"%5d\", &a); }",
                 "Unexpected scanf format",
             ),
             (
-                b"int main() { int a; scanf(\"%e\", &a); }",
+                b"int main() { int a = 0; scanf(\"%e\", &a); }",
                 "Unexpected scanf format",
             ),
             (
-                b"int main() { int a; scanf(\"x\", &a); }",
+                b"int main() { int a = 0; scanf(\"x\", &a); }",
                 "Unexpected scanf format",
             ),
         ];
