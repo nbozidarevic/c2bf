@@ -2405,6 +2405,35 @@ mod tests {
     }
 
     #[test]
+    fn direct_pointer_return_runs() {
+        // The direct declarator form carries the same signature
+        // as the typedef-alias form: a prototyped pointer return
+        // agrees with its definition, and the returned address
+        // is usable through `%s` and dereference.
+        let bf = compile(
+            b"char buf[3] = \"hi\"; \
+              char *get(void); \
+              char *get(void) { return buf; } \
+              char *other() { return &buf[0]; } \
+              int main() { char *p = get(); printf(\"%s %s %d\", p, other(), *get()); }",
+        )
+        .expect("pointer-return program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"hi hi 104");
+        // A scalar definition conflicts with a pointer-return
+        // prototype spelled directly.
+        let err = compile(b"char *f(); int f() { return 0; } int main() {}")
+            .expect_err("pointer-return conflict");
+        assert_eq!(err.msg, "conflicting prototype for function 'f'");
+        // And a scalar prototype conflicts with a pointer-return
+        // definition.
+        let err = compile(b"int f(); char *f() { return 0; } int main() {}")
+            .expect_err("scalar-prototype conflict");
+        assert_eq!(err.msg, "conflicting prototype for function 'f'");
+    }
+
+    #[test]
     fn typedef_pointer_return_runs() {
         // A pointer return spelled through an alias is usable:
         // the callee returns an address byte, the caller derefs it.

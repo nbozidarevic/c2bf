@@ -217,9 +217,10 @@ call site.
   prototypes are allowed; a conflicting one is a compile error.
   Calling a function with only a prototype is a compile error
   (there is no body to expand); an uncalled prototype compiles.
-  No function pointers. A direct pointer return declarator
-  (`char *f()`) does not parse yet; a pointer return spelled
-  through a typedef alias does (see Typedefs).
+  No function pointers. A pointer return may be spelled
+  directly (`char *f()`) or through a typedef alias (see
+  Typedefs); both spellings carry the same signature. A second
+  `*` is a pointer to a pointer and is not supported.
 - Declarations are lexically scoped: a declaration in a nested
   block shadows an outer one (each gets its own cells). A
   declaration at the top level of a function body may not reuse

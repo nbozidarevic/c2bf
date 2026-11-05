@@ -566,9 +566,23 @@ impl<'a> Parser<'a> {
         }
         if self.at_spec_start() {
             let mark = self.p;
-            let spec = self.parse_spec()?;
+            let mut spec = self.parse_spec()?;
             if self.at_ident() {
                 let name = self.next_tok().text;
+                // A `*` directly before the parameter list is a
+                // pointer-returning function declarator
+                // (`char *f()`); a `*` anywhere else belongs to
+                // the declaration below, so only take it when a
+                // `(` follows. A second `*` is a pointer to a
+                // pointer and stays an error there.
+                if !spec.pointer
+                    && self.at_punct(b"*")
+                    && self.peek_at(1).kind == Kind::Punct
+                    && self.peek_at(1).text == b"("
+                {
+                    self.next_tok();
+                    spec.pointer = true;
+                }
                 if self.at_punct(b"(") {
                     if self.after_param_list_is_semicolon() {
                         return Ok(External::FuncDecl(self.parse_funcdecl(spec, name)?));
@@ -2007,6 +2021,41 @@ mod tests {
             "int f(char s[(1)]); int main() { return 0; }",
             "(tu (funcdecl f (params (param s (array)))) (funcdef main (compound (return (int 0)))))",
         );
+    }
+
+    #[test]
+    fn pointer_return_declarators_parse() {
+        // The dump does not encode the return pointer, so these
+        // pin acceptance; the signature itself is pinned by the
+        // compile tests below.
+        assert_sexp(
+            "char *f() { return 0; }",
+            "(tu (funcdef f (compound (return (int 0)))))",
+        );
+        assert_sexp(
+            "char *f(void); int main() { return 0; }",
+            "(tu (funcdecl f) (funcdef main (compound (return (int 0)))))",
+        );
+        assert_sexp(
+            "unsigned char *f(int x) { return 0; }",
+            "(tu (funcdef f (params (param x)) (compound (return (int 0)))))",
+        );
+        // A `*` without a following `(` is still a variable
+        // declaration, not a function.
+        assert_sexp(
+            "char *p;",
+            "(tu (decl char (initdecl p (pointer))))",
+        );
+        for src in [
+            "char **f() { return 0; }",
+            "typedef char *CP; CP *f() { return 0; }",
+        ] {
+            assert!(
+                parse(src.as_bytes()).is_err(),
+                "accepted pointer-to-pointer return: {:?}",
+                src
+            );
+        }
     }
 
     #[test]
