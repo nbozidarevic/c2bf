@@ -8,6 +8,13 @@ the top, matching tag `v0.3.0`. Entries below are grouped by
 the roadmap phases that produced them. See `docs/versioning.md`
 for when and how versions change.
 
+## Unreleased
+
+- Tests: differential fuzzer (`tests/fuzz.py`, `docs/fuzzing.md`)
+  generating random C-subset programs against the g++ oracle,
+  run for 50 seeds on every push plus an on-demand `fuzz-sweep`
+  workflow for larger runs.
+
 ## v0.3.0
 
 - Language: braced initializer lists for arrays (in-order fill,

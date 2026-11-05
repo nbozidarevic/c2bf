@@ -42,10 +42,12 @@ source order, e.g.
 - `initdecl(name)`: `[pointer?, (size | unsized)?, init?]` —
   `pointer` (no children) when the declarator has one `*`, `size`
   for an array declarator (`name[N]`, the size expression) or
-  `unsized` for `name[]` (sized only by a string initializer),
-  then the initializer. A second `*` is a parse error, as is a
-  braced array initializer (`= {…}`); a string literal may
-  initialize an array.
+  `unsized` for `name[]` (sized by a string or braced
+  initializer), then the initializer. A second `*` is a parse
+  error; a string literal may initialize an array, as may a
+  braced initializer list (an `initlist` node: element
+  expressions in order; empty, nested, and designated lists
+  are parse errors).
 - `compound`: block items in order. `exprstmt`: `[expr]`. `empty`: none.
 - `if`: `[cond, then]`; `ifelse`: `[cond, then, else]`.
 - `switch`: `[expr, body]`; `while`: `[cond, body]`.

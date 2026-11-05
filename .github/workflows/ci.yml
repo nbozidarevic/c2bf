@@ -276,6 +276,22 @@ jobs:
       - name: Run harness
         run: ./rs/target/release/c2bf-bench
 
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release --manifest-path rs/Cargo.toml
+
+      - name: Fuzz 50 seeds
+        working-directory: tests
+        run: python3 fuzz.py --count 50
+
   c-abi:
     strategy:
       fail-fast: false

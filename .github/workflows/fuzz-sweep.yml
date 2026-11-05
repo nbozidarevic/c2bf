@@ -1,0 +1,36 @@
+name: fuzz-sweep
+
+# On-demand differential fuzzing with more seeds than the
+# per-push `fuzz` job runs. Run from the Actions tab; a failure
+# prints the seed, the program, and the diff in the log.
+on:
+  workflow_dispatch:
+    inputs:
+      fuzz_count:
+        description: "Programs to generate"
+        default: "500"
+        required: true
+      fuzz_seed_base:
+        description: "First seed"
+        default: "0"
+        required: true
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release --manifest-path rs/Cargo.toml
+
+      - name: Fuzz
+        working-directory: tests
+        run: >
+          python3 fuzz.py --count ${{ inputs.fuzz_count }}
+          --seed-base ${{ inputs.fuzz_seed_base }}
+          --continue-on-failure
