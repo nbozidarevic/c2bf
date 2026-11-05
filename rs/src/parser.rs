@@ -399,6 +399,10 @@ impl<'a> Parser<'a> {
                 let n = self.peek_at(1);
                 (n.kind == Kind::Kw && is_op_in(&n.text, &TYPE_KWS))
                     || n.kind == Kind::Ident
+                    // A `*` after the candidate means a pointer
+                    // declarator follows (`unsigned char *f`), so
+                    // the candidate is part of the specifier.
+                    || (n.kind == Kind::Punct && n.text == b"*")
             }
         {
             words.push(self.next_tok().text);
@@ -2050,6 +2054,17 @@ mod tests {
         assert_sexp(
             "unsigned char *f(int x) { return 0; }",
             "(tu (funcdef f (params (param x)) (compound (return (int 0)))))",
+        );
+        // A multi-word specifier joins before a pointer
+        // declarator, while a declarator named like a type
+        // word still keeps its name.
+        assert_sexp(
+            "unsigned int *p;",
+            "(tu (decl unsigned int (initdecl p (pointer))))",
+        );
+        assert_sexp(
+            "int long = 1;",
+            "(tu (decl int (initdecl long (int 1))))",
         );
         // A `*` without a following `(` is still a variable
         // declaration, not a function.
