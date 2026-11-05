@@ -211,6 +211,20 @@ MILESTONES = [
         "fixture is byte-identical, and allocated cells and "
         "runtime footprint are unchanged.",
     ),
+    (
+        "ef3a6c2380aa275c2f573ccc67576eb9cc3fc055",
+        "Storage classes + pointer returns",
+        "Then-only perform_if drops the else_value cell and the "
+        "bitwise early-exit test becomes a guard: the 45 existing "
+        "fixtures shrink by 510,516 BF bytes in total (dead-code "
+        "removal -507,524, bit extraction -2,992), and allocated "
+        "cells drop by 2 on 33 fixtures and by 1 on one. Adds "
+        "four fixtures: typedefs (812,500 BF bytes on 128 "
+        "cells), enums (104,570 on 131), storage (57,318 on "
+        "104), and pointerret (588,182 on 80). Runtime "
+        "footprints re-measured with the cached-index runner "
+        "reproduce every prior entry exactly.",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
