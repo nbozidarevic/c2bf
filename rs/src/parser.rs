@@ -208,15 +208,41 @@ fn eval_const(e: &Expr, consts: &HashMap<Vec<u8>, i32>) -> Option<i32> {
     }
 }
 
+/// A storage-class specifier word (`static`, `extern`, `auto`,
+/// `register`). They stay identifiers elsewhere — all four can
+/// still name variables — so they are recognized only inside
+/// specifier position (see `parse_spec`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StorageClass {
+    Static,
+    Extern,
+    Auto,
+    Register,
+}
+
+fn storage_word(text: &[u8]) -> Option<StorageClass> {
+    match text {
+        b"static" => Some(StorageClass::Static),
+        b"extern" => Some(StorageClass::Extern),
+        b"auto" => Some(StorageClass::Auto),
+        b"register" => Some(StorageClass::Register),
+        _ => None,
+    }
+}
+
 /// A parsed type specifier: joined words plus declarator flags
 /// contributed by a typedef name in first position (a pointer or
-/// array alias). Plain specifiers carry no flags.
+/// array alias). Plain specifiers carry no flags. A storage
+/// class, when present, is stripped from the words: `static` and
+/// `extern` are meaningful only at file scope, `auto` and
+/// `register` never change anything in this model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Spec {
     words: Vec<u8>,
     pointer: bool,
     array_len: Option<i32>,
     array_unsized: bool,
+    storage: Option<StorageClass>,
 }
 
 impl Spec {
@@ -226,6 +252,7 @@ impl Spec {
             pointer: false,
             array_len: None,
             array_unsized: false,
+            storage: None,
         }
     }
 
@@ -366,6 +393,7 @@ impl<'a> Parser<'a> {
         while (self.is_type_tok()
             || (self.at_ident()
                 && (is_qualifier(&self.peek().text)
+                    || storage_word(&self.peek().text).is_some()
                     || self.typedefs.contains_key(&self.peek().text))))
             && {
                 let n = self.peek_at(1);
@@ -392,16 +420,33 @@ impl<'a> Parser<'a> {
         self.resolve_spec(words)
     }
 
-    /// Expand a typedef name in the collected specifier words.
-    /// `words` holds the raw words `parse_spec` collected; at most
-    /// one may be a typedef name, and every other word must be a
-    /// qualifier.
+    /// Resolve the collected specifier words: strip storage
+    /// classes (two are an error), then expand a typedef name in
+    /// the remaining words. Every word beside a typedef name must
+    /// be a qualifier.
     fn resolve_spec(&self, words: Vec<Vec<u8>>) -> Result<Spec, ParseError> {
+        let mut storage = None;
+        let mut kept: Vec<Vec<u8>> = Vec::new();
+        for w in words {
+            if let Some(s) = storage_word(&w) {
+                if storage.is_some() {
+                    return self.fail(
+                        "multiple storage classes in one specifier".to_string(),
+                    );
+                }
+                storage = Some(s);
+            } else {
+                kept.push(w);
+            }
+        }
+        let words = kept;
         let at = words
             .iter()
             .position(|w| self.typedefs.contains_key(w));
         let Some(at) = at else {
-            return Ok(Spec::plain(words.join(&b' ')));
+            let mut spec = Spec::plain(words.join(&b' '));
+            spec.storage = storage;
+            return Ok(spec);
         };
         if words
             .iter()
@@ -430,6 +475,7 @@ impl<'a> Parser<'a> {
             pointer: alias.pointer,
             array_len: alias.array_len,
             array_unsized: alias.array_unsized,
+            storage,
         })
     }
 
@@ -531,7 +577,7 @@ impl<'a> Parser<'a> {
                 }
             }
             self.p = mark;
-            return Ok(External::Decl(self.parse_declaration()?));
+            return Ok(External::Decl(self.parse_declaration(true)?));
         }
         self.fail("expected declaration or function definition".to_string())
     }
@@ -544,6 +590,11 @@ impl<'a> Parser<'a> {
     fn parse_typedef_declaration(&mut self) -> Result<External, ParseError> {
         self.next_tok(); // `typedef`
         let spec = self.parse_spec()?;
+        if spec.storage.is_some() {
+            return self.fail(
+                "storage class specifiers are not allowed with typedef".to_string(),
+            );
+        }
         let mut pointer = false;
         if self.at_punct(b"*") {
             self.next_tok();
@@ -737,6 +788,16 @@ impl<'a> Parser<'a> {
                         return self.fail("expected parameter type".to_string());
                     }
                     let spec = self.parse_spec()?;
+                    // Storage classes are not allowed in parameters,
+                    // except `register`, which is ignored.
+                    if let Some(s) = spec.storage {
+                        if s != StorageClass::Register {
+                            return self.fail(
+                                "storage class specifiers are not allowed in parameters"
+                                    .to_string(),
+                            );
+                        }
+                    }
                     // An unnamed parameter ends the specifier at
                     // `,`/`)`, but the specifier joiner only swallows
                     // a following type word when another word follows
@@ -843,7 +904,14 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_declaration(&mut self) -> Result<Decl, ParseError> {
+    /// Parse a declaration; `file_scope` tells whether it sits
+    /// at file scope or inside a function body. Storage classes
+    /// are checked here: `static` and `extern` are file-scope
+    /// only, `auto` and `register` are ignored everywhere. A
+    /// file-scope `extern` declarator without an initializer is a
+    /// non-defining declaration and is dropped, so a later
+    /// definition still registers normally.
+    fn parse_declaration(&mut self, file_scope: bool) -> Result<Decl, ParseError> {
         if self.at_ident() && self.peek().text.as_slice() == b"typedef" {
             return self.fail(
                 "typedef declarations are only allowed at file scope".to_string(),
@@ -854,6 +922,17 @@ impl<'a> Parser<'a> {
         } else {
             return self.fail("expected type name".to_string());
         };
+        match spec.storage {
+            Some(StorageClass::Static) if !file_scope => {
+                return self.fail("static locals are not supported".to_string());
+            }
+            Some(StorageClass::Extern) if !file_scope => {
+                return self.fail(
+                    "extern declarations are only allowed at file scope".to_string(),
+                );
+            }
+            _ => {}
+        }
         if spec.words.as_slice() == b"enum"
             && ((self.at_ident()
                 && self.peek_at(1).kind == Kind::Punct
@@ -873,6 +952,9 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect_punct(b";", "';'")?;
+        if file_scope && spec.storage == Some(StorageClass::Extern) {
+            inits.retain(|i| i.init.is_some());
+        }
         Ok(Decl {
             spec: spec.words,
             inits,
@@ -980,7 +1062,7 @@ impl<'a> Parser<'a> {
 
     fn parse_block_item(&mut self) -> Result<BlockItem, ParseError> {
         if self.at_spec_start() {
-            Ok(BlockItem::Decl(self.parse_declaration()?))
+            Ok(BlockItem::Decl(self.parse_declaration(false)?))
         } else {
             Ok(BlockItem::Stmt(self.parse_statement()?))
         }
@@ -1081,6 +1163,17 @@ impl<'a> Parser<'a> {
 
     fn parse_for_declaration(&mut self) -> Result<ForDecl, ParseError> {
         let spec = self.parse_spec()?;
+        match spec.storage {
+            Some(StorageClass::Static) => {
+                return self.fail("static locals are not supported".to_string());
+            }
+            Some(StorageClass::Extern) => {
+                return self.fail(
+                    "extern declarations are only allowed at file scope".to_string(),
+                );
+            }
+            _ => {}
+        }
         if spec.pointer || spec.is_array() {
             return self.fail(
                 "pointer and array typedefs are not supported in for declarations"
@@ -2099,6 +2192,68 @@ mod tests {
             (
                 "int main() { enum Color { RED }; return 0; }",
                 "only allowed at file scope",
+            ),
+        ];
+        for (src, want) in cases {
+            match parse(src.as_bytes()) {
+                Err(e) => assert!(
+                    e.msg.contains(want),
+                    "for {:?}: got error {:?}, want {:?}",
+                    src,
+                    e.msg,
+                    want
+                ),
+                Ok(_) => panic!("accepted {:?}", src),
+            }
+        }
+    }
+
+    #[test]
+    fn storage_classes_parse() {
+        // Storage words are stripped from the specifier in dumps;
+        // `static`/`extern` at file scope behave like plain
+        // declarations, `register`/`auto` are ignored anywhere.
+        assert_sexp(
+            "static int x = 1; extern int y; int y = 2; int main() { register int r = 3; auto int a = 4; }",
+            "(tu (decl int (initdecl x (int 1))) (decl int) (decl int (initdecl y (int 2))) (funcdef main (compound (decl int (initdecl r (int 3))) (decl int (initdecl a (int 4))))))",
+        );
+        assert_sexp(
+            "static int f() { return 1; }",
+            "(tu (funcdef f (compound (return (int 1)))))",
+        );
+        // The storage words can still name variables.
+        assert_sexp(
+            "int static = 1; int register = 2;",
+            "(tu (decl int (initdecl static (int 1))) (decl int (initdecl register (int 2))))",
+        );
+    }
+
+    #[test]
+    fn storage_class_errors() {
+        let cases: &[(&str, &str)] = &[
+            (
+                "int main() { static int x = 1; return 0; }",
+                "static locals are not supported",
+            ),
+            (
+                "int main() { extern int x; return 0; }",
+                "only allowed at file scope",
+            ),
+            (
+                "int f(static int x) { return x; }",
+                "not allowed in parameters",
+            ),
+            (
+                "int main() { for (static int i = 0;;) { } return 0; }",
+                "static locals are not supported",
+            ),
+            (
+                "static extern int x = 1;",
+                "multiple storage classes",
+            ),
+            (
+                "typedef static int T;",
+                "not allowed with typedef",
             ),
         ];
         for (src, want) in cases {

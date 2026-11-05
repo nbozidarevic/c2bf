@@ -2472,6 +2472,39 @@ mod tests {
     }
 
     #[test]
+    fn storage_classes_compile_and_run() {
+        let bf = compile(
+            b"static int counter = 10; extern int shared; int shared = 7; \
+              static int get(void) { return counter; } \
+              int main() { \
+                register int r = 3; auto int a = 4; \
+                printf(\"%d,%d,%d,%d\", counter, shared, get(), r + a); \
+              }",
+        )
+        .expect("storage program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"10,7,10,7");
+    }
+
+    #[test]
+    fn extern_bare_declaration_uses_zero_cell() {
+        // A bare `extern` declaration defines nothing; a use
+        // allocates a zero cell. g++ would not link this, so it
+        // is pinned here, not in a fixture.
+        let bf = compile(b"extern int x; int main() { printf(\"%d\", x); }")
+            .expect("extern program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"0");
+        let bf = compile(b"extern int x; int x = 9; int main() { printf(\"%d\", x); }")
+            .expect("extern-then-define compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"9");
+    }
+
+    #[test]
     fn typedef_errors_rejected() {
         let cases: &[(&[u8], &str)] = &[
             (

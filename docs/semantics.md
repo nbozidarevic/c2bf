@@ -312,3 +312,27 @@ specifier word works anywhere, including in blocks.
   visible again after the scope ends. Uses before any
   definition treat the name as an opaque specifier word, as any
   unknown word pair already does.
+
+## Storage classes
+
+`static`, `extern`, `auto`, and `register` are recognized in
+specifier position. At file scope `static` and `extern` are
+accepted and ignored: `static int x = 1;` behaves like a plain
+global definition and a `static` function behaves like a plain
+function. An `extern` declarator *with* an initializer is a
+definition; one *without* an initializer is a non-defining
+declaration — it is dropped, so a later definition of the same
+name registers normally. An `extern`-only name that is never
+defined still allocates a zero cell when used, which is a
+deviation from C (a real linker would reject it).
+
+`static` and `extern` are rejected in block scope: `static`
+locals do not keep their values across calls (there is no
+persistence beyond the function's own cells), and block-scope
+`extern` is not supported. Storage classes are also rejected
+in parameter lists and with `typedef`, except that `register`
+is ignored in parameter lists. `auto` and `register` are
+ignored everywhere. A `for`-loop declaration rejects `static`
+and `extern` the same way a block declaration does. Storage
+words are recognized only in specifier position, so the same
+words can still name variables (`int static = 1;`).
