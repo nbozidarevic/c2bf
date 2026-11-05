@@ -2,10 +2,12 @@
 
 All notable changes to this project. Crate versions were `0.0.0`
 until the rename to `c2bf` (below); they are `0.1.0` from that
-point, matching tag `v0.1.0`. Entries below are grouped by the
-roadmap phases that produced them.
+point, matching tag `v0.1.0`, and `0.2.0` from the release
+below, matching tag `v0.2.0`. Entries below are grouped by the
+roadmap phases that produced them. See `docs/versioning.md` for
+when and how versions change.
 
-## Unreleased (towards v0.2.0)
+## v0.2.0
 
 - CLI: `check` command validates C source without emitting
   Brainfuck; `compile -s`/`--stats` prints one
@@ -17,24 +19,38 @@ roadmap phases that produced them.
 - WASM build stability: `wasm-pack` pinned to `v0.15.1` in CI and
   `wasm-opt` disabled, after nondeterministic "latest" resolution
   and an intermittent binaryen parse failure.
+- Docs: `docs/semantics.md` tidied (variable indices, `sizeof`,
+  and stale runner deviations corrected).
 - Codegen: then-only `perform_if` replaces `perform_if_else` at
   every empty-else site (logic/comparison helpers, guards,
-  division, `%s`/`scanf` checks), saving 507,064 BF bytes
-  (-4.4%) across the corpus with no fixture growing.
+  division, `%s`/`scanf` checks), saving 507,524 BF bytes across
+  the corpus with no fixture growing; allocated cells drop by 2
+  on most fixtures.
 - Codegen: the `bitwise_fold` early-exit test uses a guard
   (`negate` + `logical_and`) instead of a multiply, saving
-  2,584 BF bytes on the bitwise fixtures with the rest
+  2,992 BF bytes across the bitwise fixtures with the rest
   byte-identical.
+- Runner: cached tape index, ~9.5% faster in a within-run A/B
+  (geomean over 41 bench cases); runtime footprints are
+  unchanged.
 - Language: `typedef` aliases (file-scope only, resolved at
   parse time), including pointer/array aliases, chained aliases,
   and alias spellings in parameters, return types, and
   prototypes; function signatures now also compare pointer
-  returns. Runner: cached tape index, ~9.5% faster in a
-  within-run A/B (geomean over 41 bench cases).
+  returns.
 - Language: `enum` definitions (file-scope only) with constant
   enumerator expressions, substituted at parse time, including
   shadowing by declared names; out-of-range values wrap like
   every byte value.
+- Language: storage class specifiers (`static`/`extern` at file
+  scope, `auto`/`register` ignored); a bare file-scope `extern`
+  declarator is a non-defining declaration. `static`/`extern`
+  in blocks, parameters, `for` declarations, and `typedef`s are
+  parse errors.
+- Language: direct pointer-return declarators (`char *f()`),
+  including prototypes, with the same signature as the
+  typedef-alias form; multi-word specifiers now also join
+  before pointer declarators (`unsigned int *p`).
 
 ## Rename to `c2bf` (Phase 8)
 
