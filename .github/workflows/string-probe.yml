@@ -67,4 +67,23 @@ jobs:
           check("zaea-twice", "\n".join(
               base + [lines65[48], lines65[48], final, "}"]) + "\n",
               stdin65.encode())
+          # base = lines 1..48 (through c10 loop). Remove one
+          # context piece at a time, keeping mid + final.
+          no_c10 = ([l for l in base if not l.strip().startswith("int c10")]
+                    + [l for l in lines65[45:48] if "c10" not in l])
+          # no_c10 above drops the decl but keeps the loop lines
+          # mentioning c10; build it explicitly instead:
+          no_c10 = lines65[:44] + lines65[48:49] + [final, "}"]
+          check("no-c10-loop", "\n".join(no_c10) + "\n", stdin65.encode())
+          no_hhu = lines65[:43] + lines65[44:49] + [final, "}"]
+          check("no-hhu-printf", "\n".join(no_hhu) + "\n", stdin65.encode())
+          mid_litnum = '  printf("%tX, %s\\n", 5, "zaea");'
+          check("mid-litnum", "\n".join(base + [mid_litnum, final, "}"]) + "\n",
+                stdin65.encode())
+          mid_swap = '  printf("%s, %tX\\n", "zaea", ((s6)));'
+          check("mid-swapped", "\n".join(base + [mid_swap, final, "}"]) + "\n",
+                stdin65.encode())
+          short_final = '  printf("%s, %s\\n", "gb", "yx");'
+          check("short-final", "\n".join(base + [lines65[48], short_final, "}"]) + "\n",
+                stdin65.encode())
           EOF
