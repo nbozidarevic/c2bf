@@ -13,36 +13,31 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Build
         run: cargo build --release --manifest-path rs/Cargo.toml
-      - name: Isolate cell hog
+      - name: Isolate percent-i trigger
         run: |
           python3 - <<'EOF'
-          import subprocess
-          H = "#include <stdio.h>\n"
-          HELPER = "int helper(int hp) {\n  int v1 = (hp ? hp : (127 < hp));\n  return 15;\n}\n"
-          cases = {
-              "empty": "int main() {}",
-              "decl": "int main() { int v3 = 64; }",
-              "cmp": "int main() { int v3 = 64; int v4 = (5 > v3); }",
-              "mod": "int main() { int v3 = 64; int v5 = ((8 == v3) % 64); }",
-              "bitor": "int main() { int v3 = 64; int v4 = (5 > v3); int x = (10 | v4); }",
-              "scanf_d": 'int main() { int s7 = 0; scanf("%d", &s7); }',
-              "scanf_i": 'int main() { int s7 = 0; scanf("%i", &s7); }',
-              "scanf_both": 'int main() { int s7 = 0; int s8 = 0; scanf("%i %d", &s7, &s8); }',
-              "char_assign": "int main() { int v3 = 64; char v6 = v3; }",
-              "increments": "int main() { int v3 = 64; int v5 = 1; v5++; v3++; }",
-              "if_only": "int main() { int v3 = 64; if (v3) { v3 = 1; } else { v3 = 2; } }",
-              "helper_def_only": HELPER + "int main() {}",
-              "helper_call": HELPER + "int main() { int v4 = helper(8); }",
-              "pA_no_scanf": ("int main() { int v3 = 64; int v4 = (5 > v3); "
-                  "int v5 = ((8 == v3) % 64); char v6 = v3; "
-                  "if ((10 | v4)) { v3 = (v5 / 1); } else { v3 = v5; } v5++; v4++; }"),
-              "pA_no_if": ("int main() { int v3 = 64; int v4 = (5 > v3); "
-                  "int v5 = ((8 == v3) % 64); char v6 = v3; int s7 = 0; int s8 = 0; "
-                  'scanf("%i %d", &s7, &s8); v5++; v4++; }'),
+          import subprocess, sys
+          sys.path.insert(0, "tests")
+          import fuzz
+          src, _ = fuzz.gen_program(3)
+          lines = src.splitlines()
+          variants = {
+              "q1-switch-with-pct-d": (
+                  "\n".join(lines[:78] + ["}"]) + "\n"
+              ).replace('scanf("%i %d"', 'scanf("%d %d"'),
+              "q2-late-string-after-scanf": (
+                  "\n".join(lines[:23])
+                  + '\n  char *p = "late";\n  printf("%s", p);\n}\n'
+              ),
+              "q3-no-switch-final-printf": (
+                  "\n".join(lines[:35] + [lines[78]] + ["}"]) + "\n"
+              ),
+              "q4-full-with-pct-d": src.replace(
+                  'scanf("%i %d"', 'scanf("%d %d"'),
           }
-          for name, body in cases.items():
+          for name, text in variants.items():
               p = f"/tmp/{name}.c"
-              open(p, "w").write(H + body + "\n")
+              open(p, "w").write(text)
               r = subprocess.run(
                   ["./rs/target/release/c2bf", "compile", "-c", p,
                    "--stats", "-o", "/dev/null"],
