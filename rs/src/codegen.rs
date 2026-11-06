@@ -1514,20 +1514,23 @@ impl Emitter {
         // Digits accumulate as `result = result * base + value`.
         // Hand-rolled like the skip loop above: the digit scanned
         // before the loop (and rescanned at each pass's end) is
-        // the one accumulated, and the loop re-tests `skip`
-        // itself; `prefix_done` gates the loop, since a `%i` `0`
-        // prefix followed by neither `x` nor an octal digit leaves
-        // the value at 0. Classification temporaries are
+        // the one accumulated, and the loop re-tests its gate
+        // cell itself; `prefix_done` gates the loop, since a `%i`
+        // `0` prefix followed by neither `x` nor an octal digit
+        // leaves the value at 0. Classification temporaries are
         // reclaimed afterwards, as for the skip loop.
         let checkpoint = self.checkpoint();
         let scan_value = self.memory.temp_cell();
         let scan_valid = self.memory.temp_cell();
-        let skip = self.memory.temp_cell();
         let not_done = self.is_equal(prefix_done, zero_cell)?;
         self.scan_digit_into(reader, base_cell, &bounds, scan_value, scan_valid)?;
+        // The loop tests `go` itself (unlike the skip loop, which
+        // tests its negation): each pass recomputes the gate
+        // into the same cell, so the `[` re-tests the fresh
+        // value. Testing the negation here ran the body exactly
+        // when no digit remained and spun on the terminator.
         let go = self.logical_and(scan_valid, not_done)?;
-        self.negate_into(go, skip)?;
-        self.move_pointer(skip);
+        self.move_pointer(go);
         self.emit("[");
         let shifted = self.multiply_values(result, base_cell);
         let acc = self.add_values(scan_value, shifted);
@@ -1535,9 +1538,9 @@ impl Emitter {
         self.move_pointer(reader);
         self.emit(",");
         self.scan_digit_into(reader, base_cell, &bounds, scan_value, scan_valid)?;
-        let go = self.logical_and(scan_valid, not_done)?;
-        self.negate_into(go, skip)?;
-        self.move_pointer(skip);
+        let go_next = self.logical_and(scan_valid, not_done)?;
+        self.move_value(go_next, go);
+        self.move_pointer(go);
         self.emit("]");
         self.release_temps(checkpoint);
         self.perform_if(negative, |em| {
