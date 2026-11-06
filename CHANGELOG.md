@@ -22,6 +22,11 @@ for when and how versions change.
   range" after a based read now compile; deeply nested
   programs can still hit that limit (see `docs/fuzzing.md`).
   Decision record: `docs/decisions/0012-scanf-reader-shrink.md`.
+- Codegen: `switch` matches are computed just in time per
+  case and reclaimed after the case's guard (eager shape
+  kept when `default` is not last): the `switch` fixture
+  falls to 171 cells from 279. Decision record:
+  `docs/decisions/0013-switch-matches-just-in-time.md`.
 
 ## v0.3.0
 
