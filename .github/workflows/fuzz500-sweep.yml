@@ -1,0 +1,23 @@
+# Temporary 500-seed fuzz sweep validating the generator
+# agreement fixes (shift fits, %hhd cap). Never a standing
+# workflow; removed after the sweep result is recorded.
+name: fuzz500-sweep
+
+on:
+  push:
+    paths:
+      - .github/workflows/fuzz500-sweep.yml
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release --manifest-path rs/Cargo.toml
+      - name: Fuzz 500 seeds
+        working-directory: tests
+        run: python3 fuzz.py --count 500 --continue-on-failure
