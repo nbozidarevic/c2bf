@@ -1,0 +1,53 @@
+name: string-probe
+on:
+  push:
+    paths:
+      - .github/workflows/string-probe.yml
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release --manifest-path rs/Cargo.toml
+      - name: Probe string literal bases
+        run: |
+          python3 - <<'EOF'
+          import subprocess, sys
+          sys.path.insert(0, "tests")
+          import fuzz
+          B = "./rs/target/release/c2bf"
+          H = "#include <stdio.h>\n"
+          def check(name, src, stdin=b""):
+              open("/tmp/sp.c", "w").write(src)
+              open("/tmp/sp.in", "wb").write(stdin)
+              g = subprocess.run(["g++", "-w", "/tmp/sp.c", "-o", "/tmp/sp.o"],
+                                 capture_output=True)
+              if g.returncode != 0:
+                  print(f"{name}: ORACLE REJECT: {g.stderr.decode()[:200]}", flush=True)
+                  return
+              exp = subprocess.run(["/tmp/sp.o"], input=stdin,
+                                   capture_output=True).stdout
+              c = subprocess.run([B, "compile", "-c", "/tmp/sp.c", "-o", "/tmp/sp.bf"],
+                                 capture_output=True)
+              if c.returncode != 0:
+                  print(f"{name}: C2BF REJECT: {c.stderr.decode()[:200]}", flush=True)
+                  return
+              got = subprocess.run([B, "run", "-c", "/tmp/sp.bf", "-i", "/tmp/sp.in"],
+                                   capture_output=True).stdout
+              ok = "PASS" if got == exp else "FAIL"
+              print(f"{name}: {ok} exp={exp!r} got={got!r}", flush=True)
+          check("bare", H + 'int main() { printf("%s, %s\\n", "gbe", "yxeb"); }')
+          check("decls60", H + 'int main() { ' + " ".join(
+              f"int d{i} = {i};" for i in range(60)) +
+              ' printf("%s, %s\\n", "gbe", "yxeb"); }')
+          for pad in (180, 240, 250):
+              check(f"pad{pad}", H + f'int main() {{ char pad[{pad}]; '
+                    'printf("%s, %s\\n", "gbe", "yxeb"); }')
+          src65, stdin65 = fuzz.gen_program(65)
+          check("seed65", src65, stdin65.encode())
+          EOF
