@@ -1495,21 +1495,50 @@ impl Emitter {
         let mut cases: Vec<SwitchCase<'_>> = Vec::new();
         self.collect_switch_stmt(body, &mut cases)?;
         let any_match = self.const_value(0);
+        // SPIKE: when there is at most one `default` and it
+        // comes last (the usual shape, and the only shape the
+        // fuzzer emits), compute each case's match just in time
+        // and reclaim it after the case, instead of holding
+        // every match cell live across the whole switch: the
+        // default's gate reads `any_match`, which is complete
+        // by then, and `fall`/`broken`/expression/label cells
+        // are allocated before the per-case checkpoint, so
+        // they survive. Any other default placement keeps the
+        // eager shape below, which computes all matches
+        // upfront.
+        let defaults = cases.iter().filter(|c| c.is_default).count();
+        let lazy = defaults == 0
+            || (defaults == 1 && cases.last().is_some_and(|c| c.is_default));
         let mut matched: Vec<i32> = Vec::new();
-        for c in &cases {
-            if c.is_default {
-                matched.push(-1);
-                continue;
+        if !lazy {
+            for c in &cases {
+                if c.is_default {
+                    matched.push(-1);
+                    continue;
+                }
+                let m = self.is_equal(expr_cell, c.label_cell)?;
+                matched.push(m);
+                let o = self.logical_or(any_match, m)?;
+                self.move_value(o, any_match);
             }
-            let m = self.is_equal(expr_cell, c.label_cell)?;
-            matched.push(m);
-            let o = self.logical_or(any_match, m)?;
-            self.move_value(o, any_match);
         }
         let fall = self.const_value(0);
         let broken = self.const_value(0);
         self.break_stack.push(broken);
         for (i, c) in cases.iter().enumerate() {
+            let checkpoint = self.checkpoint();
+            let match_cell = if lazy {
+                if c.is_default {
+                    -1
+                } else {
+                    let m = self.is_equal(expr_cell, c.label_cell)?;
+                    let o = self.logical_or(any_match, m)?;
+                    self.move_value(o, any_match);
+                    m
+                }
+            } else {
+                matched[i]
+            };
             // GCC right-to-left within each nested call (see order probe).
             let run_cond = if c.is_default {
                 let nb = self.negate(broken)?;
@@ -1518,7 +1547,7 @@ impl Emitter {
                 self.logical_and(o, nb)?
             } else {
                 let nb = self.negate(broken)?;
-                let o = self.logical_or(matched[i], fall)?;
+                let o = self.logical_or(match_cell, fall)?;
                 self.logical_and(o, nb)?
             };
             // A `continue` in a case binds the enclosing loop: later
@@ -1572,6 +1601,15 @@ impl Emitter {
                 },
                 |_| Ok(()),
             )?;
+            // Lazy path only: the match and gate temporaries
+            // are dead once the case's guard has run (the body
+            // flows out through `fall`/`broken`/variables and
+            // the guard's own reclaim), so later cases reuse
+            // their cells. The eager path keeps its layout
+            // exactly.
+            if lazy {
+                self.release_temps(checkpoint);
+            }
         }
         self.break_stack.pop();
         Ok(())
