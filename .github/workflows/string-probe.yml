@@ -54,4 +54,17 @@ jobs:
                              ("cut-c9", 43), ("cut-hhu", 44), ("cut-c10", 48)):
               text = "\n".join(lines65[:upto] + [final, "}"]) + "\n"
               check(name, text, stdin65.encode())
+          base = lines65[:48]
+          mid_no_lit = '  printf("%tX\\n", ((s6)));'
+          mid_only_s = '  printf("%s\\n", "zaea");'
+          final_one = '  printf("%s\\n", "yxeb");'
+          check("zaea-nolit", "\n".join(base + [mid_no_lit, final, "}"]) + "\n",
+                stdin65.encode())
+          check("zaea-only-s", "\n".join(base + [mid_only_s, final, "}"]) + "\n",
+                stdin65.encode())
+          check("zaea-then-one", "\n".join(
+              base + [lines65[48], final_one, "}"]) + "\n", stdin65.encode())
+          check("zaea-twice", "\n".join(
+              base + [lines65[48], lines65[48], final, "}"]) + "\n",
+              stdin65.encode())
           EOF
