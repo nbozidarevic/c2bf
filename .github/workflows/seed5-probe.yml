@@ -1,0 +1,42 @@
+name: seed5-probe
+on:
+  push:
+    paths:
+      - .github/workflows/seed5-probe.yml
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release --manifest-path rs/Cargo.toml
+      - name: Bisect capped seed 5
+        run: |
+          python3 - <<'EOF'
+          import subprocess, sys
+          sys.path.insert(0, "tests")
+          import fuzz
+          src, _ = fuzz.gen_program(5)
+          lines = src.splitlines()
+          variants = {
+              "p21-while": lines[:21] + ["}"],
+              "p23-stmts": lines[:23] + ["}"],
+              "p53-first-switch": lines[:53] + ["  }", "}"],
+              "p66-ifelse": lines[:66] + ["}"],
+              "p68-trailing": lines[:68] + ["}"],
+              "p70-trailing": lines[:70] + ["}"],
+              "p72-full": lines[:72] + ["}"],
+          }
+          for name, ls in variants.items():
+              p = f"/tmp/{name}.c"
+              open(p, "w").write("\n".join(ls) + "\n")
+              r = subprocess.run(
+                  ["./rs/target/release/c2bf", "compile", "-c", p,
+                   "--stats", "-o", "/dev/null"],
+                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+              first = (r.stderr.strip().splitlines() or ["<no stderr>"])[0]
+              print(f"{name}: exit={r.returncode} :: {first}", flush=True)
+          EOF
