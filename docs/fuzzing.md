@@ -43,7 +43,11 @@ keeps a `[lo, hi]` bound):
 
 - Every value stays in 0..255. Operations that would leave the
   range are retried with different operands or fall back to a
-  literal. Division and modulo divisors are nonzero.
+  literal. Division and modulo divisors are nonzero. Shifts
+  are checked on the shifted interval, not just the count:
+  a left shift whose result would exceed 255 is retried
+  ('y' `<<` 3 is 968 in C, 200 here), since the byte model
+  agrees with C only inside the range.
 - `char` storage only receives 0..127: C converts larger values
   into a `char` implementation-defined (signed-char
   sign-extension on the oracle platform), so the generator caps
@@ -76,6 +80,12 @@ keeps a `[lo, hi]` bound):
   with side effects inside them, so evaluation order cannot
   change the result. Helper functions are pure too (one
   parameter, locals, one return expression).
+- `printf` `%hhd` is emitted only with arguments capped at
+  127: the conversion narrows to signed `char` in C, so
+  larger values print negative there and unsigned here
+  (length modifiers are ignored). No other length modifier
+  narrows a byte value, so `%hd`, `%ld`, and friends take
+  uncapped arguments.
 - No declarations inside branches: all names are declared at
   function top level, so the generator's flat interval
   environment stays sound across merges.

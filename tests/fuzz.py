@@ -48,10 +48,10 @@ TIMEOUT = 15
 # three more, one `switch` holds four case bodies), so an
 # unbounded count lets straight-line temporaries accumulate
 # past the 256 addressable cells (fuzz seeds 5 and 6 used 29
-# and 25 calls). Empirical, sweep-validated: see
-# `docs/fuzzing.md`. Declarations and the trailing `printf`s
-# are outside the budget; exhausted branches come out empty,
-# which is still valid C.
+# and 25 calls). Empirical: see `docs/fuzzing.md`.
+# Declarations and the trailing `printf`s are outside the
+# budget; exhausted branches come out empty, which is still
+# valid C.
 STMT_BUDGET = 20
 
 
@@ -172,12 +172,21 @@ class Gen:
                     continue
                 k = rng.randint(0, 3)
                 iv = iv_shl(l[1:], k)
+                # The shift branches return early, bypassing the
+                # fits() check below that the other operators
+                # go through: a shifted interval can exceed 255
+                # ('y' << 3 is 968 in C, 200 here), so check
+                # the shifted interval itself, not just the count.
+                if not fits(*iv):
+                    continue
                 return (f"({l[0]} << {k})", *iv)
             elif op == ">>":
                 if r[2] > 4 or r[1] < 0:
                     continue
                 k = rng.randint(0, 4)
                 iv = iv_shr(l[1:], k)
+                if not fits(*iv):
+                    continue
                 return (f"({l[0]} >> {k})", *iv)
             elif op in ("&", "|", "^"):
                 if l[2] > 31 or r[2] > 31:
@@ -626,7 +635,14 @@ class Gen:
                 continue
             letter = rng.choice(["d", "x", "X", "o", "u"])
             prefix = rng.choice(["", "", "l", "hh", "ll", "h", "z", "j", "t"])
-            e = self.readable_expr(2)
+            if prefix == "hh" and letter == "d":
+                # %hhd narrows to signed char in C, so values
+                # above 127 print negative there and unsigned
+                # here (length modifiers are ignored): cap the
+                # argument. No other modifier narrows a byte value.
+                e = self.capped(2, 127)
+            else:
+                e = self.readable_expr(2)
             parts.append(f"%{prefix}{letter}")
             args.append(e[0])
         fmt = ", ".join(parts)
@@ -804,7 +820,9 @@ def main(argv=None):
     if args.keep_dir:
         os.makedirs(args.keep_dir, exist_ok=True)
     failures = []
+    ran = 0
     for seed in seeds:
+        ran += 1
         try:
             run_seed(seed, args.keep_dir, args.verbose)
         except GeneratorFailure as e:
@@ -821,7 +839,6 @@ def main(argv=None):
             failures.append(seed)
             if not args.continue_on_failure:
                 break
-    ran = len(seeds) if not failures else seeds.index(failures[0]) + 1
     print(f"fuzz: {ran - len(failures)}/{ran} seeds passed"
           + (f"; failures: {failures}" if failures else ""))
     return 1 if failures else 0
