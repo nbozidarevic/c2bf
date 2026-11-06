@@ -3726,6 +3726,27 @@ mod tests {
     }
 
     #[test]
+    fn string_literal_straddling_255_errors() {
+        // A literal whose NUL would land past cell 255 used to
+        // compile, and its print walk then wrapped to cell 0
+        // and read unrelated tape (fuzz seed 65). Pad sizes
+        // leave margin for prologue cells before the first
+        // declaration, so the straddling case errors and the
+        // fitting case compiles regardless of the exact base.
+        assert_eq!(
+            compile(b"int main() { char pad[252] = {0}; printf(\"%s\", \"abcd\"); }")
+                .unwrap_err()
+                .msg,
+            "address is outside the addressable range"
+        );
+        let bf = compile(b"int main() { char pad[240] = {0}; printf(\"%s\", \"abcd\"); }")
+            .expect("fitting literal compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"abcd");
+    }
+
+    #[test]
     fn casts_wrap_like_bytes() {
         let bf = compile(
             b"int main() { printf(\"%d\", (char)300); printf(\"%d\", (int)(200 + 100)); printf(\"%d\", (unsigned int)7); }",

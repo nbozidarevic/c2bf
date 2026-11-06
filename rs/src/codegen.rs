@@ -305,11 +305,15 @@ impl Emitter {
 
     /// Materialize a string literal's cooked bytes plus a NUL
     /// terminator in anonymous, never-reclaimed cells, and return a
-    /// fresh cell holding the base address. The base must fit in a
-    /// byte, like every other address.
+    /// fresh cell holding the base address. The whole storage,
+    /// terminator included, must fit in the addressable cells:
+    /// checking only the base let a literal straddling cell 255
+    /// compile, and its print walk then wrapped to cell 0 and
+    /// read unrelated tape (fuzz seed 65).
     pub fn string_value(&mut self, cooked: &[u8]) -> Result<i32, CompileError> {
         let base = self.memory.alloc_anon_array(cooked.len() + 1);
-        if !(0..=255).contains(&base) {
+        let end = base + cooked.len() as i32;
+        if !(0..=255).contains(&base) || end > 255 {
             return Err(CompileError {
                 msg: "address is outside the addressable range".to_string(),
             });

@@ -31,6 +31,12 @@ for when and how versions change.
   are reclaimed before the loop re-emission: the `dowhile`
   fixture falls to 147 cells from 181. Decision record:
   `docs/decisions/0014-do-while-first-emission-reclaim.md`.
+- Fixed: a string literal whose storage (including the NUL
+  terminator) would cross cell 255 now fails to compile
+  instead of printing past the tape (the print walk wrapped
+  to cell 0 and read unrelated data; found by differential
+  fuzzing, seed 65). The check is the whole-storage bound in
+  `string_value`, pinned by `string_literal_straddling_255_errors`.
 
 ## v0.3.0
 

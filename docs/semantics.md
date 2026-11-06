@@ -96,7 +96,10 @@ the deviation is stated here as defined behavior, pinned by tests.
   literals reserve storage permanently, so such programs fail
   with the same error; this is a known limitation, not a bug
   in any one construct, and the fuzzer caps nesting depth to
-  stay inside it. The null pointer is address `0` (cell `0`).
+  stay inside it. A string literal whose storage (including its
+  NUL terminator) would cross cell 255 is likewise a compile
+  error, rather than printing past the tape. The null pointer
+  is address `0` (cell `0`).
   `scanf` destinations may be variables, `&`-expressions, or
   bare pointers, and store through the address. `scanf` `%d`
   writes one byte here; in C it writes `sizeof(int)` bytes, so
