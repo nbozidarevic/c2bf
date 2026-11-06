@@ -43,6 +43,17 @@ _RAW_BIN = os.environ.get("C2BF_BIN")
 C2BF_BIN = os.path.abspath(_RAW_BIN) if _RAW_BIN else _DEFAULT_BIN
 TIMEOUT = 15
 
+# Total `stmt()` calls per program, including nested ones:
+# nesting multiplies statements (one top-level `if` holds
+# three more, one `switch` holds four case bodies), so an
+# unbounded count lets straight-line temporaries accumulate
+# past the 256 addressable cells (fuzz seeds 5 and 6 used 29
+# and 25 calls). Empirical, sweep-validated: see
+# `docs/fuzzing.md`. Declarations and the trailing `printf`s
+# are outside the budget; exhausted branches come out empty,
+# which is still valid C.
+STMT_BUDGET = 20
+
 
 # --- intervals: every generated value stays in [0, 255] ------------
 
@@ -107,6 +118,7 @@ class Gen:
         self.helpers = {}
         self.protected = set()
         self.counter = 0
+        self.emitted = 0
 
     def fresh(self, stem):
         self.counter += 1
@@ -363,6 +375,14 @@ class Gen:
 
     def stmt(self, depth, loop, lines, pure=False, allow_while=True,
              allow_loop=True):
+        self.emitted += 1
+        if self.emitted > STMT_BUDGET:
+            # Budget exhausted: emit nothing. Callers tolerate
+            # empty branches (an `if`/`for`/`switch` with no
+            # body statements is still valid C), and the merged
+            # interval environment is unchanged by a statement
+            # that never happened.
+            return
         rng = self.rng
         roll = rng.random()
         if pure:

@@ -99,6 +99,20 @@ keeps a `[lo, hi]` bound):
   cap and after just-in-time matches). Loops elsewhere, and
   switches inside loops, are still generated; loops in
   cases remain covered by the hand-written `switch` fixture.
+- Total statements per program are budgeted (`STMT_BUDGET`,
+  20 `stmt()` calls including nested ones): nesting
+  multiplies statements, and straight-line temporaries
+  accumulate across a whole function body with no reclaim
+  boundary between top-level statements (statement-level
+  reclaim was measured and rejected in
+  `docs/decisions/0009-statement-reclaim-rejected.md`), so
+  an unbounded count eventually leaves the next free cell
+  above 255 and a trailing string literal fails (fuzz seed
+  6). Exhausted branches come out empty. Like the depth
+  cap, the budget is empirical and sweep-validated, not a
+  proof: seeds 0-4 use at most 15 calls, seeds 5-6 used
+  29/25, and the 500-seed sweep is the check that 20 keeps
+  generated programs inside the limit.
 
 Not covered (yet): `scanf %s`/`%c` input, negative `scanf`
 tokens, recursion, function pointers, `goto`, structs,
