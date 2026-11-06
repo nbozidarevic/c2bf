@@ -37,6 +37,10 @@ for when and how versions change.
   to cell 0 and read unrelated data; found by differential
   fuzzing, seed 65). The check is the whole-storage bound in
   `string_value`, pinned by `string_literal_straddling_255_errors`.
+- Demo: samples for braced initializers (array + string lists)
+  and I/O formats (`scanf %i` base detection, `printf`
+  `%d`/`%o`/`%X`), asserted in the Node WASM smoke test like
+  the existing samples.
 - Tests: the fuzzer reports compiler rejections carrying only
   the documented addressable-cell limit as skips (capped at
   10% of seeds; any skip fails a single-seed run) instead of

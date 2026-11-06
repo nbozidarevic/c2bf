@@ -41,6 +41,16 @@ const samples = [
     input: "",
     out: [52, 50, 10],
   },
+  {
+    src: 'int main() { int a[3] = {10, 20, 30}; char s[] = {"hi"}; printf("%d,%d,%d,%s\\n", a[0], a[1], a[2], s); }',
+    input: "",
+    out: [49, 48, 44, 50, 48, 44, 51, 48, 44, 104, 105, 10],
+  },
+  {
+    src: 'int main() { int a = 0; scanf("%i", &a); printf("%d,%o,%X\\n", a, a, a); }',
+    input: "0xff\n",
+    out: [50, 53, 53, 44, 51, 55, 55, 44, 70, 70, 10],
+  },
 ];
 for (const sample of samples) {
   const bf = compile(sample.src);

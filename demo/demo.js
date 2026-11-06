@@ -32,6 +32,14 @@ const SAMPLES = {
     src: "int main() {\n  int x = 41;\n  int *p = &x;\n  *p = *p + 1;\n  printf(\"%d\\n\", x);\n}\n",
     input: "",
   },
+  braced: {
+    src: "int main() {\n  int a[3] = {10, 20, 30};\n  char s[] = {\"hi\"};\n  printf(\"%d,%d,%d,%s\\n\", a[0], a[1], a[2], s);\n}\n",
+    input: "",
+  },
+  formats: {
+    src: "int main() {\n  int a = 0;\n  scanf(\"%i\", &a);\n  printf(\"%d,%o,%X\\n\", a, a, a);\n}\n",
+    input: "0xff\n",
+  },
 };
 
 function loadSample() {
