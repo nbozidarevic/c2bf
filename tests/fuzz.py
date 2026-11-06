@@ -361,7 +361,8 @@ class Gen:
     def assignable(self):
         return [n for n in self.env if n not in self.protected]
 
-    def stmt(self, depth, loop, lines, pure=False, allow_while=True):
+    def stmt(self, depth, loop, lines, pure=False, allow_while=True,
+             allow_loop=True):
         rng = self.rng
         roll = rng.random()
         if pure:
@@ -377,6 +378,14 @@ class Gen:
             # addressable cells (fuzz seed 5 at depth 5). The
             # nesting band is [0.52, 0.8): assignments, increments,
             # break/continue, and prints outside it stay as-is.
+            roll = 0.9
+        if not allow_loop and 0.62 <= roll < 0.74:
+            # Inside a switch case (at any depth): no loops. A
+            # loopy case body plus the switch's match/guard cells
+            # peaks past the 256 addressable cells (fuzz seed 5
+            # after the depth cap); flat cases keep the peak
+            # inside. Loops elsewhere, and switches inside
+            # loops, are unaffected.
             roll = 0.9
         if roll < 0.3 and self.assignable():
             name = rng.choice(self.assignable())
@@ -444,7 +453,7 @@ class Gen:
                 self.env[name] = (lo - 1, hi - 1)
             return
         if roll < 0.62:
-            self.gen_if(depth, loop, lines, pure, allow_while)
+            self.gen_if(depth, loop, lines, pure, allow_while, allow_loop)
             return
         if roll < 0.74:
             self.gen_loop(depth, lines, allow_while)
@@ -464,19 +473,22 @@ class Gen:
             return
         self.gen_printf(lines)
 
-    def gen_if(self, depth, loop, lines, pure=False, allow_while=True):
+    def gen_if(self, depth, loop, lines, pure=False, allow_while=True,
+               allow_loop=True):
         snap = self.snap()
         cond = self.expr(1)
         then_lines = []
         # Branches are braced, so a while counter declared inside
         # one is scoped to it: always allowed there.
-        self.stmts(depth - 1, loop, 2, then_lines, pure, allow_while=True)
+        self.stmts(depth - 1, loop, 2, then_lines, pure, allow_while=True,
+                   allow_loop=allow_loop)
         then_snap = self.snap()
         # Copies: restoring the snapshot dict itself and then
         # mutating it would corrupt the snapshot the merge reads.
         self.env, self.arrays, self.chartypes = dict(snap[0]), dict(snap[1]), set(snap[2])
         else_lines = []
-        self.stmts(depth - 1, loop, 1, else_lines, pure, allow_while=True)
+        self.stmts(depth - 1, loop, 1, else_lines, pure, allow_while=True,
+                   allow_loop=allow_loop)
         self.merge([snap, then_snap, self.snap()])
         lines.append(f"if ({cond[0]}) {{")
         lines.extend("  " + s for s in then_lines)
@@ -548,23 +560,26 @@ class Gen:
         for lab in labels:
             lines.append(f"case {lab}:")
             body = []
-            self.stmts(1, loop, 1, body, pure, allow_while=False)
+            self.stmts(1, loop, 1, body, pure, allow_while=False,
+                       allow_loop=False)
             lines.extend("  " + s for s in body)
             lines.append("  break;")
             snaps.append(self.snap())
             self.env, self.arrays, self.chartypes = dict(snap[0]), dict(snap[1]), set(snap[2])
         lines.append("default:")
         body = []
-        self.stmts(1, loop, 1, body, pure, allow_while=False)
+        self.stmts(1, loop, 1, body, pure, allow_while=False,
+                   allow_loop=False)
         lines.extend("  " + s for s in body)
         lines.append("  break;")
         snaps.append(self.snap())
         lines.append("}")
         self.merge(snaps)
 
-    def stmts(self, depth, loop, n, lines, pure=False, allow_while=True):
+    def stmts(self, depth, loop, n, lines, pure=False, allow_while=True,
+              allow_loop=True):
         for _ in range(n):
-            self.stmt(depth, loop, lines, pure, allow_while)
+            self.stmt(depth, loop, lines, pure, allow_while, allow_loop)
 
     def gen_printf(self, lines):
         rng = self.rng

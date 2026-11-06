@@ -92,6 +92,13 @@ keeps a `[lo, hi]` bound):
   minimal case shows a single construct exceeding the limit
   on its own. The underlying compiler limit is documented in
   `docs/semantics.md`.
+- `switch` cases are flat: no loop at any depth inside a
+  case body (a loop inside an `if` inside a case is barred
+  too). A loopy case body plus the switch's match and guard
+  cells peaked past 256 (fuzz seed 5 again, after the depth
+  cap and after just-in-time matches). Loops elsewhere, and
+  switches inside loops, are still generated; loops in
+  cases remain covered by the hand-written `switch` fixture.
 
 Not covered (yet): `scanf %s`/`%c` input, negative `scanf`
 tokens, recursion, function pointers, `goto`, structs,
