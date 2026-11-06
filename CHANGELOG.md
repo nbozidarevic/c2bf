@@ -3,12 +3,13 @@
 All notable changes to this project. Crate versions were `0.0.0`
 until the rename to `c2bf` (below); they are `0.1.0` from that
 point, matching tag `v0.1.0`, `0.2.0` from the release below
-that, matching tag `v0.2.0`, and `0.3.0` from the release at
-the top, matching tag `v0.3.0`. Entries below are grouped by
+that, matching tag `v0.2.0`, `0.3.0` from the release below
+that, matching tag `v0.3.0`, and `0.3.1` from the release at
+the top, matching tag `v0.3.1`. Entries below are grouped by
 the roadmap phases that produced them. See `docs/versioning.md`
 for when and how versions change.
 
-## Unreleased
+## v0.3.1
 
 - Tests: differential fuzzer (`tests/fuzz.py`, `docs/fuzzing.md`)
   generating random C-subset programs against the g++ oracle,

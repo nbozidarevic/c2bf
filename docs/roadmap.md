@@ -3,8 +3,8 @@
 Evolve the C-to-Brainfuck transpiler into a tested, documented, portable
 toolchain. Current position: Phases 0–5, 7, and 8 complete; Phase 6
 (language expansion) remains open-ended, one construct at a time. The
-project was renamed to `c2bf` and tagged `v0.1.0`, then `v0.2.0`
-and `v0.3.0`; npm publishing is declined (see
+project was renamed to `c2bf` and tagged `v0.1.0`, then `v0.2.0`,
+`v0.3.0`, and `v0.3.1`; npm publishing is declined (see
 `docs/decisions/0006-distribution-adapters.md`). Versioning rules
 are in `docs/versioning.md`.
 
