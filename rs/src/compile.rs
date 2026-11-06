@@ -2039,6 +2039,19 @@ impl Emitter {
             b"scanf" => false,
             _ => return Err(err("Unsupported postfix expression")),
         };
+        // I/O calls yield no usable value (see the `Ok(0)` below)
+        // and write only through pre-existing cells (variables,
+        // guarded by the reclaim floor, and anonymous string
+        // storage, likewise), so their argument and helper
+        // temporaries are dead once the call is emitted: reclaim
+        // them, as `expand_call` does for function expansions.
+        // Without this, every `printf` in a deep nest leaves its
+        // print-helper cells allocated and later address-taking
+        // sites (string literals, `&`) can run past the 256
+        // addressable cells on programs that are otherwise
+        // small. Error paths skip the release: compilation
+        // aborts there anyway.
+        let checkpoint = self.checkpoint();
         // Arguments compile left-to-right (sequenced vector construction).
         // `printf` takes value cells; `scanf` takes destinations, so
         // its arguments compile through `compile_scanf_target`.
@@ -2181,6 +2194,7 @@ impl Emitter {
         }
         // Calls yield no usable value (the C++ returns null Any); statements
         // drop it. Zero is a dummy for the unreachable use-as-value spot.
+        self.release_temps(checkpoint);
         Ok(0)
     }
 
