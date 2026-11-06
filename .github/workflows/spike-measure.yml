@@ -41,6 +41,10 @@ jobs:
           for seed in (3, 5):
               src, _ = fuzz.gen_program(seed)
               stats(src, f"fuzz-seed-{seed}")
+          src6, _ = fuzz.gen_program(6)
+          lines6 = src6.splitlines()
+          for upto in (45, 49, 54):
+              stats("\n".join(lines6[:upto] + ["}"]) + "\n", f"seed6-prefix-{upto}")
           for f in sorted(glob.glob("tests/compile/*.c")):
               r = subprocess.run([B, "compile", "-c", f, "--stats", "-o", "/tmp/m.bf"],
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
