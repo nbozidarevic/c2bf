@@ -27,6 +27,10 @@ for when and how versions change.
   kept when `default` is not last): the `switch` fixture
   falls to 171 cells from 279. Decision record:
   `docs/decisions/0013-switch-matches-just-in-time.md`.
+- Codegen: the do...while first body emission's temporaries
+  are reclaimed before the loop re-emission: the `dowhile`
+  fixture falls to 147 cells from 181. Decision record:
+  `docs/decisions/0014-do-while-first-emission-reclaim.md`.
 
 ## v0.3.0
 
