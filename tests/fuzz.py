@@ -848,7 +848,9 @@ def main(argv=None):
             return 2
         except FuzzFailure as e:
             msg = str(e)
-            if msg.startswith("c2bf rejected") and LIMIT_MSG in msg:
+            # The rejection message is seed-prefixed
+            # ("seed N: c2bf rejected the program:\n<stderr>").
+            if "c2bf rejected the program" in msg and LIMIT_MSG in msg:
                 # Documented limit (docs/semantics.md), not a
                 # wrong output: report and keep going; the cap
                 # below bounds how many a run may skip.
