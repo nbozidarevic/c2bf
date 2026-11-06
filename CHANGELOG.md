@@ -37,6 +37,13 @@ for when and how versions change.
   to cell 0 and read unrelated data; found by differential
   fuzzing, seed 65). The check is the whole-storage bound in
   `string_value`, pinned by `string_literal_straddling_255_errors`.
+- Tests: the fuzzer reports compiler rejections carrying only
+  the documented addressable-cell limit as skips (capped at
+  10% of seeds; any skip fails a single-seed run) instead of
+  failures, since no generator bound separates fitting from
+  over-limit programs. 500-seed sweep: 476 pass, 24 skip,
+  0 mismatches. Decision record:
+  `docs/decisions/0015-straddle-bound-and-skip-policy.md`.
 
 ## v0.3.0
 

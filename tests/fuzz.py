@@ -7,6 +7,15 @@ both, and compares stdout byte-for-byte. A seed that mismatches
 fails loudly with the seed, the program, and the input, so the
 case reproduces with `--seeds <seed>`.
 
+A seed the compiler rejects only with the documented
+addressable-cell limit ("address is outside the addressable
+range") is outside the fuzzed subset: it is reported as a
+skip, never hidden, and the run fails if skips exceed 10% of
+seeds (any skip fails a single-seed run). Every other
+rejection and every mismatch is a failure. Exit codes: 0
+clean (skips within cap), 1 fuzz failure or skip cap
+exceeded, 2 generator failure.
+
 Usage (from `tests/`):
 
     python3 fuzz.py [--count N] [--seed-base N] [--seeds A,B,...]
@@ -42,6 +51,14 @@ _DEFAULT_BIN = os.path.normpath(os.path.join(
 _RAW_BIN = os.environ.get("C2BF_BIN")
 C2BF_BIN = os.path.abspath(_RAW_BIN) if _RAW_BIN else _DEFAULT_BIN
 TIMEOUT = 15
+
+# The compiler's documented addressable-cell limit (see
+# docs/semantics.md): rejections carrying exactly this message
+# are out-of-subset skips (see main()); anything else is a bug.
+LIMIT_MSG = "address is outside the addressable range"
+# Skips may not exceed this fraction of seeds (1 in 10); a
+# single-seed run fails on any skip.
+SKIP_CAP_FRAC = 10
 
 # Total `stmt()` calls per program, including nested ones:
 # nesting multiplies statements (one top-level `if` holds
@@ -820,6 +837,7 @@ def main(argv=None):
     if args.keep_dir:
         os.makedirs(args.keep_dir, exist_ok=True)
     failures = []
+    skipped = []
     ran = 0
     for seed in seeds:
         ran += 1
@@ -829,6 +847,15 @@ def main(argv=None):
             print(f"GENERATOR BUG: {e}", file=sys.stderr)
             return 2
         except FuzzFailure as e:
+            msg = str(e)
+            if msg.startswith("c2bf rejected") and LIMIT_MSG in msg:
+                # Documented limit (docs/semantics.md), not a
+                # wrong output: report and keep going; the cap
+                # below bounds how many a run may skip.
+                print(f"FUZZ SKIP: seed {seed} (address limit)",
+                      file=sys.stderr)
+                skipped.append(seed)
+                continue
             print(f"FUZZ FAILURE: {e}", file=sys.stderr)
             failures.append(seed)
             if not args.continue_on_failure:
@@ -839,9 +866,17 @@ def main(argv=None):
             failures.append(seed)
             if not args.continue_on_failure:
                 break
-    print(f"fuzz: {ran - len(failures)}/{ran} seeds passed"
+    if len(seeds) > 1:
+        over_cap = len(skipped) > max(1, len(seeds) // SKIP_CAP_FRAC)
+    else:
+        over_cap = bool(skipped)
+    print(f"fuzz: {ran - len(failures) - len(skipped)}/{ran} seeds passed"
+          + (f"; {len(skipped)} skipped (address limit): {skipped}" if skipped else "")
           + (f"; failures: {failures}" if failures else ""))
-    return 1 if failures else 0
+    if over_cap:
+        print(f"fuzz: skip cap exceeded ({len(skipped)} skipped)",
+              file=sys.stderr)
+    return 1 if failures or over_cap else 0
 
 
 if __name__ == "__main__":

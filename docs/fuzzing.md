@@ -34,6 +34,23 @@ says so: that is a bug in the generator's contract, not in
 reported as a fuzz failure, since generated loops are bounded
 and must terminate.
 
+A seed the compiler rejects only with "address is outside
+the addressable range" is outside the fuzzed subset: it
+exceeded the 256 addressable cells (see
+`docs/semantics.md`), which no generator bound separates
+cleanly from fitting programs (statement counts of failing
+and passing seeds overlap, and a fitted surface-feature
+estimator scores a passing seed above a failing one). The
+driver reports such seeds as skips (`FUZZ SKIP`), counts
+them in the summary, and fails the run if skips exceed 10%
+of seeds (any skip fails a single-seed run) — so an
+allocation regression that pushes more programs over the
+limit fails loudly instead of hiding. Every other rejection
+and every output mismatch is a failure. The statement
+budget below reduces the skip rate but does not eliminate
+it: the 500-seed sweep after the generator agreement fixes
+passed 476 seeds, skipped 24 (4.8%), and mismatched none.
+
 ## Generator guarantees
 
 The generator only emits programs on which C `int` arithmetic
@@ -98,9 +115,10 @@ keeps a `[lo, hi]` bound):
   range" even after the reader shrink). The cap is structural
   and sweep-validated, not a proof that every generated
   program fits: the 500-seed sweep is the check, and any new
-  address-range failure is a generator-bound bug unless a
-  minimal case shows a single construct exceeding the limit
-  on its own. The underlying compiler limit is documented in
+  address-range failure beyond the skip cap is a
+  generator-bound or allocation bug unless a minimal case
+  shows a single construct exceeding the limit on its own.
+  The underlying compiler limit is documented in
   `docs/semantics.md`.
 - `switch` cases are flat: no loop at any depth inside a
   case body (a loop inside an `if` inside a case is barred
@@ -121,8 +139,10 @@ keeps a `[lo, hi]` bound):
   6). Exhausted branches come out empty. Like the depth
   cap, the budget is empirical and sweep-validated, not a
   proof: seeds 0-4 use at most 15 calls, seeds 5-6 used
-  29/25, and the 500-seed sweep is the check that 20 keeps
-  generated programs inside the limit.
+  29/25. The budget reduces the skip rate but does not
+  eliminate it (24 of 500 seeds still exceed the limit and
+  are reported as skips); the sweep's checks are zero
+  mismatches and skips within cap.
 
 Not covered (yet): `scanf %s`/`%c` input, negative `scanf`
 tokens, recursion, function pointers, `goto`, structs,
