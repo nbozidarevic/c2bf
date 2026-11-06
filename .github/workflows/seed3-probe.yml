@@ -13,29 +13,36 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Build
         run: cargo build --release --manifest-path rs/Cargo.toml
-      - name: Bisect seed 3 cell growth
+      - name: Isolate cell hog
         run: |
           python3 - <<'EOF'
-          import subprocess, sys
-          sys.path.insert(0, "tests")
-          import fuzz
-          src, _ = fuzz.gen_program(3)
-          lines = src.splitlines()
-          def variant(upto):
-              return "\n".join(lines[:upto] + ["}"]) + "\n"
-          variants = {
-              "pA-through-v4++": variant(23),
-              "pB-through-first-printf": variant(24),
-              "pC-through-dowhile-if": variant(35),
-              "pD-through-switch": variant(78),
-              "pE-full-no-final-string": src.replace(
-                  'printf("%hX, %c, %s\\n", (v3), \'z\', "z");',
-                  'printf("%hX, %c, %c\\n", (v3), \'z\', \'z\');'),
-              "pF-full": src,
+          import subprocess
+          H = "#include <stdio.h>\n"
+          HELPER = "int helper(int hp) {\n  int v1 = (hp ? hp : (127 < hp));\n  return 15;\n}\n"
+          cases = {
+              "empty": "int main() {}",
+              "decl": "int main() { int v3 = 64; }",
+              "cmp": "int main() { int v3 = 64; int v4 = (5 > v3); }",
+              "mod": "int main() { int v3 = 64; int v5 = ((8 == v3) % 64); }",
+              "bitor": "int main() { int v3 = 64; int v4 = (5 > v3); int x = (10 | v4); }",
+              "scanf_d": 'int main() { int s7 = 0; scanf("%d", &s7); }',
+              "scanf_i": 'int main() { int s7 = 0; scanf("%i", &s7); }',
+              "scanf_both": 'int main() { int s7 = 0; int s8 = 0; scanf("%i %d", &s7, &s8); }',
+              "char_assign": "int main() { int v3 = 64; char v6 = v3; }",
+              "increments": "int main() { int v3 = 64; int v5 = 1; v5++; v3++; }",
+              "if_only": "int main() { int v3 = 64; if (v3) { v3 = 1; } else { v3 = 2; } }",
+              "helper_def_only": HELPER + "int main() {}",
+              "helper_call": HELPER + "int main() { int v4 = helper(8); }",
+              "pA_no_scanf": ("int main() { int v3 = 64; int v4 = (5 > v3); "
+                  "int v5 = ((8 == v3) % 64); char v6 = v3; "
+                  "if ((10 | v4)) { v3 = (v5 / 1); } else { v3 = v5; } v5++; v4++; }"),
+              "pA_no_if": ("int main() { int v3 = 64; int v4 = (5 > v3); "
+                  "int v5 = ((8 == v3) % 64); char v6 = v3; int s7 = 0; int s8 = 0; "
+                  'scanf("%i %d", &s7, &s8); v5++; v4++; }'),
           }
-          for name, text in variants.items():
+          for name, body in cases.items():
               p = f"/tmp/{name}.c"
-              open(p, "w").write(text)
+              open(p, "w").write(H + body + "\n")
               r = subprocess.run(
                   ["./rs/target/release/c2bf", "compile", "-c", p,
                    "--stats", "-o", "/dev/null"],
