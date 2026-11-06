@@ -1,0 +1,78 @@
+name: tape-probe
+on:
+  push:
+    paths:
+      - .github/workflows/tape-probe.yml
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release --manifest-path rs/Cargo.toml
+      - name: Dump tape after failing program
+        run: |
+          cat > /tmp/bfdump.rs <<'RS'
+          use std::io::{Read, Write};
+          fn main() {
+              let mut code = String::new();
+              std::fs::File::open(&std::env::args().nth(1).unwrap()).unwrap()
+                  .read_to_string(&mut code).unwrap();
+              let code: Vec<u8> = code.bytes().filter(|b| b"<>+-.,[]".contains(b)).collect();
+              let mut jump = vec![0usize; code.len()];
+              let mut stack = Vec::new();
+              for (i, &b) in code.iter().enumerate() {
+                  if b == b'[' { stack.push(i); }
+                  if b == b']' { let j = stack.pop().unwrap(); jump[i] = j; jump[j] = i; }
+              }
+              let mut input = Vec::new();
+              std::fs::File::open(&std::env::args().nth(2).unwrap()).unwrap()
+                  .read_to_end(&mut input).unwrap();
+              let mut tape = vec![0u8; 4096];
+              let mut ptr: usize = 0;
+              let mut ip = 0usize;
+              let mut ii = 0usize;
+              let mut out = std::io::stdout();
+              let mut steps = 0u64;
+              while ip < code.len() {
+                  steps += 1;
+                  match code[ip] {
+                      b'>' => ptr += 1,
+                      b'<' => ptr -= 1,
+                      b'+' => tape[ptr] = tape[ptr].wrapping_add(1),
+                      b'-' => tape[ptr] = tape[ptr].wrapping_sub(1),
+                      b'.' => { out.write_all(&[tape[ptr]]).unwrap(); }
+                      b',' => { tape[ptr] = if ii < input.len() { let v = input[ii]; ii += 1; v } else { tape[ptr] }; }
+                      b'[' => { if tape[ptr] == 0 { ip = jump[ip]; } }
+                      b']' => { if tape[ptr] != 0 { ip = jump[ip]; } }
+                      _ => {}
+                  }
+                  ip += 1;
+              }
+              eprintln!("steps={steps}");
+              let mut nz = Vec::new();
+              for (i, &v) in tape.iter().enumerate().take(300) {
+                  if v != 0 { nz.push((i, v)); }
+              }
+              eprintln!("nonzero[0..300]={nz:?}");
+          }
+          RS
+          rustc -O /tmp/bfdump.rs -o /tmp/bfdump
+          python3 - <<'EOF'
+          import subprocess, sys
+          sys.path.insert(0, "tests")
+          import fuzz
+          src, stdin = fuzz.gen_program(65)
+          open("/tmp/s65.c", "w").write(src)
+          open("/tmp/s65.in", "w").write(stdin)
+          subprocess.run(["./rs/target/release/c2bf", "compile", "-c", "/tmp/s65.c",
+                          "-o", "/tmp/s65.bf", "--stats"], check=True)
+          r = subprocess.run(["/tmp/bfdump", "/tmp/s65.bf", "/tmp/s65.in"],
+                             capture_output=True)
+          print("STDOUT:", r.stdout)
+          print("STDERR:", r.stderr.decode(), flush=True)
+          EOF
