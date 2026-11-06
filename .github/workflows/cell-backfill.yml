@@ -1,0 +1,51 @@
+name: cell-backfill
+
+# TEMPORARY (v13): re-measure runtime footprints at every size-history
+# milestone plus allocated cells at HEAD, for tools/cell-history.json
+# after the based-scanf shrink / just-in-time switch / do-while
+# reclaim snapshots (10a40df). Removed once landed.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build bench
+        run: cargo build --release --manifest-path rs/Cargo.toml
+
+      - name: Backfill runtime footprints
+        run: |
+          set -euo pipefail
+          mkdir -p backfill
+          for sha in a2e3653 61def42 5edd230 b6f6435 db7db25 52b87b4 c37dc8a 42c58df 069bafe e13e51c 2798235 45b9cfc fec53d9 f2122c7 4627a7b d4418ab 2f84071 5a3bffa 3c4ab19 e0e858f 412a09b 6486d45 634c3f4 f3d007e bd5e7b9 5e92b4d 91f9161 961773d ef3a6c2 72a356f 10a40df; do
+            dir="backfill/$sha"
+            mkdir -p "$dir"
+            for bf in $(git ls-tree -r --name-only "$sha" -- tests/golden/bf/); do
+              stem=$(basename "$bf" .bf)
+              git show "$sha:$bf" > "$dir/$stem.bf"
+              git show "$sha:tests/compile/$stem.in" > "$dir/$stem.in" 2>/dev/null || : > "$dir/$stem.in"
+            done
+            ./rs/target/release/c2bf-bench --footprint "$dir" > "backfill/$sha.json"
+            rm -rf "$dir"
+          done
+
+      - name: Measure allocated cells at HEAD
+        run: ./rs/target/release/c2bf-bench --quick --json > backfill/bench-head.json
+
+      - name: Upload backfill
+        uses: actions/upload-artifact@v4
+        with:
+          name: cell-backfill
+          path: backfill
+          if-no-files-found: error
