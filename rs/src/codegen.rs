@@ -123,16 +123,14 @@ pub enum NumericBase {
     Auto,
 }
 
-/// Bound cells for `scan_digit`, allocated once per reader.
+/// Bound cells for `scan_digit_into`, allocated once per reader.
 struct DigitBounds {
     zero: i32,
-    nine: i32,
     ten: i32,
     sixteen: i32,
     lo_a: i32,
-    lo_f: i32,
     hi_a: i32,
-    hi_f: i32,
+    six: i32,
 }
 
 impl Emitter {
@@ -1412,13 +1410,11 @@ impl Emitter {
         let zero_cell = self.const_value(0);
         let bounds = DigitBounds {
             zero: self.const_value(b'0'),
-            nine: self.const_value(b'9'),
             ten: self.const_value(10),
             sixteen: self.const_value(16),
             lo_a: self.const_value(b'a'),
-            lo_f: self.const_value(b'f'),
             hi_a: self.const_value(b'A'),
-            hi_f: self.const_value(b'F'),
+            six: self.const_value(6),
         };
         let minus = self.const_value(b'-');
         let negative = self.const_value(0);
@@ -1431,23 +1427,35 @@ impl Emitter {
         self.emit(",");
         // Skip until a digit for the current base starts the
         // number (decimal digits for `%i` before any prefix is
-        // seen; the prefix check below runs first for `%x`).
-        self.perform_while(
-            |em| {
-                let (_, valid) = em.scan_digit(reader, base_cell, &bounds)?;
-                Ok(em.is_equal(valid, zero_cell)?)
-            },
-            |em| {
-                let is_minus = em.is_equal(reader, minus)?;
-                em.perform_if(is_minus, |em| {
-                    em.set_value(negative, 1);
-                    Ok(())
-                })?;
-                em.move_pointer(reader);
-                em.emit(",");
-                Ok(())
-            },
-        )?;
+        // seen; the prefix check below runs first for `%x`). The
+        // loop is hand-rolled, like `print_as_string`: each pass
+        // rescans into the same `value`/`valid` cells and the
+        // loop re-tests `skip` itself, instead of `perform_while`
+        // re-emitting the classification for the prologue, the
+        // body, and the back edge. Classification temporaries
+        // are reclaimed afterwards: only `reader`, `result`, and
+        // the bound cells (allocated before the checkpoint) flow
+        // out, as for `perform_while`.
+        let checkpoint = self.checkpoint();
+        let scan_value = self.memory.temp_cell();
+        let scan_valid = self.memory.temp_cell();
+        let skip = self.memory.temp_cell();
+        self.scan_digit_into(reader, base_cell, &bounds, scan_value, scan_valid)?;
+        self.negate_into(scan_valid, skip)?;
+        self.move_pointer(skip);
+        self.emit("[");
+        let is_minus = self.is_equal(reader, minus)?;
+        self.perform_if(is_minus, |em| {
+            em.set_value(negative, 1);
+            Ok(())
+        })?;
+        self.move_pointer(reader);
+        self.emit(",");
+        self.scan_digit_into(reader, base_cell, &bounds, scan_value, scan_valid)?;
+        self.negate_into(scan_valid, skip)?;
+        self.move_pointer(skip);
+        self.emit("]");
+        self.release_temps(checkpoint);
         // An optional `0x` prefix: a leading `0` is consumed and
         // the next character decides. For `%i`, a following octal
         // digit instead selects base 8; any other following
@@ -1460,6 +1468,9 @@ impl Emitter {
         // unread; here it is consumed, like every other `scanf`
         // terminator).
         let prefix_done = self.const_value(0);
+        // Only `base_cell` and `prefix_done` (allocated before
+        // the checkpoint) flow out of the prefix check.
+        let prefix_checkpoint = self.checkpoint();
         if base != NumericBase::Oct {
             let x_lo = self.const_value(b'x');
             let x_hi = self.const_value(b'X');
@@ -1499,25 +1510,39 @@ impl Emitter {
                 Ok(())
             })?;
         }
-        // Digits accumulate as `result = result * base + value`;
-        // the condition recomputes the digit, as the decimal
-        // reader recomputes its digit in the loop body.
-        self.perform_while(
-            |em| {
-                let (_, valid) = em.scan_digit(reader, base_cell, &bounds)?;
-                let not_done = em.is_equal(prefix_done, zero_cell)?;
-                Ok(em.logical_and(valid, not_done)?)
-            },
-            |em| {
-                let (value, _) = em.scan_digit(reader, base_cell, &bounds)?;
-                let shifted = em.multiply_values(result, base_cell);
-                let acc = em.add_values(value, shifted);
-                em.move_value(acc, result);
-                em.move_pointer(reader);
-                em.emit(",");
-                Ok(())
-            },
-        )?;
+        self.release_temps(prefix_checkpoint);
+        // Digits accumulate as `result = result * base + value`.
+        // Hand-rolled like the skip loop above: the digit scanned
+        // before the loop (and rescanned at each pass's end) is
+        // the one accumulated, and the loop re-tests its gate
+        // cell itself; `prefix_done` gates the loop, since a `%i`
+        // `0` prefix followed by neither `x` nor an octal digit
+        // leaves the value at 0. Classification temporaries are
+        // reclaimed afterwards, as for the skip loop.
+        let checkpoint = self.checkpoint();
+        let scan_value = self.memory.temp_cell();
+        let scan_valid = self.memory.temp_cell();
+        let not_done = self.is_equal(prefix_done, zero_cell)?;
+        self.scan_digit_into(reader, base_cell, &bounds, scan_value, scan_valid)?;
+        // The loop tests `go` itself (unlike the skip loop, which
+        // tests its negation): each pass recomputes the gate
+        // into the same cell, so the `[` re-tests the fresh
+        // value. Testing the negation here ran the body exactly
+        // when no digit remained and spun on the terminator.
+        let go = self.logical_and(scan_valid, not_done)?;
+        self.move_pointer(go);
+        self.emit("[");
+        let shifted = self.multiply_values(result, base_cell);
+        let acc = self.add_values(scan_value, shifted);
+        self.move_value(acc, result);
+        self.move_pointer(reader);
+        self.emit(",");
+        self.scan_digit_into(reader, base_cell, &bounds, scan_value, scan_valid)?;
+        let go_next = self.logical_and(scan_valid, not_done)?;
+        self.move_value(go_next, go);
+        self.move_pointer(go);
+        self.emit("]");
+        self.release_temps(checkpoint);
         self.perform_if(negative, |em| {
             let zero_value = em.const_value(0);
             let negated = em.subtract_values(zero_value, result);
@@ -1528,45 +1553,72 @@ impl Emitter {
         Ok(())
     }
 
+    /// `dest = (cell == 0)`, reusing the caller-owned `dest`
+    /// cell: a `negate` that does not allocate a fresh result per
+    /// call, for hand-rolled loops that re-test the same cell
+    /// each pass.
+    fn negate_into(&mut self, cell: i32, dest: i32) -> Result<(), CompileError> {
+        self.set_value(dest, 1);
+        self.perform_if(cell, |em| {
+            em.set_value(dest, 0);
+            Ok(())
+        })
+    }
+
     /// Value and validity of the digit in `reader` for the base
-    /// held in `base_cell`: decimal digits below the base, plus
-    /// hex letters when the base is 16. Returns `(value, valid)`
-    /// cells, with `valid` 0 or 1. Called once for the loop
-    /// condition and once for the body, so the computation is
-    /// re-emitted; the bound cells in `bounds` are allocated
-    /// once by the caller.
-    fn scan_digit(
+    /// held in `base_cell`, written into the caller-owned `value`
+    /// (0 when invalid) and `valid` (0 or 1) cells: decimal
+    /// digits below the base, plus hex letters when the base is
+    /// 16. The bound cells in `bounds` are allocated once by the
+    /// caller, and the same `value`/`valid` cells are reused
+    /// across rescans in a loop, so the classification is emitted
+    /// once per scan point instead of once per loop-condition
+    /// evaluation.
+    ///
+    /// Classification uses wrapping subtraction and one-sided
+    /// bounds, not two-sided range tests: a byte below `'0'`
+    /// subtracts to 208..255, which fails `< 10`, and likewise
+    /// for the letter ranges, so one `less_than` per class
+    /// suffices. The value is selected with guarded copies (the
+    /// classes are disjoint), not with multiplies.
+    fn scan_digit_into(
         &mut self,
         reader: i32,
         base_cell: i32,
         bounds: &DigitBounds,
-    ) -> Result<(i32, i32), CompileError> {
-        let ge_zero = self.greater_than_or_equal(reader, bounds.zero)?;
-        let le_nine = self.less_than_or_equal(reader, bounds.nine)?;
-        let dec_digit = self.logical_and(ge_zero, le_nine)?;
-        let dec_val = self.subtract_values(reader, bounds.zero);
-        let ge_lo = self.greater_than_or_equal(reader, bounds.lo_a)?;
-        let le_lo = self.less_than_or_equal(reader, bounds.lo_f)?;
-        let lo_digit = self.logical_and(ge_lo, le_lo)?;
+        value: i32,
+        valid: i32,
+    ) -> Result<(), CompileError> {
+        let dec_diff = self.subtract_values(reader, bounds.zero);
+        let dec_digit = self.less_than(dec_diff, bounds.ten)?;
         let lo_diff = self.subtract_values(reader, bounds.lo_a);
+        let lo_digit = self.less_than(lo_diff, bounds.six)?;
         let lo_val = self.add_values(lo_diff, bounds.ten);
-        let ge_hi = self.greater_than_or_equal(reader, bounds.hi_a)?;
-        let le_hi = self.less_than_or_equal(reader, bounds.hi_f)?;
-        let hi_digit = self.logical_and(ge_hi, le_hi)?;
         let hi_diff = self.subtract_values(reader, bounds.hi_a);
+        let hi_digit = self.less_than(hi_diff, bounds.six)?;
         let hi_val = self.add_values(hi_diff, bounds.ten);
-        let m1 = self.multiply_values(dec_val, dec_digit);
-        let m2 = self.multiply_values(lo_val, lo_digit);
-        let m3 = self.multiply_values(hi_val, hi_digit);
-        let m12 = self.add_values(m1, m2);
-        let value = self.add_values(m12, m3);
-        let lt_base = self.less_than(value, base_cell)?;
+        self.set_value(value, 0);
+        self.perform_if(dec_digit, |em| {
+            em.copy_value(dec_diff, value);
+            Ok(())
+        })?;
+        self.perform_if(lo_digit, |em| {
+            em.copy_value(lo_val, value);
+            Ok(())
+        })?;
+        self.perform_if(hi_digit, |em| {
+            em.copy_value(hi_val, value);
+            Ok(())
+        })?;
+        let lt_base = self.less_than(dec_diff, base_cell)?;
         let dec_ok = self.logical_and(dec_digit, lt_base)?;
-        let is16 = self.is_equal(base_cell, bounds.sixteen)?;
+        let base_diff = self.subtract_values(base_cell, bounds.sixteen);
+        let is16 = self.negate(base_diff)?;
         let letter = self.logical_or(lo_digit, hi_digit)?;
         let letter_ok = self.logical_and(is16, letter)?;
-        let valid = self.logical_or(dec_ok, letter_ok)?;
-        Ok((value, valid))
+        let valid_result = self.logical_or(dec_ok, letter_ok)?;
+        self.move_value(valid_result, valid);
+        Ok(())
     }
 
     /// Whether `cell` holds a C whitespace byte: 9..13 or 32.

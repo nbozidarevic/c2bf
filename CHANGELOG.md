@@ -14,6 +14,14 @@ for when and how versions change.
   generating random C-subset programs against the g++ oracle,
   run for 50 seeds on every push plus an on-demand `fuzz-sweep`
   workflow for larger runs.
+- Codegen: based `scanf` readers (`%o`/`%x`/`%i`) shrunk
+  (one `%i` read: 502 to 171 cells, 270,091 to 73,489 BF
+  bytes; the `formats` fixture: -1,326,964 bytes) via cheaper
+  digit classification and rescan loops. Programs that
+  previously failed with "address is outside the addressable
+  range" after a based read now compile; deeply nested
+  programs can still hit that limit (see `docs/fuzzing.md`).
+  Decision record: `docs/decisions/0012-scanf-reader-shrink.md`.
 
 ## v0.3.0
 
