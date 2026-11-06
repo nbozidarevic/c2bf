@@ -54,6 +54,11 @@ jobs:
           for upto in (21, 23, 58, 74, 95, 127, 128):
               stats("\n".join(lines5[:upto] + ["}"]) + "\n",
                     f"seed5-prefix-{upto}")
+          for name, upto, closers in (
+                  ("seed5-case1", 31, ["    }", "  }"]),
+                  ("seed5-case39", 37, ["    }", "  }"]),
+                  ("seed5-switch-only", 50, ["  }"])):
+              stats("\n".join(lines5[:upto] + closers + ["}"]) + "\n", name)
           for f in sorted(glob.glob("tests/compile/*.c")):
               r = subprocess.run([B, "compile", "-c", f, "--stats", "-o", "/tmp/m.bf"],
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
