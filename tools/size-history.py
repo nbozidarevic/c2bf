@@ -248,8 +248,11 @@ MILESTONES = [
         "re-snapshotted fixtures shrink by 168-3,089 bytes "
         "each. Cell counts per decisions 0012-0014 (formats "
         "reader 502 -> 171 cells on the probe, switch 279 -> "
-        "171, dowhile 181 -> 147); allocated cells and runtime "
-        "footprints are not yet backfilled for this milestone.",
+        "171, dowhile 181 -> 147). Backfilled: formats on 625 "
+        "allocated cells (was 715) with 431 touched (was 709), "
+        "switch on 171 (was 279), dowhile on 147 (was 181), "
+        "break on 159 (was 181) and continue on 214 (was 229); "
+        "runtime footprints backfilled for all 51 fixtures.",
     ),
 ]
 

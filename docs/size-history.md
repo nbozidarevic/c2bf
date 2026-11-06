@@ -51,7 +51,7 @@ How the emitted Brainfuck size (bytes) for each golden fixture changed across no
 | Function prototypes | `961773d` | 45 | 11835130 | +0 | File-scope prototypes with optional parameter names, checked against definitions and earlier prototypes; a prototype alone emits nothing. Adds the prototypes fixture (371,582 BF bytes on 121 cells); every other fixture is byte-identical, and allocated cells and runtime footprint are unchanged. |
 | Storage classes + pointer returns | `ef3a6c2` | 49 | 12887184 | -510516 | Then-only perform_if drops the else_value cell and the bitwise early-exit test becomes a guard: the 45 existing fixtures shrink by 510,516 BF bytes in total (dead-code removal -507,524, bit extraction -2,992), and allocated cells drop by 2 on 33 fixtures and by 1 on one. Adds four fixtures: typedefs (812,500 BF bytes on 128 cells), enums (104,570 on 131), storage (57,318 on 104), and pointerret (588,182 on 80). Runtime footprints re-measured with the cached-index runner reproduce every prior entry exactly. |
 | Braced initializers + I/O formats | `72a356f` | 51 | 16279064 | +0 | Braced initializer lists and the new I/O conversions add no new emission for old programs: all 49 existing fixtures are byte-identical, with allocated cells and runtime footprints unchanged. Adds two fixtures: braceinit (292,759 BF bytes on 209 cells) and formats (3,099,121 BF bytes on 715 cells, dominated by the based `scanf` readers). |
-| Based-scanf shrink + lazy switch + do-while reclaim | `10a40df` | 51 | 14941389 | -1337675 | Based `scanf` readers shrink via cheaper digit classification and rescan loops (0012), `switch` matches are computed just in time per case (0013), and do...while first-emission temporaries are reclaimed (0014). formats shrinks 3,099,121 -> 1,772,157 BF bytes (-1,326,964); the six other re-snapshotted fixtures shrink by 168-3,089 bytes each. Cell counts per decisions 0012-0014 (formats reader 502 -> 171 cells on the probe, switch 279 -> 171, dowhile 181 -> 147); allocated cells and runtime footprints are not yet backfilled for this milestone. |
+| Based-scanf shrink + lazy switch + do-while reclaim | `10a40df` | 51 | 14941389 | -1337675 | Based `scanf` readers shrink via cheaper digit classification and rescan loops (0012), `switch` matches are computed just in time per case (0013), and do...while first-emission temporaries are reclaimed (0014). formats shrinks 3,099,121 -> 1,772,157 BF bytes (-1,326,964); the six other re-snapshotted fixtures shrink by 168-3,089 bytes each. Cell counts per decisions 0012-0014 (formats reader 502 -> 171 cells on the probe, switch 279 -> 171, dowhile 181 -> 147). Backfilled: formats on 625 allocated cells (was 715) with 431 touched (was 709), switch on 171 (was 279), dowhile on 147 (was 181), break on 159 (was 181) and continue on 214 (was 229); runtime footprints backfilled for all 51 fixtures. |
 
 ## Sizes by fixture
 
@@ -1292,7 +1292,7 @@ Braced initializer lists and the new I/O conversions add no new emission for old
 
 ### Based-scanf shrink + lazy switch + do-while reclaim (`10a40df`)
 
-Based `scanf` readers shrink via cheaper digit classification and rescan loops (0012), `switch` matches are computed just in time per case (0013), and do...while first-emission temporaries are reclaimed (0014). formats shrinks 3,099,121 -> 1,772,157 BF bytes (-1,326,964); the six other re-snapshotted fixtures shrink by 168-3,089 bytes each. Cell counts per decisions 0012-0014 (formats reader 502 -> 171 cells on the probe, switch 279 -> 171, dowhile 181 -> 147); allocated cells and runtime footprints are not yet backfilled for this milestone.
+Based `scanf` readers shrink via cheaper digit classification and rescan loops (0012), `switch` matches are computed just in time per case (0013), and do...while first-emission temporaries are reclaimed (0014). formats shrinks 3,099,121 -> 1,772,157 BF bytes (-1,326,964); the six other re-snapshotted fixtures shrink by 168-3,089 bytes each. Cell counts per decisions 0012-0014 (formats reader 502 -> 171 cells on the probe, switch 279 -> 171, dowhile 181 -> 147). Backfilled: formats on 625 allocated cells (was 715) with 431 touched (was 709), switch on 171 (was 279), dowhile on 147 (was 181), break on 159 (was 181) and continue on 214 (was 229); runtime footprints backfilled for all 51 fixtures.
 
 | Fixture | Bytes | Change vs previous |
 |---|---|---|
@@ -1826,7 +1826,54 @@ Tape cells the compiler's bump allocator reserved for each program (`Memory::all
 | `typespec` | 161 |
 | `unary` | 172 |
 
-Allocated cells were not recorded at: Rust baseline, do...while, break, ternary, continue + decimal printing rewrite, Rename to c2bf (v0.1.0), Loop-based constants, Unary -, +, ~, printf %%, %u, %x, Hex/octal/binary literals, Multiple declarators, Multi-word type specifiers, Casts, sizeof, Object-like #define, Bitwise ops and shifts, Bitwise/shift compound assignment, Bitwise optimization, Based-scanf shrink + lazy switch + do-while reclaim. Allocation counts were never recorded before the first measured milestone, and golden BF alone does not record them, so they are not backfilled.
+### Based-scanf shrink + lazy switch + do-while reclaim (`10a40df`)
+
+| Fixture | Cells alloc |
+|---|---|
+| `addition` | 67 |
+| `addsub` | 205 |
+| `arrays` | 192 |
+| `assign` | 300 |
+| `bitassign` | 194 |
+| `bitwise` | 630 |
+| `braceinit` | 209 |
+| `branch` | 64 |
+| `break` | 159 |
+| `casts` | 139 |
+| `cmp` | 376 |
+| `complex` | 134 |
+| `continue` | 214 |
+| `define` | 101 |
+| `div` | 178 |
+| `dowhile` | 147 |
+| `enums` | 131 |
+| `fordecl` | 105 |
+| `formats` | 625 |
+| `functions` | 273 |
+| `hello_world` | 24 |
+| `io` | 104 |
+| `literals` | 142 |
+| `logic` | 213 |
+| `loop` | 88 |
+| `mod` | 304 |
+| `mul` | 205 |
+| `multidecl` | 113 |
+| `pointerret` | 80 |
+| `pointers` | 436 |
+| `printfmt` | 187 |
+| `printnum` | 326 |
+| `prototypes` | 119 |
+| `scanfstr` | 218 |
+| `sizeof` | 100 |
+| `storage` | 104 |
+| `strings` | 213 |
+| `switch` | 171 |
+| `ternary` | 235 |
+| `typedefs` | 128 |
+| `typespec` | 161 |
+| `unary` | 172 |
+
+Allocated cells were not recorded at: Rust baseline, do...while, break, ternary, continue + decimal printing rewrite, Rename to c2bf (v0.1.0), Loop-based constants, Unary -, +, ~, printf %%, %u, %x, Hex/octal/binary literals, Multiple declarators, Multi-word type specifiers, Casts, sizeof, Object-like #define, Bitwise ops and shifts, Bitwise/shift compound assignment, Bitwise optimization. Allocation counts were never recorded before the first measured milestone, and golden BF alone does not record them, so they are not backfilled.
 
 ## Runtime footprint (from golden BF)
 
@@ -3009,5 +3056,57 @@ Tape cells actually used when each milestone's committed golden program runs wit
 
 ### Based-scanf shrink + lazy switch + do-while reclaim (`10a40df`)
 
-No runtime footprint recorded for this milestone.
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 67 | 66 | 0 |
+| `addsub` | 205 | 204 | 0 |
+| `arrays` | 179 | 178 | 0 |
+| `assign` | 287 | 286 | 0 |
+| `bitassign` | 194 | 193 | 0 |
+| `bitwise` | 617 | 616 | 0 |
+| `braceinit` | 209 | 208 | 0 |
+| `branch` | 60 | 61 | 0 |
+| `break` | 146 | 145 | 0 |
+| `casts` | 139 | 138 | 0 |
+| `cmp` | 347 | 346 | 0 |
+| `complex` | 134 | 133 | 0 |
+| `continue` | 201 | 200 | 0 |
+| `define` | 88 | 87 | 0 |
+| `div` | 165 | 164 | 0 |
+| `dowhile` | 134 | 133 | 0 |
+| `enums` | 122 | 121 | 0 |
+| `fordecl` | 92 | 91 | 0 |
+| `formats` | 431 | 618 | 0 |
+| `functions` | 273 | 272 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 102 | 101 | 0 |
+| `literals` | 122 | 121 | 0 |
+| `logic` | 200 | 199 | 0 |
+| `loop` | 88 | 87 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 3 | 2 | 0 |
+| `micro_order_bitwise` | 46 | 45 | 0 |
+| `micro_order_case` | 4 | 3 | 0 |
+| `micro_order_deref` | 15 | 14 | 0 |
+| `micro_order_eq` | 15 | 14 | 0 |
+| `micro_order_index` | 11 | 10 | 0 |
+| `micro_order_le` | 20 | 19 | 0 |
+| `micro_order_shift` | 14 | 13 | 0 |
+| `mod` | 291 | 290 | 0 |
+| `mul` | 205 | 204 | 0 |
+| `multidecl` | 100 | 99 | 0 |
+| `pointerret` | 80 | 79 | 0 |
+| `pointers` | 436 | 435 | 0 |
+| `printfmt` | 187 | 186 | 0 |
+| `printnum` | 326 | 325 | 0 |
+| `prototypes` | 119 | 118 | 0 |
+| `scanfstr` | 191 | 190 | 0 |
+| `sizeof` | 87 | 86 | 0 |
+| `storage` | 95 | 94 | 0 |
+| `strings` | 213 | 212 | 0 |
+| `switch` | 158 | 157 | 0 |
+| `ternary` | 222 | 221 | 0 |
+| `typedefs` | 115 | 114 | 0 |
+| `typespec` | 148 | 147 | 0 |
+| `unary` | 137 | 136 | 0 |
 
