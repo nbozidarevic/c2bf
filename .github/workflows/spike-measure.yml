@@ -17,7 +17,7 @@ jobs:
       - name: Differential suite
         working-directory: tests
         run: python3 test
-      - name: Reader micro counts and fixture stats (before fuzz: runs even if fuzz fails)
+      - name: Reader micro counts and fixture stats
         run: |
           python3 - <<'EOF'
           import glob, os, re, subprocess
