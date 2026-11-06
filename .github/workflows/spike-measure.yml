@@ -17,10 +17,7 @@ jobs:
       - name: Differential suite
         working-directory: tests
         run: python3 test
-      - name: Fuzz 50 seeds (includes seed 3)
-        working-directory: tests
-        run: python3 fuzz.py --count 50
-      - name: Reader micro counts and fixture stats
+      - name: Reader micro counts and fixture stats (before fuzz: runs even if fuzz fails)
         run: |
           python3 - <<'EOF'
           import glob, os, re, subprocess
@@ -44,6 +41,14 @@ jobs:
           stats(H + 'int main() { int s7 = 0; scanf("%x", &s7); }', "scanf_x")
           stats(H + 'int main() { int s7 = 0; int s8 = 0; scanf("%i %d", &s7, &s8); }',
                 "scanf_both")
+          import sys
+          sys.path.insert(0, "tests")
+          import fuzz
+          for seed in (3, 5):
+              src, _ = fuzz.gen_program(seed)
+              stats(src, f"fuzz-seed-{seed}")
+              stats(src.replace('scanf("%x %i"', 'scanf("%d %d"').replace(
+                  'scanf("%i %d"', 'scanf("%d %d"'), f"fuzz-seed-{seed}-pct-d")
           for f in sorted(glob.glob("tests/compile/*.c")):
               r = subprocess.run([B, "compile", "-c", f, "--stats", "-o", "/tmp/m.bf"],
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -53,5 +58,8 @@ jobs:
                     f"bytes={m.group(1) if m else '?'} "
                     f"cells={m.group(2) if m else '?'}", flush=True)
           EOF
+      - name: Fuzz 50 seeds (includes seed 3)
+        working-directory: tests
+        run: python3 fuzz.py --count 50
       - name: Perf harness
         run: ./rs/target/release/c2bf-bench
