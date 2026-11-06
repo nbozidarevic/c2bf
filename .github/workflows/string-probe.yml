@@ -42,12 +42,16 @@ jobs:
               ok = "PASS" if got == exp else "FAIL"
               print(f"{name}: {ok} exp={exp!r} got={got!r}", flush=True)
           check("bare", H + 'int main() { printf("%s, %s\\n", "gbe", "yxeb"); }')
-          check("decls60", H + 'int main() { ' + " ".join(
-              f"int d{i} = {i};" for i in range(60)) +
-              ' printf("%s, %s\\n", "gbe", "yxeb"); }')
-          for pad in (180, 240, 250):
+          for pad in (180, 240):
               check(f"pad{pad}", H + f'int main() {{ char pad[{pad}]; '
                     'printf("%s, %s\\n", "gbe", "yxeb"); }')
           src65, stdin65 = fuzz.gen_program(65)
           check("seed65", src65, stdin65.encode())
+          lines65 = src65.splitlines()
+          final = '  printf("%s, %s\\n", "gbe", "yxeb");'
+          for name, upto in (("cut-switch", 18), ("cut-if", 29),
+                             ("cut-dowhile", 35), ("cut-assign", 37),
+                             ("cut-c9", 43), ("cut-hhu", 44), ("cut-c10", 48)):
+              text = "\n".join(lines65[:upto] + [final, "}"]) + "\n"
+              check(name, text, stdin65.encode())
           EOF
