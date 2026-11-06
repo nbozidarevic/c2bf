@@ -49,6 +49,11 @@ jobs:
               stats(src, f"fuzz-seed-{seed}")
               stats(src.replace('scanf("%x %i"', 'scanf("%d %d"').replace(
                   'scanf("%i %d"', 'scanf("%d %d"'), f"fuzz-seed-{seed}-pct-d")
+          src5, _ = fuzz.gen_program(5)
+          lines5 = src5.splitlines()
+          for upto in (21, 23, 58, 74, 95, 127, 128):
+              stats("\n".join(lines5[:upto] + ["}"]) + "\n",
+                    f"seed5-prefix-{upto}")
           for f in sorted(glob.glob("tests/compile/*.c")):
               r = subprocess.run([B, "compile", "-c", f, "--stats", "-o", "/tmp/m.bf"],
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
