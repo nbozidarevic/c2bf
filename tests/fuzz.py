@@ -369,10 +369,14 @@ class Gen:
             # about intervals across iterations would need a
             # fixpoint, so bodies only print or control flow.
             roll = 0.62 + roll * 0.38
-        if depth <= 0 and roll >= 0.62:
-            # Depth exhausted: no further nesting (if/loop/switch
-            # would recurse without bound, since stmts() clamps
-            # nothing here); fall through to the print branch.
+        if depth <= 0 and 0.52 <= roll < 0.8:
+            # Depth exhausted: no further nesting. The old clamp
+            # only forced the print branch for roll >= 0.62, so
+            # if/loop/switch still nested past depth 0 without
+            # bound, and live temporaries could exceed the 256
+            # addressable cells (fuzz seed 5 at depth 5). The
+            # nesting band is [0.52, 0.8): assignments, increments,
+            # break/continue, and prints outside it stay as-is.
             roll = 0.9
         if roll < 0.3 and self.assignable():
             name = rng.choice(self.assignable())

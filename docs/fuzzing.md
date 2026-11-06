@@ -79,6 +79,19 @@ keeps a `[lo, hi]` bound):
 - No declarations inside branches: all names are declared at
   function top level, so the generator's flat interval
   environment stays sound across merges.
+- Nesting depth is hard-capped: at depth 0 a statement may
+  only assign, increment, break/continue, or print — never
+  nest another `if`, loop, or `switch`. Temporaries stay live
+  across nesting levels, so unbounded nesting could exceed
+  the 256 addressable cells (fuzz seed 5 nested `if`s five
+  deep and failed with "address is outside the addressable
+  range" even after the reader shrink). The cap is structural
+  and sweep-validated, not a proof that every generated
+  program fits: the 500-seed sweep is the check, and any new
+  address-range failure is a generator-bound bug unless a
+  minimal case shows a single construct exceeding the limit
+  on its own. The underlying compiler limit is documented in
+  `docs/semantics.md`.
 
 Not covered (yet): `scanf %s`/`%c` input, negative `scanf`
 tokens, recursion, function pointers, `goto`, structs,

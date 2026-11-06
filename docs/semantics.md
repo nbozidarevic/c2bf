@@ -90,7 +90,13 @@ the deviation is stated here as defined behavior, pinned by tests.
   byte arithmetic (wrapping). Only the first 256 tape cells are
   addressable: taking the address of storage at cell 256 or
   above is a compile error, while static-index array access
-  works anywhere. The null pointer is address `0` (cell `0`).
+  works anywhere. Deeply nested programs can exhaust the
+  addressable cells even with few variables, because
+  temporaries stay live across nesting levels and string
+  literals reserve storage permanently, so such programs fail
+  with the same error; this is a known limitation, not a bug
+  in any one construct, and the fuzzer caps nesting depth to
+  stay inside it. The null pointer is address `0` (cell `0`).
   `scanf` destinations may be variables, `&`-expressions, or
   bare pointers, and store through the address. `scanf` `%d`
   writes one byte here; in C it writes `sizeof(int)` bytes, so
