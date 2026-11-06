@@ -236,6 +236,21 @@ MILESTONES = [
         "(3,099,121 BF bytes on 715 cells, dominated by the "
         "based `scanf` readers).",
     ),
+    (
+        "10a40df5029f46f6197f08da7c292205a8f433aa",
+        "Based-scanf shrink + lazy switch + do-while reclaim",
+        "Based `scanf` readers shrink via cheaper digit "
+        "classification and rescan loops (0012), `switch` "
+        "matches are computed just in time per case (0013), "
+        "and do...while first-emission temporaries are "
+        "reclaimed (0014). formats shrinks 3,099,121 -> "
+        "1,772,157 BF bytes (-1,326,964); the six other "
+        "re-snapshotted fixtures shrink by 168-3,089 bytes "
+        "each. Cell counts per decisions 0012-0014 (formats "
+        "reader 502 -> 171 cells on the probe, switch 279 -> "
+        "171, dowhile 181 -> 147); allocated cells and runtime "
+        "footprints are not yet backfilled for this milestone.",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
