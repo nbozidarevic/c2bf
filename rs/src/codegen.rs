@@ -889,12 +889,24 @@ impl Emitter {
 
     /// Do...while loop: the body runs once unconditionally, then like
     /// `perform_while` (Phase 6: completes the thesis iteration set).
+    ///
+    /// SPIKE: the first body emission's temporaries are reclaimed
+    /// before the loop emission: without this, the first emission
+    /// and the loop's own re-emission stack, and nested loops
+    /// peak past the 256 addressable cells (fuzz seed 6). The
+    /// re-emission deterministically reallocates the same
+    /// indices and every helper re-initializes its temps before
+    /// use, while loop flags, variables, and anonymous storage
+    /// are allocated before the body or guarded by the reclaim
+    /// floor, so no value the second emission needs is lost.
     pub fn perform_do_while(
         &mut self,
         cond: impl FnMut(&mut Self) -> Result<i32, CompileError>,
         mut body: impl FnMut(&mut Self) -> Result<(), CompileError>,
     ) -> Result<(), CompileError> {
+        let checkpoint = self.checkpoint();
         body(self)?;
+        self.release_temps(checkpoint);
         self.perform_while(cond, body)
     }
 
