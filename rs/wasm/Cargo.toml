@@ -1,6 +1,6 @@
 [package]
 name = "c2bf-wasm"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 description = "WebAssembly adapter over c2bf-core (gated web distribution; kept out of the core crate)"
 license = "MIT"
