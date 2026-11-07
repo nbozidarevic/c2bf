@@ -86,6 +86,12 @@ pub struct Decl {
     pub spec: Vec<u8>,
     /// Declarators in order; empty for a bare specifier (`int;`).
     pub inits: Vec<InitDecl>,
+    /// `true` when the declaration was written with the `extern`
+    /// storage class at file scope. A declarator without an
+    /// initializer in such a declaration is a non-defining
+    /// declaration: it emits nothing, and a use without a
+    /// later definition is a compile error.
+    pub is_extern: bool,
 }
 
 #[derive(Debug)]

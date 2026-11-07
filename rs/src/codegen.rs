@@ -20,7 +20,7 @@
 
 use crate::ast::{Block, Expr, FnParam};
 use crate::memory::Memory;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 /// A function definition with its body scope-renamed (see
@@ -93,6 +93,12 @@ pub struct Emitter {
     /// dimensional array parameters decay to plain pointers and
     /// are not recorded here.
     pub(crate) param_dims: HashMap<Vec<u8>, Vec<usize>>,
+    /// Names declared only as `extern` and never defined in
+    /// this translation unit, computed by `compile_program`
+    /// before any code is emitted. Using one is a compile
+    /// error (an undefined reference); `sizeof` operands do
+    /// not count, since they are unevaluated.
+    pub(crate) extern_undefined: HashSet<Vec<u8>>,
 }
 
 /// Compile failure: mirrors a C++ `throw "..."` site.

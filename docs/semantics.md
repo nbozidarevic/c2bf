@@ -392,15 +392,18 @@ specifier word works anywhere, including in blocks.
 ## Storage classes
 
 `static`, `extern`, `auto`, and `register` are recognized in
-specifier position. At file scope `static` and `extern` are
-accepted and ignored: `static int x = 1;` behaves like a plain
-global definition and a `static` function behaves like a plain
+specifier position. At file scope `static` is accepted and
+ignored: `static int x = 1;` behaves like a plain global
+definition and a `static` function behaves like a plain
 function. An `extern` declarator *with* an initializer is a
 definition; one *without* an initializer is a non-defining
-declaration — it is dropped, so a later definition of the same
-name registers normally. An `extern`-only name that is never
-defined still allocates a zero cell when used, which is a
-deviation from C (a real linker would reject it).
+declaration — it emits nothing, so a later definition of the
+same name registers normally. Using a name that is declared
+only as `extern` and never defined is a compile error when
+the use is compiled (an undefined reference, like a linker
+error); a `sizeof` operand does not count as a use, since it
+is unevaluated, and neither does a use inside a function
+that is never called, since its body is never expanded.
 
 `static` and `extern` are rejected in block scope: `static`
 locals do not keep their values across calls (there is no

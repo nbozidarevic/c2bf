@@ -786,6 +786,7 @@ impl<'a> Parser<'a> {
             return Ok(External::Decl(Decl {
                 spec: spec.words,
                 inits: Vec::new(),
+                is_extern: false,
             }));
         }
         let mut inits = Vec::new();
@@ -798,6 +799,7 @@ impl<'a> Parser<'a> {
         Ok(External::Decl(Decl {
             spec: spec.words,
             inits,
+            is_extern: false,
         }))
     }
 
@@ -1004,8 +1006,10 @@ impl<'a> Parser<'a> {
     /// are checked here: `static` and `extern` are file-scope
     /// only, `auto` and `register` are ignored everywhere. A
     /// file-scope `extern` declarator without an initializer is a
-    /// non-defining declaration and is dropped, so a later
-    /// definition still registers normally.
+    /// non-defining declaration: it is kept, flagged
+    /// `is_extern`, and emits nothing, so a later definition
+    /// still registers normally and a use without one fails
+    /// in code generation.
     fn parse_declaration(&mut self, file_scope: bool) -> Result<Decl, ParseError> {
         if self.at_ident() && self.peek().text.as_slice() == b"typedef" {
             return self.fail(
@@ -1047,12 +1051,10 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect_punct(b";", "';'")?;
-        if file_scope && spec.storage == Some(StorageClass::Extern) {
-            inits.retain(|i| i.init.is_some());
-        }
         Ok(Decl {
             spec: spec.words,
             inits,
+            is_extern: file_scope && spec.storage == Some(StorageClass::Extern),
         })
     }
 
@@ -2551,7 +2553,7 @@ mod tests {
         // declarations, `register`/`auto` are ignored anywhere.
         assert_sexp(
             "static int x = 1; extern int y; int y = 2; int main() { register int r = 3; auto int a = 4; }",
-            "(tu (decl int (initdecl x (int 1))) (decl int) (decl int (initdecl y (int 2))) (funcdef main (compound (decl int (initdecl r (int 3))) (decl int (initdecl a (int 4))))))",
+            "(tu (decl int (initdecl x (int 1))) (decl int (initdecl y)) (decl int (initdecl y (int 2))) (funcdef main (compound (decl int (initdecl r (int 3))) (decl int (initdecl a (int 4))))))",
         );
         assert_sexp(
             "static int f() { return 1; }",

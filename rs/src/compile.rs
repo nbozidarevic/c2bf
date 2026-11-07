@@ -260,6 +260,7 @@ impl<'a> Renamer<'a> {
         Ok(Decl {
             spec: decl.spec.clone(),
             inits,
+            is_extern: decl.is_extern,
         })
     }
 
@@ -593,6 +594,12 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
     // every duplicate this pass can express is initialized, and
     // both compilers reject those.
     let mut globals: HashMap<Vec<u8>, bool> = HashMap::new();
+    // Names declared only as `extern`: candidates for the
+    // undefined-reference set, minus any name defined
+    // anywhere in the unit (order-independent, like a
+    // linker: a definition after the use still satisfies it).
+    let mut defined: HashSet<Vec<u8>> = HashSet::new();
+    let mut extern_candidates: HashSet<Vec<u8>> = HashSet::new();
     for item in &tu.0 {
         match item {
             External::FuncDef(f) => {
@@ -628,6 +635,10 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
             External::Decl(d) => {
                 for init in &d.inits {
                     let is_array = !init.dims.is_empty();
+                    if d.is_extern && init.init.is_none() {
+                        extern_candidates.insert(init.name.clone());
+                        continue;
+                    }
                     if init.init.is_none() && !is_array {
                         continue;
                     }
@@ -640,10 +651,15 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
                         }
                     }
                     globals.insert(init.name.clone(), is_array);
+                    defined.insert(init.name.clone());
                 }
             }
         }
     }
+    em.extern_undefined = extern_candidates
+        .difference(&defined)
+        .cloned()
+        .collect();
     for item in &tu.0 {
         match item {
             External::FuncDef(f) => {
@@ -707,9 +723,28 @@ impl Emitter {
     /// Compile a declaration: declarators in order, cell first, then
     /// the value each. A declarator without an initializer is still an
     /// error, as before (`int x;` pins it) — now per declarator.
+    /// Error when `name` was declared only as `extern` and never
+    /// defined in this translation unit: a use of it is an
+    /// undefined reference, not a zero cell.
+    fn check_extern_defined(&self, name: &[u8]) -> Result<(), CompileError> {
+        if self.extern_undefined.contains(name) {
+            return Err(err(format!(
+                "undefined reference to '{}'",
+                String::from_utf8_lossy(name)
+            )));
+        }
+        Ok(())
+    }
+
     fn compile_decl(&mut self, d: &Decl) -> Result<(), CompileError> {
         // `int;` — no declarators, the base visitor emits nothing.
         for init in &d.inits {
+            // A non-defining `extern` declarator emits nothing
+            // (scalar or array); a use without a definition
+            // fails at the use site via `extern_undefined`.
+            if d.is_extern && init.init.is_none() {
+                continue;
+            }
             if !init.dims.is_empty() {
                 self.compile_array_decl(init)?;
                 continue;
@@ -1153,6 +1188,7 @@ impl Emitter {
         let (root, indices) = Self::flatten_chain(e);
         match root {
             Expr::Ident(name) => {
+                self.check_extern_defined(name)?;
                 if let Some((base, total)) = self.memory.array_info(name) {
                     let dims = self
                         .memory
@@ -1384,6 +1420,7 @@ impl Emitter {
     fn address_value(&mut self, e: &Expr) -> Result<i32, CompileError> {
         match e {
             Expr::Ident(name) => {
+                self.check_extern_defined(name)?;
                 if let Some((base, _)) = self.memory.array_info(name) {
                     self.address_const(base)
                 } else {
@@ -1469,6 +1506,7 @@ impl Emitter {
     fn store_target(&mut self, e: &Expr) -> Result<StoreTarget, CompileError> {
         match e {
             Expr::Ident(name) => {
+                self.check_extern_defined(name)?;
                 if self.memory.is_array(name) {
                     Err(err("cannot assign to an array"))
                 } else {
@@ -1648,6 +1686,7 @@ impl Emitter {
         match e {
             Expr::Paren(inner) => self.check_deref_operand(inner),
             Expr::Ident(name) => {
+                self.check_extern_defined(name)?;
                 if self.memory.is_array(name) || self.memory.is_pointer(name) {
                     Ok(())
                 } else if self.memory.has_var(name) {
@@ -2216,6 +2255,7 @@ impl Emitter {
                 // A bare array name decays to the address of its
                 // first element; scalars and pointers keep the
                 // variable cell itself.
+                self.check_extern_defined(name)?;
                 if let Some((base, _)) = self.memory.array_info(name) {
                     self.address_const(base)
                 } else {
@@ -2547,6 +2587,7 @@ impl Emitter {
     fn compile_scanf_target(&mut self, a: &Expr) -> Result<ScanfTarget, CompileError> {
         match a {
             Expr::Ident(name) => {
+                self.check_extern_defined(name)?;
                 if let Some((base, len)) = self.memory.array_info(name) {
                     Ok(ScanfTarget::Bounded { base, len })
                 } else if self.memory.is_pointer(name) {
@@ -3425,20 +3466,64 @@ mod tests {
     }
 
     #[test]
-    fn extern_bare_declaration_uses_zero_cell() {
-        // A bare `extern` declaration defines nothing; a use
-        // allocates a zero cell. g++ would not link this, so it
-        // is pinned here, not in a fixture.
-        let bf = compile(b"extern int x; int main() { printf(\"%d\", x); }")
-            .expect("extern program compiles");
-        let mut out = Vec::new();
-        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
-        assert_eq!(out, b"0");
+    fn extern_undefined_is_an_error() {
+        // A bare `extern` declaration defines nothing: using
+        // the name without a definition is an undefined
+        // reference, in every use position (value, address,
+        // store, subscript, dereference). g++ would not link
+        // these either, so they are pinned here, not in a
+        // fixture.
+        for (src, want) in [
+            (
+                b"extern int x; int main() { printf(\"%d\", x); }"
+                    as &[u8],
+                "undefined reference to 'x'",
+            ),
+            (
+                b"extern int x; int main() { int *p = &x; return 0; }",
+                "undefined reference to 'x'",
+            ),
+            (
+                b"extern int x; int main() { x = 1; return 0; }",
+                "undefined reference to 'x'",
+            ),
+            (
+                b"extern char a[3]; int main() { printf(\"%d\", a[0]); }",
+                "undefined reference to 'a'",
+            ),
+            (
+                b"extern int x; int main() { printf(\"%d\", *x); }",
+                "undefined reference to 'x'",
+            ),
+        ] {
+            let err = compile(src).expect_err("undefined extern use");
+            assert_eq!(err.msg, want, "for {:?}", src);
+        }
+        // A later definition satisfies the declaration, in
+        // either order, and repeated bare declarations are
+        // fine when unused. `sizeof` does not count as a use:
+        // the operand is unevaluated. A use inside a function
+        // that is never called is never compiled, so it does
+        // not fail either.
         let bf = compile(b"extern int x; int x = 9; int main() { printf(\"%d\", x); }")
             .expect("extern-then-define compiles");
         let mut out = Vec::new();
         crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
         assert_eq!(out, b"9");
+        let bf = compile(b"int x = 8; extern int x; int main() { printf(\"%d\", x); }")
+            .expect("define-then-extern compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"8");
+        compile(b"extern int x; extern int x; int main() { return 0; }")
+            .expect("repeated extern declarations compile");
+        let bf = compile(b"extern int x; int main() { printf(\"%d\", sizeof(x)); }")
+            .expect("sizeof of extern compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"1");
+        compile(b"extern int x; int f() { return x; } int main() { return 0; }")
+            .expect("use in uncalled function is never compiled");
     }
 
     #[test]
