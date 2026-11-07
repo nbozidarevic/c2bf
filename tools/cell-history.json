@@ -1,6 +1,6 @@
 {
-  "provenance": "Runtime footprints measured by the temporary cell-backfill CI workflow running c2bf-bench --footprint over each milestone's committed golden BF files with that milestone's fixture inputs (empty input where a golden has no input file; the micro probes never read stdin), using the runner at commit 0ce60a0615b6b292f2070ecf08e352b8a3a5b878. Allocated cells measured by c2bf-bench --quick --json at the same commit; the BF goldens there are byte-identical to the 3c4ab19 milestone (CI golden-codegen green) and no emission or allocation order changed in between, so the allocated counts are recorded under 3c4ab19. A second backfill run of the same workflow (runner at commit 9f2443a2146f3e5737765b83e8020bdde3fe5917) reproduced every recorded runtime entry exactly and added the e0e858f reclaim snapshot: its runtime footprint over the snapshot goldens, and its allocated cells from --quick --json at that commit, whose BF goldens are byte-identical to the e0e858f milestone. A third backfill run (runner at commit 773956eb33ce160a5f0a857c263f0973d30fe61e) reproduced every recorded runtime entry exactly and added the 412a09b arrays/pointers snapshot the same way. A fourth backfill run (runner at commit 603a4cc2d5da2ab1f628ada6a49149eb631e84c2) reproduced every recorded runtime entry exactly and added the 6486d45 strings snapshot the same way. A fifth backfill run (runner at commit 7bc3dc3e2b2fba82428f34ad7a6c9b0f839c1277) reproduced every recorded runtime entry exactly and added the 634c3f4 functions snapshot the same way. A sixth backfill run (runner at commit 4a9aa9e843c226acab4491aba98deffc708e1083) reproduced every recorded runtime entry exactly and added the f3d007e div/scanf snapshot the same way. A seventh backfill run (runner at commit c77c80322639967ec7c7ebf23fd3bbaa79cb5813) reproduced every recorded runtime entry exactly and added the bd5e7b9 strings single-dispatch snapshot the same way. An eighth backfill run (runner at commit 75a614fa8b64848190c6eb8b2ae05d059bfd4ad2) reproduced every recorded runtime entry exactly and added the bd5e7b9 strings single-dispatch snapshot the same way. A ninth backfill run (runner at commit bde74ba7855363ed4a4f653ccbfa73c50e903e94) reproduced every recorded runtime entry exactly and added the 91f9161 scanf %s snapshot the same way. A tenth backfill run (runner at commit 8296561b8f631c10bfbc4b155977075af915c248) reproduced every recorded runtime entry exactly and added the 961773d prototype snapshot the same way. An eleventh backfill run (runner at commit 6475abbc709cb273b12629effaa6cc42bd1abf08) reproduced every recorded runtime entry exactly and added the ef3a6c2 storage/pointer-return snapshot the same way. Allocated cells were re-measured at HEAD rather than carried: common fixtures are unchanged or 1-2 cells lower than the 961773d recording because the then-only perform_if dropped the else_value cell. A twelfth backfill run (runner at commit fea3ba333fbb05a48a0e6ebf5c24bd25cc9873d3) reproduced every recorded runtime entry exactly and added the 72a356f braced-initializer/I/O-format snapshot the same way. A thirteenth backfill run (runner at commit cfdf98c7b8ffee0da6898f0fae10975978f2304b) reproduced every recorded runtime entry exactly and added the 10a40df based-scanf shrink / just-in-time switch / do-while reclaim snapshot the same way. A fourteenth backfill run (runner at commit a667af4cd21a1408ba850380c3983b3e0e7d896e) reproduced every recorded runtime entry exactly and added the fc99c9e pointer-to-pointer / multi-dimensional snapshot the same way.",
-  "allocated_commit": "a667af4cd21a1408ba850380c3983b3e0e7d896e",
+  "provenance": "Runtime footprints measured by the temporary cell-backfill CI workflow running c2bf-bench --footprint over each milestone's committed golden BF files with that milestone's fixture inputs (empty input where a golden has no input file; the micro probes never read stdin), using the runner at commit 0ce60a0615b6b292f2070ecf08e352b8a3a5b878. Allocated cells measured by c2bf-bench --quick --json at the same commit; the BF goldens there are byte-identical to the 3c4ab19 milestone (CI golden-codegen green) and no emission or allocation order changed in between, so the allocated counts are recorded under 3c4ab19. A second backfill run of the same workflow (runner at commit 9f2443a2146f3e5737765b83e8020bdde3fe5917) reproduced every recorded runtime entry exactly and added the e0e858f reclaim snapshot: its runtime footprint over the snapshot goldens, and its allocated cells from --quick --json at that commit, whose BF goldens are byte-identical to the e0e858f milestone. A third backfill run (runner at commit 773956eb33ce160a5f0a857c263f0973d30fe61e) reproduced every recorded runtime entry exactly and added the 412a09b arrays/pointers snapshot the same way. A fourth backfill run (runner at commit 603a4cc2d5da2ab1f628ada6a49149eb631e84c2) reproduced every recorded runtime entry exactly and added the 6486d45 strings snapshot the same way. A fifth backfill run (runner at commit 7bc3dc3e2b2fba82428f34ad7a6c9b0f839c1277) reproduced every recorded runtime entry exactly and added the 634c3f4 functions snapshot the same way. A sixth backfill run (runner at commit 4a9aa9e843c226acab4491aba98deffc708e1083) reproduced every recorded runtime entry exactly and added the f3d007e div/scanf snapshot the same way. A seventh backfill run (runner at commit c77c80322639967ec7c7ebf23fd3bbaa79cb5813) reproduced every recorded runtime entry exactly and added the bd5e7b9 strings single-dispatch snapshot the same way. An eighth backfill run (runner at commit 75a614fa8b64848190c6eb8b2ae05d059bfd4ad2) reproduced every recorded runtime entry exactly and added the bd5e7b9 strings single-dispatch snapshot the same way. A ninth backfill run (runner at commit bde74ba7855363ed4a4f653ccbfa73c50e903e94) reproduced every recorded runtime entry exactly and added the 91f9161 scanf %s snapshot the same way. A tenth backfill run (runner at commit 8296561b8f631c10bfbc4b155977075af915c248) reproduced every recorded runtime entry exactly and added the 961773d prototype snapshot the same way. An eleventh backfill run (runner at commit 6475abbc709cb273b12629effaa6cc42bd1abf08) reproduced every recorded runtime entry exactly and added the ef3a6c2 storage/pointer-return snapshot the same way. Allocated cells were re-measured at HEAD rather than carried: common fixtures are unchanged or 1-2 cells lower than the 961773d recording because the then-only perform_if dropped the else_value cell. A twelfth backfill run (runner at commit fea3ba333fbb05a48a0e6ebf5c24bd25cc9873d3) reproduced every recorded runtime entry exactly and added the 72a356f braced-initializer/I/O-format snapshot the same way. A thirteenth backfill run (runner at commit cfdf98c7b8ffee0da6898f0fae10975978f2304b) reproduced every recorded runtime entry exactly and added the 10a40df based-scanf shrink / just-in-time switch / do-while reclaim snapshot the same way. A fourteenth backfill run (runner at commit a667af4cd21a1408ba850380c3983b3e0e7d896e) reproduced every recorded runtime entry exactly and added the fc99c9e pointer-to-pointer / multi-dimensional snapshot the same way. A fifteenth backfill run (runner at commit 2eff1ce3d995b6429727fe65ee7a4bfb5a94b082) reproduced every recorded runtime entry exactly and added the 9936220 assignment-value-capture snapshot the same way.",
+  "allocated_commit": "2eff1ce3d995b6429727fe65ee7a4bfb5a94b082",
   "allocated": {
     "3c4ab19": {
       "addition": 417,
@@ -527,6 +527,52 @@
       "switch": 171,
       "ternary": 235,
       "typedefs": 128,
+      "typespec": 161,
+      "unary": 172
+    },
+    "9936220": {
+      "addition": 67,
+      "addsub": 205,
+      "arrays": 214,
+      "assign": 310,
+      "bitassign": 210,
+      "bitwise": 638,
+      "braceinit": 209,
+      "branch": 64,
+      "break": 161,
+      "casts": 139,
+      "cmp": 376,
+      "complex": 134,
+      "continue": 218,
+      "define": 101,
+      "div": 178,
+      "dowhile": 147,
+      "enums": 131,
+      "fordecl": 109,
+      "formats": 625,
+      "functions": 281,
+      "hello_world": 24,
+      "io": 104,
+      "literals": 142,
+      "logic": 213,
+      "loop": 90,
+      "mod": 304,
+      "mul": 205,
+      "multidecl": 113,
+      "multidim": 635,
+      "pointerret": 80,
+      "pointers": 484,
+      "printfmt": 187,
+      "printnum": 328,
+      "prototypes": 119,
+      "ptrptr": 564,
+      "scanfstr": 220,
+      "sizeof": 100,
+      "storage": 104,
+      "strings": 215,
+      "switch": 173,
+      "ternary": 235,
+      "typedefs": 130,
       "typespec": 161,
       "unary": 172
     }
@@ -6228,6 +6274,273 @@
       "typedefs": {
         "cells_touched": 115,
         "high_water": 114,
+        "low_water": 0
+      },
+      "typespec": {
+        "cells_touched": 148,
+        "high_water": 147,
+        "low_water": 0
+      },
+      "unary": {
+        "cells_touched": 137,
+        "high_water": 136,
+        "low_water": 0
+      }
+    },
+    "9936220": {
+      "addition": {
+        "cells_touched": 67,
+        "high_water": 66,
+        "low_water": 0
+      },
+      "addsub": {
+        "cells_touched": 205,
+        "high_water": 204,
+        "low_water": 0
+      },
+      "arrays": {
+        "cells_touched": 201,
+        "high_water": 200,
+        "low_water": 0
+      },
+      "assign": {
+        "cells_touched": 297,
+        "high_water": 296,
+        "low_water": 0
+      },
+      "bitassign": {
+        "cells_touched": 210,
+        "high_water": 209,
+        "low_water": 0
+      },
+      "bitwise": {
+        "cells_touched": 625,
+        "high_water": 624,
+        "low_water": 0
+      },
+      "braceinit": {
+        "cells_touched": 209,
+        "high_water": 208,
+        "low_water": 0
+      },
+      "branch": {
+        "cells_touched": 60,
+        "high_water": 61,
+        "low_water": 0
+      },
+      "break": {
+        "cells_touched": 148,
+        "high_water": 147,
+        "low_water": 0
+      },
+      "casts": {
+        "cells_touched": 139,
+        "high_water": 138,
+        "low_water": 0
+      },
+      "cmp": {
+        "cells_touched": 347,
+        "high_water": 346,
+        "low_water": 0
+      },
+      "complex": {
+        "cells_touched": 134,
+        "high_water": 133,
+        "low_water": 0
+      },
+      "continue": {
+        "cells_touched": 205,
+        "high_water": 204,
+        "low_water": 0
+      },
+      "define": {
+        "cells_touched": 88,
+        "high_water": 87,
+        "low_water": 0
+      },
+      "div": {
+        "cells_touched": 165,
+        "high_water": 164,
+        "low_water": 0
+      },
+      "dowhile": {
+        "cells_touched": 134,
+        "high_water": 133,
+        "low_water": 0
+      },
+      "enums": {
+        "cells_touched": 122,
+        "high_water": 121,
+        "low_water": 0
+      },
+      "fordecl": {
+        "cells_touched": 96,
+        "high_water": 95,
+        "low_water": 0
+      },
+      "formats": {
+        "cells_touched": 431,
+        "high_water": 618,
+        "low_water": 0
+      },
+      "functions": {
+        "cells_touched": 281,
+        "high_water": 280,
+        "low_water": 0
+      },
+      "hello_world": {
+        "cells_touched": 24,
+        "high_water": 23,
+        "low_water": 0
+      },
+      "io": {
+        "cells_touched": 102,
+        "high_water": 101,
+        "low_water": 0
+      },
+      "literals": {
+        "cells_touched": 122,
+        "high_water": 121,
+        "low_water": 0
+      },
+      "logic": {
+        "cells_touched": 200,
+        "high_water": 199,
+        "low_water": 0
+      },
+      "loop": {
+        "cells_touched": 90,
+        "high_water": 89,
+        "low_water": 0
+      },
+      "micro_order_arith": {
+        "cells_touched": 18,
+        "high_water": 17,
+        "low_water": 0
+      },
+      "micro_order_assign": {
+        "cells_touched": 5,
+        "high_water": 4,
+        "low_water": 0
+      },
+      "micro_order_bitwise": {
+        "cells_touched": 46,
+        "high_water": 45,
+        "low_water": 0
+      },
+      "micro_order_case": {
+        "cells_touched": 6,
+        "high_water": 5,
+        "low_water": 0
+      },
+      "micro_order_deref": {
+        "cells_touched": 17,
+        "high_water": 16,
+        "low_water": 0
+      },
+      "micro_order_eq": {
+        "cells_touched": 15,
+        "high_water": 14,
+        "low_water": 0
+      },
+      "micro_order_index": {
+        "cells_touched": 13,
+        "high_water": 12,
+        "low_water": 0
+      },
+      "micro_order_le": {
+        "cells_touched": 20,
+        "high_water": 19,
+        "low_water": 0
+      },
+      "micro_order_shift": {
+        "cells_touched": 14,
+        "high_water": 13,
+        "low_water": 0
+      },
+      "mod": {
+        "cells_touched": 291,
+        "high_water": 290,
+        "low_water": 0
+      },
+      "mul": {
+        "cells_touched": 205,
+        "high_water": 204,
+        "low_water": 0
+      },
+      "multidecl": {
+        "cells_touched": 100,
+        "high_water": 99,
+        "low_water": 0
+      },
+      "multidim": {
+        "cells_touched": 635,
+        "high_water": 634,
+        "low_water": 0
+      },
+      "pointerret": {
+        "cells_touched": 80,
+        "high_water": 79,
+        "low_water": 0
+      },
+      "pointers": {
+        "cells_touched": 484,
+        "high_water": 483,
+        "low_water": 0
+      },
+      "printfmt": {
+        "cells_touched": 187,
+        "high_water": 186,
+        "low_water": 0
+      },
+      "printnum": {
+        "cells_touched": 328,
+        "high_water": 327,
+        "low_water": 0
+      },
+      "prototypes": {
+        "cells_touched": 119,
+        "high_water": 118,
+        "low_water": 0
+      },
+      "ptrptr": {
+        "cells_touched": 564,
+        "high_water": 563,
+        "low_water": 0
+      },
+      "scanfstr": {
+        "cells_touched": 193,
+        "high_water": 192,
+        "low_water": 0
+      },
+      "sizeof": {
+        "cells_touched": 87,
+        "high_water": 86,
+        "low_water": 0
+      },
+      "storage": {
+        "cells_touched": 95,
+        "high_water": 94,
+        "low_water": 0
+      },
+      "strings": {
+        "cells_touched": 215,
+        "high_water": 214,
+        "low_water": 0
+      },
+      "switch": {
+        "cells_touched": 160,
+        "high_water": 159,
+        "low_water": 0
+      },
+      "ternary": {
+        "cells_touched": 222,
+        "high_water": 221,
+        "low_water": 0
+      },
+      "typedefs": {
+        "cells_touched": 117,
+        "high_water": 116,
         "low_water": 0
       },
       "typespec": {

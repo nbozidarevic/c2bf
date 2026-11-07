@@ -53,6 +53,7 @@ How the emitted Brainfuck size (bytes) for each golden fixture changed across no
 | Braced initializers + I/O formats | `72a356f` | 51 | 16279064 | +0 | Braced initializer lists and the new I/O conversions add no new emission for old programs: all 49 existing fixtures are byte-identical, with allocated cells and runtime footprints unchanged. Adds two fixtures: braceinit (292,759 BF bytes on 209 cells) and formats (3,099,121 BF bytes on 715 cells, dominated by the based `scanf` readers). |
 | Based-scanf shrink + lazy switch + do-while reclaim | `10a40df` | 51 | 14941389 | -1337675 | Based `scanf` readers shrink via cheaper digit classification and rescan loops (0012), `switch` matches are computed just in time per case (0013), and do...while first-emission temporaries are reclaimed (0014). formats shrinks 3,099,121 -> 1,772,157 BF bytes (-1,326,964); the six other re-snapshotted fixtures shrink by 168-3,089 bytes each. Cell counts per decisions 0012-0014 (formats reader 502 -> 171 cells on the probe, switch 279 -> 171, dowhile 181 -> 147). Backfilled: formats on 625 allocated cells (was 715) with 431 touched (was 709), switch on 171 (was 279), dowhile on 147 (was 181), break on 159 (was 181) and continue on 214 (was 229); runtime footprints backfilled for all 51 fixtures. |
 | Pointer-to-pointer + multi-dimensional arrays | `fc99c9e` | 53 | 34015355 | +0 | Pointer depth (at most 2) and array dimensions become lists in the AST, and subscript chains address through loads (0016). All 51 existing fixtures are byte-identical, with allocated cells and runtime footprints unchanged. Adds two fixtures: ptrptr (14,138,504 BF bytes on 532 cells) and multidim (4,935,462 BF bytes on 619 cells). |
+| Assignment-value capture | `9936220` | 53 | 35651049 | +1635694 | Assignment expressions yield the stored value, captured in a fresh cell (0017). 24 fixtures grow by 1,635,694 BF bytes in total (+4.81%), worst ptrptr +8.8% and pointers +9.1%; allocated cells grow by 182 across 17 fixtures. Runtime footprints reproduce every prior entry exactly. |
 
 ## Sizes by fixture
 
@@ -1409,6 +1410,66 @@ Pointer depth (at most 2) and array dimensions become lists in the AST, and subs
 | `typespec` | 78768 | +0 |
 | `unary` | 84407 | +0 |
 
+### Assignment-value capture (`9936220`)
+
+Assignment expressions yield the stored value, captured in a fresh cell (0017). 24 fixtures grow by 1,635,694 BF bytes in total (+4.81%), worst ptrptr +8.8% and pointers +9.1%; allocated cells grow by 182 across 17 fixtures. Runtime footprints reproduce every prior entry exactly.
+
+| Fixture | Bytes | Change vs previous |
+|---|---|---|
+| `addition` | 13985 | +0 |
+| `addsub` | 126266 | +0 |
+| `arrays` | 113274 | +2645 |
+| `assign` | 257923 | +3107 |
+| `bitassign` | 127165 | +1360 |
+| `bitwise` | 460258 | -52 |
+| `braceinit` | 292759 | +0 |
+| `branch` | 5636 | +0 |
+| `break` | 155254 | +1014 |
+| `casts` | 97203 | +0 |
+| `cmp` | 234565 | +0 |
+| `complex` | 74149 | +73 |
+| `continue` | 209911 | +2204 |
+| `define` | 55445 | +0 |
+| `div` | 146154 | +0 |
+| `dowhile` | 127346 | +870 |
+| `enums` | 104402 | +0 |
+| `fordecl` | 63868 | +854 |
+| `formats` | 1772157 | +0 |
+| `functions` | 803284 | +13558 |
+| `hello_world` | 597 | +0 |
+| `io` | 60929 | +0 |
+| `literals` | 124481 | +0 |
+| `logic` | 195177 | +0 |
+| `loop` | 50087 | +503 |
+| `micro_order_arith` | 500 | +0 |
+| `micro_order_assign` | 71 | +39 |
+| `micro_order_bitwise` | 5319 | +0 |
+| `micro_order_case` | 77 | +39 |
+| `micro_order_deref` | 345813 | -3002 |
+| `micro_order_eq` | 457 | +0 |
+| `micro_order_index` | 555 | +140 |
+| `micro_order_le` | 1402 | +0 |
+| `micro_order_shift` | 363 | +0 |
+| `mod` | 154842 | +0 |
+| `mul` | 113344 | +0 |
+| `multidecl` | 58453 | +0 |
+| `multidim` | 5057282 | +121820 |
+| `pointerret` | 588182 | +0 |
+| `pointers` | 3182667 | +265147 |
+| `printfmt` | 147112 | +0 |
+| `printnum` | 333085 | +75 |
+| `prototypes` | 365550 | +0 |
+| `ptrptr` | 15378326 | +1239822 |
+| `scanfstr` | 1368311 | -1833 |
+| `sizeof` | 56011 | +0 |
+| `storage` | 57318 | +0 |
+| `strings` | 1610128 | +407 |
+| `switch` | 34464 | +33 |
+| `ternary` | 156376 | -220 |
+| `typedefs` | 799591 | -12909 |
+| `typespec` | 78768 | +0 |
+| `unary` | 84407 | +0 |
+
 ## Cells allocated (compiler)
 
 Tape cells the compiler's bump allocator reserved for each program (`Memory::allocated_cells` after compilation). Allocation never reuses cells, so this is the static tape footprint: fewer allocated cells means less tape reserved, whether or not execution ever visits them all.
@@ -1980,6 +2041,55 @@ Tape cells the compiler's bump allocator reserved for each program (`Memory::all
 | `switch` | 171 |
 | `ternary` | 235 |
 | `typedefs` | 128 |
+| `typespec` | 161 |
+| `unary` | 172 |
+
+### Assignment-value capture (`9936220`)
+
+| Fixture | Cells alloc |
+|---|---|
+| `addition` | 67 |
+| `addsub` | 205 |
+| `arrays` | 214 |
+| `assign` | 310 |
+| `bitassign` | 210 |
+| `bitwise` | 638 |
+| `braceinit` | 209 |
+| `branch` | 64 |
+| `break` | 161 |
+| `casts` | 139 |
+| `cmp` | 376 |
+| `complex` | 134 |
+| `continue` | 218 |
+| `define` | 101 |
+| `div` | 178 |
+| `dowhile` | 147 |
+| `enums` | 131 |
+| `fordecl` | 109 |
+| `formats` | 625 |
+| `functions` | 281 |
+| `hello_world` | 24 |
+| `io` | 104 |
+| `literals` | 142 |
+| `logic` | 213 |
+| `loop` | 90 |
+| `mod` | 304 |
+| `mul` | 205 |
+| `multidecl` | 113 |
+| `multidim` | 635 |
+| `pointerret` | 80 |
+| `pointers` | 484 |
+| `printfmt` | 187 |
+| `printnum` | 328 |
+| `prototypes` | 119 |
+| `ptrptr` | 564 |
+| `scanfstr` | 220 |
+| `sizeof` | 100 |
+| `storage` | 104 |
+| `strings` | 215 |
+| `switch` | 173 |
+| `ternary` | 235 |
+| `typedefs` | 130 |
 | `typespec` | 161 |
 | `unary` | 172 |
 
@@ -3275,6 +3385,64 @@ Tape cells actually used when each milestone's committed golden program runs wit
 | `switch` | 158 | 157 | 0 |
 | `ternary` | 222 | 221 | 0 |
 | `typedefs` | 115 | 114 | 0 |
+| `typespec` | 148 | 147 | 0 |
+| `unary` | 137 | 136 | 0 |
+
+### Assignment-value capture (`9936220`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 67 | 66 | 0 |
+| `addsub` | 205 | 204 | 0 |
+| `arrays` | 201 | 200 | 0 |
+| `assign` | 297 | 296 | 0 |
+| `bitassign` | 210 | 209 | 0 |
+| `bitwise` | 625 | 624 | 0 |
+| `braceinit` | 209 | 208 | 0 |
+| `branch` | 60 | 61 | 0 |
+| `break` | 148 | 147 | 0 |
+| `casts` | 139 | 138 | 0 |
+| `cmp` | 347 | 346 | 0 |
+| `complex` | 134 | 133 | 0 |
+| `continue` | 205 | 204 | 0 |
+| `define` | 88 | 87 | 0 |
+| `div` | 165 | 164 | 0 |
+| `dowhile` | 134 | 133 | 0 |
+| `enums` | 122 | 121 | 0 |
+| `fordecl` | 96 | 95 | 0 |
+| `formats` | 431 | 618 | 0 |
+| `functions` | 281 | 280 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 102 | 101 | 0 |
+| `literals` | 122 | 121 | 0 |
+| `logic` | 200 | 199 | 0 |
+| `loop` | 90 | 89 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 5 | 4 | 0 |
+| `micro_order_bitwise` | 46 | 45 | 0 |
+| `micro_order_case` | 6 | 5 | 0 |
+| `micro_order_deref` | 17 | 16 | 0 |
+| `micro_order_eq` | 15 | 14 | 0 |
+| `micro_order_index` | 13 | 12 | 0 |
+| `micro_order_le` | 20 | 19 | 0 |
+| `micro_order_shift` | 14 | 13 | 0 |
+| `mod` | 291 | 290 | 0 |
+| `mul` | 205 | 204 | 0 |
+| `multidecl` | 100 | 99 | 0 |
+| `multidim` | 635 | 634 | 0 |
+| `pointerret` | 80 | 79 | 0 |
+| `pointers` | 484 | 483 | 0 |
+| `printfmt` | 187 | 186 | 0 |
+| `printnum` | 328 | 327 | 0 |
+| `prototypes` | 119 | 118 | 0 |
+| `ptrptr` | 564 | 563 | 0 |
+| `scanfstr` | 193 | 192 | 0 |
+| `sizeof` | 87 | 86 | 0 |
+| `storage` | 95 | 94 | 0 |
+| `strings` | 215 | 214 | 0 |
+| `switch` | 160 | 159 | 0 |
+| `ternary` | 222 | 221 | 0 |
+| `typedefs` | 117 | 116 | 0 |
 | `typespec` | 148 | 147 | 0 |
 | `unary` | 137 | 136 | 0 |
 

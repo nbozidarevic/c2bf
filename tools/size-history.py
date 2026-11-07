@@ -266,6 +266,16 @@ MILESTONES = [
         "cells) and multidim (4,935,462 BF bytes on 619 "
         "cells).",
     ),
+    (
+        "9936220f5f20a7f409b454b502fff64ea1495e74",
+        "Assignment-value capture",
+        "Assignment expressions yield the stored value, "
+        "captured in a fresh cell (0017). 24 fixtures grow "
+        "by 1,635,694 BF bytes in total (+4.81%), worst "
+        "ptrptr +8.8% and pointers +9.1%; allocated cells "
+        "grow by 182 across 17 fixtures. Runtime footprints "
+        "reproduce every prior entry exactly.",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
