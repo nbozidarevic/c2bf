@@ -28,7 +28,7 @@ int main() {
   printf("%d,%d,%d\n", c[2][1], d[0][2], d[1][1]);
   printf("%d,%d,%d\n", g[0][2], g[1][0], get(a, 1, 2));
   printf("%d,%d\n", sumrow(a, 0), sumrow(g, 1));
-  printf("%d,%d,%d\n", sizeof(a), sizeof(a[0]), sizeof(a[0][0]));
+  printf("%d,%d,%d\n", sizeof(w), sizeof(w[0]), sizeof(w[0][0]));
   printf("%c,%c\n", w[0][1], w[1][0]);
   p = a[1];
   printf("%d,%d\n", p[0], p[2]);

@@ -1,7 +1,8 @@
 # Temporary golden snapshot for the pointer-to-pointer and
 # multi-dimensional fixtures. Never merged as a standing
 # workflow; removed after the snapshots are committed.
-# Re-triggered once the crate compiles at the snapshot commit.
+# Re-triggered for the corrected multidim fixture (sizeof
+# of a char array, not an int array).
 name: golden-snapshot
 
 on:
