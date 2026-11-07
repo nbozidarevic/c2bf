@@ -1258,8 +1258,10 @@ impl Emitter {
         bounds: &[usize],
         indices: &[&Expr],
     ) -> Result<ChainOffsetPlan, CompileError> {
-        debug_assert_eq!(strides.len(), indices.len());
-        debug_assert_eq!(bounds.len(), indices.len());
+        // Strides/bounds cover every dimension; a row chain
+        // supplies fewer indices, using only the leading ones.
+        debug_assert!(strides.len() >= indices.len());
+        debug_assert!(bounds.len() >= indices.len());
         let mut static_sum: i64 = 0;
         let mut dynamic = false;
         for (k, index) in indices.iter().enumerate() {

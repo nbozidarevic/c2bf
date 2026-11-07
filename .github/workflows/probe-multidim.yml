@@ -1,0 +1,28 @@
+# TEMPORARY: print oracle vs c2bf output for the multidim
+# fixture to locate the e2e divergence. Removed after diagnosis.
+name: probe-multidim
+
+on:
+  push:
+    paths:
+      - .github/workflows/probe-multidim.yml
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release --manifest-path rs/Cargo.toml
+      - name: Compare outputs
+        run: |
+          ./rs/target/release/c2bf compile -c tests/compile/multidim.c -o /tmp/m.bf
+          ./rs/target/release/c2bf run -c /tmp/m.bf -i tests/compile/multidim.in > /tmp/m.c2bf; echo "c2bf exit: $?"
+          echo "=== c2bf ==="; cat /tmp/m.c2bf
+          g++ -w tests/compile/multidim.c -o /tmp/m.o
+          /tmp/m.o < tests/compile/multidim.in > /tmp/m.gcc; echo "gcc exit: $?"
+          echo "=== gcc ==="; cat /tmp/m.gcc
+          echo "=== diff ==="; diff /tmp/m.gcc /tmp/m.c2bf || true
