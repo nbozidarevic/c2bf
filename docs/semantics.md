@@ -36,12 +36,10 @@ the deviation is stated here as defined behavior, pinned by tests.
   Operands evaluate right-to-left, like other non-arithmetic
   operators; the `bitwise` fixture's double-side-effect lines
   pin this against g++.
-- An assignment expression yields its target cell, not a value
-  copy, so two assignments to the *same* variable inside one
-  operator's operands are both read after both assignments
-  (unlike C, which captures each assigned value). The fixture
-  avoids that shape; distinct variables in the operands are
-  unaffected.
+- An assignment expression yields the value stored, captured
+  in a fresh cell: two assignments to the *same* variable
+  inside one operator's operands each contribute the value
+  they stored, as in C.
 - Compound assignment (`op=`) desugars to `x = x op y` with the
   right-hand side evaluated first, as for the other compound
   forms; `&= |= ^= <<= >>=` use the bitwise/shift helpers.

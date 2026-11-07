@@ -1580,17 +1580,25 @@ impl Emitter {
 
     /// Write `value` into a store destination.
     fn store_value(&mut self, target: &StoreTarget, value: i32) -> Result<i32, CompileError> {
+        // An assignment expression yields the value stored,
+        // captured in a fresh cell — not the target cell,
+        // whose later reassignment inside the same expression
+        // must not rewrite it. The capture is taken before
+        // the store so it reads the value as computed, even
+        // if the store overwrites the value cell itself.
+        let captured = self.duplicate_value(value);
         match target {
-            StoreTarget::Cell(cell) => Ok(self.copy_value(value, *cell)),
+            StoreTarget::Cell(cell) => {
+                self.copy_value(captured, *cell);
+            }
             StoreTarget::Range { counter, cells } => {
-                self.store_to_cells(*counter, cells, value)?;
-                Ok(value)
+                self.store_to_cells(*counter, cells, captured)?;
             }
             StoreTarget::Any { addr } => {
-                self.store_through(*addr, value)?;
-                Ok(value)
+                self.store_through(*addr, captured)?;
             }
         }
+        Ok(captured)
     }
 
     /// Value held by an assignment target, plus its store
@@ -3394,6 +3402,34 @@ mod tests {
         let mut out = Vec::new();
         crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
         assert_eq!(out, b"1,6,6,0,6,2,6,6,3,4,99,1");
+    }
+
+    #[test]
+    fn assignment_yields_stored_value() {
+        // Each assignment contributes the value it stored,
+        // even when the same target is assigned again later
+        // in the same expression: the result must be a copy,
+        // not the target cell read after both assignments.
+        for (src, want) in [
+            (
+                b"int main() { int x = 0; printf(\"%d\", (x = 1) + (x = 2)); }"
+                    as &[u8],
+                b"3" as &[u8],
+            ),
+            (
+                b"int main() { int x = 1; int a[2]; printf(\"%d,%d\", (a[0] = x) + (x = 5), a[0]); }",
+                b"6,1",
+            ),
+            (
+                b"int main() { int x = 0; int *p = &x; printf(\"%d\", (*p = 3) + (x = 4)); }",
+                b"7",
+            ),
+        ] {
+            let bf = compile(src).expect("assignment program compiles");
+            let mut out = Vec::new();
+            crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+            assert_eq!(out, want, "for {:?}", src);
+        }
     }
 
     #[test]
