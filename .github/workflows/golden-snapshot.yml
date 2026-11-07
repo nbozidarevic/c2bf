@@ -1,0 +1,38 @@
+# Temporary golden snapshot after the assignment-value
+# capture (0017). Never merged as a standing workflow;
+# removed after the snapshot is committed.
+name: golden-snapshot
+
+on:
+  push:
+    paths:
+      - .github/workflows/golden-snapshot.yml
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release --manifest-path rs/Cargo.toml
+      - name: Generate BF goldens
+        run: |
+          mkdir -p /tmp/goldens
+          for f in tests/compile/*.c; do
+            n=$(basename "$f" .c)
+            ./rs/target/release/bfcompile "$f" > "/tmp/goldens/$n.bf"
+          done
+          for f in tests/differential/micro/*.c; do
+            n=$(basename "$f" .c)
+            ./rs/target/release/bfcompile "$f" > "/tmp/goldens/micro_$n.bf"
+          done
+          wc -c /tmp/goldens/*.bf | tail -n 1
+      - name: Upload goldens
+        uses: actions/upload-artifact@v4
+        with:
+          name: changed-goldens
+          path: /tmp/goldens
+          if-no-files-found: error
