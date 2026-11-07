@@ -2059,10 +2059,16 @@ mod tests {
             "int f() { char s[] = {'h', 'i', 0}; int x = {5}; int y = {1,}; }",
             "(tu (funcdef f (compound (decl char (initdecl s (unsized) (initlist (char 'h') (char 'i') (int 0)))) (decl int (initdecl x (initlist (int 5)))) (decl int (initdecl y (initlist (int 1)))))))",
         );
+        // A nested list parses (it is meaningful for
+        // multi-dimensional declarators); code generation
+        // rejects it for one-dimensional ones.
+        assert_sexp(
+            "int a[2] = {{1}, 2};",
+            "(tu (decl int (initdecl a (int 2) (initlist (initlist (int 1)) (int 2)))))",
+        );
         // A braced list is an initializer, not an expression.
         for src in [
             "int a[2] = {};",
-            "int a[2] = {{1}, 2};",
             "int a[3] = {[1] = 5};",
             "int main() { int x; x = {1}; return 0; }",
             "int main() { return {1}; }",
@@ -2093,13 +2099,19 @@ mod tests {
 
     #[test]
     fn array_declarator_errors() {
-        assert_err("int f() { int a[3][4]; }", 1, 19, "expected ';', found '['");
-        assert_err(
-            "int f() { char **p; }",
-            1,
-            17,
-            "expected declarator name, found '*'",
+        assert_sexp(
+            "int f() { int a[3][4]; }",
+            "(tu (funcdef f (compound (decl int (initdecl a (int 3) (int 4))))))",
         );
+        // A third level of indirection is still an error.
+        match parse(b"int f() { char ***p; }") {
+            Err(e) => assert!(
+                e.msg.contains("pointer to pointer to pointer"),
+                "unexpected error: {}",
+                e.msg
+            ),
+            Ok(_) => panic!("triple-pointer declarator accepted"),
+        }
         // `int a[2] = {1, 2};` used to be rejected here; braced
         // initializers are supported now, and the list-shape
         // errors live in `braced_initializer_lists_parse`.
@@ -2195,13 +2207,23 @@ mod tests {
             "char *p;",
             "(tu (decl char (initdecl p (pointer))))",
         );
-        for src in [
+        // Pointer-to-pointer returns parse (the dump does not
+        // encode the return depth); a third level is an error.
+        assert_sexp(
             "char **f() { return 0; }",
+            "(tu (funcdef f (compound (return (int 0)))))",
+        );
+        assert_sexp(
             "typedef char *CP; CP *f() { return 0; }",
+            "(tu (typedef CP char (pointer)) (funcdef f (compound (return (int 0)))))",
+        );
+        for src in [
+            "char ***f() { return 0; }",
+            "typedef char *CP; CP **f() { return 0; }",
         ] {
             assert!(
                 parse(src.as_bytes()).is_err(),
-                "accepted pointer-to-pointer return: {:?}",
+                "accepted triple-pointer return: {:?}",
                 src
             );
         }
@@ -2209,14 +2231,19 @@ mod tests {
 
     #[test]
     fn prototype_errors() {
-        // A second `*` still fails at the parameter name.
-        match parse(b"int f(int **p);") {
+        // A double-pointer parameter parses; a third `*`
+        // is still an error.
+        assert_sexp(
+            "int f(int **p);",
+            "(tu (funcdecl f (params (param p (pointer) (pointer)))))",
+        );
+        match parse(b"int f(int ***p);") {
             Err(e) => assert!(
-                e.msg.contains("parameter name"),
+                e.msg.contains("pointer to pointer to pointer"),
                 "unexpected error: {}",
                 e.msg
             ),
-            Ok(_) => panic!("double-pointer prototype accepted"),
+            Ok(_) => panic!("triple-pointer prototype accepted"),
         }
         // A variadic prototype is rejected: `...` does not
         // start a parameter type.
@@ -2250,13 +2277,13 @@ mod tests {
             ),
             Ok(_) => panic!("unnamed parameter accepted"),
         }
-        match parse(b"int f(int **p) { }") {
+        match parse(b"int f(int ***p) { }") {
             Err(e) => assert!(
-                e.msg.contains("parameter name"),
+                e.msg.contains("pointer to pointer to pointer"),
                 "unexpected error: {}",
                 e.msg
             ),
-            Ok(_) => panic!("double-pointer parameter accepted"),
+            Ok(_) => panic!("triple-pointer parameter accepted"),
         }
     }
 
