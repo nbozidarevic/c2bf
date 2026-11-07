@@ -48,8 +48,10 @@ allocation regression that pushes more programs over the
 limit fails loudly instead of hiding. Every other rejection
 and every output mismatch is a failure. The statement
 budget below reduces the skip rate but does not eliminate
-it: the 500-seed sweep after the generator agreement fixes
-passed 476 seeds, skipped 24 (4.8%), and mismatched none.
+it: the 500-seed sweep after the 0016 generator extensions
+passed 460 seeds, skipped 40 (8.0%), and mismatched none
+(the previous sweep, before those extensions, passed 476
+and skipped 24).
 
 ## Generator guarantees
 

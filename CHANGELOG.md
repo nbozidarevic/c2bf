@@ -9,6 +9,24 @@ the top, matching tag `v0.3.1`. Entries below are grouped by
 the roadmap phases that produced them. See `docs/versioning.md`
 for when and how versions change.
 
+## Unreleased
+
+- Language: pointer-to-pointer (`int **pp`, depth at most 2,
+  including parameters, `**` returns, and typedef composition),
+  addressed through the dereference dispatch (`**pp`,
+  `pp[i][j]`, `(*pp)[j]`, `scanf` through `*pp`).
+  Decision record: `docs/decisions/0016-pointer-to-pointer-multi-dim-arrays.md`.
+- Language: multi-dimensional arrays (row-major, flat and
+  nested initializer lists with zero fill, row decay,
+  multi-dimensional parameters with stride dimensions,
+  `sizeof` of rows). String initializers, mixed flat/nested
+  lists, and unsized dimensions after the first are compile
+  errors. Pinned by the `multidim` oracle fixture.
+- Tests: differential fuzzer generates fixed `**` bindings
+  with dereference chains and at most one 3x3
+  two-dimensional array per program. 500-seed sweep: 460
+  pass, 40 skip (address limit), 0 mismatches.
+
 ## v0.3.1
 
 - Tests: differential fuzzer (`tests/fuzz.py`, `docs/fuzzing.md`)

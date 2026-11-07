@@ -82,12 +82,36 @@ the deviation is stated here as defined behavior, pinned by tests.
   in C, so the fallback is pinned by unit tests, not by the
   oracle. `sizeof` an array is its element count (unlike the `1`
   rule for scalar operands).
+  Multi-dimensional arrays (`int a[2][3]`) lay out row-major
+  in consecutive cells. A subscript chain addresses `base +
+  i * stride + j`, bounds-checked per dimension for constant
+  indices; variable indices compute the linear offset in byte
+  arithmetic and load/store through the range dispatch, with
+  the same out-of-range fallback as one dimension. A short
+  chain names a row: `a[i]` decays to the address of
+  `a[i][0]` and may be used as a pointer value or a
+  subscript base, but not as an assignment or increment
+  target, and dereferencing a multi-dimensional array name
+  (`*a`) likewise yields the base address. Subscripting
+  past the last dimension is a compile error. `sizeof(a)`
+  is the total element count, `sizeof(a[i])` the product
+  of the remaining dimensions. A flat list fills row-major
+  and a list of lists fills row by row, both zero-filling;
+  mixing flat and nested lists in one initializer, string
+  initializers, and unsized dimensions after the first are
+  compile errors. Only the outermost dimension may be
+  unsized, sized by the initializer.
 - Pointers: there are no pointer types; a pointer is a byte
   holding a tape index. `&x` is the index of `x`'s cell, `*p`
   loads or stores the cell at the index `p` holds (a dispatch
   over all 256 byte addresses), a bare array name decays to
   `&a[0]`, and pointer arithmetic and comparison are ordinary
-  byte arithmetic (wrapping). Only the first 256 tape cells are
+  byte arithmetic (wrapping). A pointer to a pointer (`int
+  **pp`) holds the address of a pointer cell: `**pp` loads
+  through both levels, `pp[i][j]` and `(*pp)[j]` step
+  through the pointer each level loads, and `*pp` is an
+  address-valued `scanf` destination. A third `*` is an
+  error. Only the first 256 tape cells are
   addressable: taking the address of storage at cell 256 or
   above is a compile error, while static-index array access
   works anywhere. Deeply nested programs can exhaust the
@@ -233,6 +257,14 @@ call site.
   parameters, which receive an address. Array parameters decay to
   pointers, and the size is discarded. Arguments evaluate
   left-to-right into temporaries before any parameter is bound.
+  A multi-dimensional array parameter decays to a pointer to
+  its first row: the outermost size is discarded and the inner
+  dimensions are the stride, so `m[i][j]` addresses through
+  them. Pointer-to-pointer parameters (`int **pp`) receive an
+  address like other pointers. A prototype must agree with its
+  definition in pointer depth and in the inner dimensions of
+  array parameters, as well as in the existing signature
+  rules.
   A wrong number of arguments is a compile error.
 - Recursion, direct or mutual, is a compile error: a function on
   the expansion stack may not be called again. (An uncalled
@@ -296,13 +328,16 @@ nothing.
   behind a variable of the same name: the alias always wins in
   specifier position, a documented deviation from C scoping.
 - One declarator per declaration, no initializer, no comma list.
-  The declarator may add `*` or `[]` to a scalar alias; adding
-  `*` to a pointer alias or `[]` to an array alias is an error
-  (pointer-to-pointer and multi-dimensional arrays are
-  unsupported). Chained aliases (`typedef MyInt Alias;`) expand
-  transitively. Qualifiers may precede or follow the alias name
-  (`const T`, `T const`); any other specifier word beside an
-  alias name is an error.
+  The declarator may add `*` or `[]` to a scalar alias, and
+  the additions compose with the aliased flags: a pointer
+  alias plus `*` is depth 2, and an array alias plus `[N]`
+  prepends a dimension (`typedef char A[3]; A b[2];` is a
+  2x3 array). Adding `*` to a depth-2 alias is an error
+  (a third level is not supported). Chained aliases
+  (`typedef MyInt Alias;`) expand transitively. Qualifiers
+  may precede or follow the alias name (`const T`,
+  `T const`); any other specifier word beside an alias name
+  is an error.
 - Array aliases carry an integer-literal size, checked at the
   definition (`typedef char A[3];`), or are unsized (`typedef
   char S[];`, sized by a string initializer at each use).

@@ -102,6 +102,28 @@ interval discipline, with these additional rules:
   `%s` argument. Flat and nested initializers both appear;
   zero fill is folded into the array interval.
 
+## Validation
+
+The oracle fixtures `ptrptr` and `multidim` agree with g++;
+one-dimensional emission is byte-identical for every prior
+fixture. The 500-seed differential sweep after the generator
+extensions passed 460 seeds, skipped 40 (8.0%, within the
+10% cap), and mismatched none. The skip rate rose from
+4.8% (24 skips) before this batch: the new constructs cost
+cells, and the cap headroom is now 10 seeds. The sweep
+also found two generator bugs, fixed in the generator, not
+the compiler: whole-array decay for a two-dimensional
+array must go through row 0 (`int *p = a;` is a pointer
+to a row, not an element pointer), and `sizeof` results
+must not appear in braced-list elements (a `size_t` value
+narrows there in C++). One real compiler bug surfaced on
+the way: the offset planner asserted equal stride and
+index counts, which row chains violate; it now allows a
+prefix. The one `sizeof` divergence the sweep exposed was
+in the fixture, not the compiler: `sizeof(int[2][3])` is
+24 in C and 6 in the byte model, so the fixture measures
+`sizeof` on a `char` array.
+
 ## Rejected
 
 - Recording depth in `Memory`: no code-generation decision
