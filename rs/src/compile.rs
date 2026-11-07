@@ -81,6 +81,14 @@ enum SubBase {
 /// parameter (with the dimensions after the first, the
 /// stride), or a pointer-valued expression whose value is an
 /// address (a pointer variable, a dereference, a call, ...).
+/// Planned subscript-chain offset: a static cell offset
+/// when every index is constant, or the constant prefix sum
+/// to fold into the emitted variable offset otherwise.
+enum ChainOffsetPlan {
+    Static(i32),
+    Dynamic(i64),
+}
+
 enum ChainClass<'a> {
     Array {
         base: i32,
@@ -743,31 +751,50 @@ impl Emitter {
     /// Compile an array declaration: reserve consecutive cells and
     /// clear them, so elements start at zero (unlike C's indeterminate
     /// values; the tape starts zeroed, but a reclaimed index could
-    /// otherwise carry a stale temporary). The size must be a
-    /// positive integer literal. Redeclaring the same array with
-    /// the same size re-clears it.
+    /// otherwise carry a stale temporary). Every size must be a
+    /// positive integer literal; only the outermost dimension may
+    /// be unsized, sized by its initializer. Redeclaring the same
+    /// array with the same total size re-clears it.
     fn compile_array_decl(&mut self, init: &InitDecl) -> Result<(), CompileError> {
         if self.memory.has_var(&init.name) {
             return Err(err("cannot redeclare a variable as an array"));
         }
-        // Multi-dimensional declarations land with the subscript
-        // support below; until then they are rejected here, as
-        // the parser used to reject them outright.
-        if init.dims.len() > 1 {
-            return Err(err("multi-dimensional arrays are not supported"));
+        if init.dims.is_empty() {
+            return Err(err("array declarator has no dimensions"));
+        }
+        // Resolve the dimension list: every dimension after
+        // the first must be a sized integer literal.
+        let mut sized: Vec<Option<usize>> = Vec::with_capacity(init.dims.len());
+        for (k, dim) in init.dims.iter().enumerate() {
+            match dim {
+                None => {
+                    if k == 0 {
+                        sized.push(None);
+                    } else {
+                        return Err(err(
+                            "only the first array dimension may be unsized",
+                        ));
+                    }
+                }
+                Some(Expr::Int(bytes)) => {
+                    let len = int_literal_value(bytes);
+                    if len <= 0 {
+                        return Err(err("array size must be positive"));
+                    }
+                    sized.push(Some(len as usize));
+                }
+                Some(_) => {
+                    return Err(err("array size must be an integer literal"));
+                }
+            }
         }
         // A string initializer fills the elements (plus a NUL when
         // it fits); a braced list fills them in order, zero-filling
         // the rest; any other initializer is rejected, as before.
         // A list holding exactly one string literal is a string
         // initializer (`char a[] = {"hi"}`), sized with its NUL.
-        // One dimension only here (see the length check
-        // above); `None` is an unsized dimension.
-        let array_unsized = matches!(init.dims.first(), Some(None));
-        let array_len_expr = match init.dims.first() {
-            Some(Some(e)) => Some(e),
-            _ => None,
-        };
+        // `None` is an unsized dimension.
+        let array_unsized = sized[0].is_none();
         let mut list_init: Option<&Vec<Expr>> = None;
         let string_init = match &init.init {
             Some(Expr::StringLit { cooked, .. }) => Some(cooked.clone()),
@@ -786,15 +813,46 @@ impl Emitter {
             Some(_) => return Err(err("array initializers are not supported")),
             None => None,
         };
-        let len = if array_unsized {
+        // String initializers size only one-dimensional
+        // arrays; a list holding exactly one string literal is
+        // a string initializer too, so both shapes are
+        // rejected for more dimensions.
+        if sized.len() > 1 && string_init.is_some() {
+            return Err(err(
+                "string initializer is not supported for multi-dimensional arrays",
+            ));
+        }
+        let stride: usize = sized[1..]
+            .iter()
+            .map(|d| d.expect("sized dimension"))
+            .product();
+        let (dims, len) = if array_unsized {
             match &string_init {
-                Some(cooked) => cooked.len() + 1,
+                Some(cooked) => {
+                    let len = cooked.len() + 1;
+                    (vec![len], len)
+                }
                 None => match list_init {
                     Some(elems) => {
                         if elems.is_empty() {
                             return Err(err("array size must be positive"));
                         }
-                        elems.len()
+                        let outer =
+                            if elems.iter().any(|e| matches!(e, Expr::InitList(_))) {
+                                elems.len()
+                            } else {
+                                elems.len().div_ceil(stride)
+                            };
+                        let len = outer
+                            .checked_mul(stride)
+                            .ok_or_else(|| err("array is too large"))?;
+                        let mut dims = vec![outer];
+                        dims.extend(
+                            sized[1..]
+                                .iter()
+                                .map(|d| d.expect("sized dimension")),
+                        );
+                        (dims, len)
                     }
                     None => {
                         return Err(err("unsized array requires a string initializer"));
@@ -802,15 +860,16 @@ impl Emitter {
                 },
             }
         } else {
-            let len_expr = array_len_expr.expect("array declarator");
-            let len = match len_expr {
-                Expr::Int(bytes) => int_literal_value(bytes),
-                _ => return Err(err("array size must be an integer literal")),
-            };
-            if len <= 0 {
-                return Err(err("array size must be positive"));
+            let dims: Vec<usize> = sized
+                .iter()
+                .map(|d| d.expect("sized dimension"))
+                .collect();
+            let mut len: usize = 1;
+            for d in &dims {
+                len = len
+                    .checked_mul(*d)
+                    .ok_or_else(|| err("array is too large"))?;
             }
-            let len = len as usize;
             if let Some(cooked) = &string_init {
                 if cooked.len() > len {
                     return Err(err("string initializer is too long"));
@@ -821,15 +880,26 @@ impl Emitter {
                     return Err(err("initializer list is too long"));
                 }
             }
-            len
+            (dims, len)
         };
-        self.memory.record_array_dims(&init.name, vec![len]);
+        self.memory.record_array_dims(&init.name, dims.clone());
         // Fill the elements: string bytes plus zero fill (a NUL
         // terminator when it fits), list elements in source order
         // plus zero fill, or plain clearing. Setting every element
         // covers clearing, so the string path needs no separate
         // pass. List elements evaluate left to right, as written.
         let fill = |em: &mut Self, base: i32| -> Result<(), CompileError> {
+            if dims.len() > 1 {
+                return match list_init {
+                    Some(elems) => em.fill_list(base, &dims, elems),
+                    None => {
+                        for cell in base..base + len as i32 {
+                            em.set_value(cell, 0);
+                        }
+                        Ok(())
+                    }
+                };
+            }
             if let Some(elems) = list_init {
                 for (offset, elem) in elems.iter().enumerate() {
                     if matches!(elem, Expr::InitList(_)) {
@@ -864,6 +934,71 @@ impl Emitter {
         }
         let base = self.memory.alloc_array(&init.name, len);
         fill(self, base)?;
+        Ok(())
+    }
+
+    /// Fill a multi-dimensional array from a braced list: a list
+    /// of lists fills row by row, zero-filling each row; a flat
+    /// list fills row-major, zero-filling at the end. Mixing the
+    /// two in one list, a string element, a list longer than
+    /// the array, or nesting deeper than the dimensions is an
+    /// error. Elements evaluate left to right, in source order.
+    fn fill_list(
+        &mut self,
+        base: i32,
+        dims: &[usize],
+        elems: &[Expr],
+    ) -> Result<(), CompileError> {
+        debug_assert!(!dims.is_empty());
+        if dims.len() == 1
+            && elems
+                .iter()
+                .any(|e| matches!(e, Expr::InitList(_)))
+        {
+            return Err(err("nested initializer lists are not supported"));
+        }
+        if elems
+            .iter()
+            .any(|e| matches!(e, Expr::StringLit { .. }))
+        {
+            return Err(err(
+                "string initializer is not supported for multi-dimensional arrays",
+            ));
+        }
+        let stride: usize = dims[1..].iter().product();
+        let total: usize = dims.iter().product();
+        let all_nested = elems.iter().all(|e| matches!(e, Expr::InitList(_)));
+        let any_nested = elems.iter().any(|e| matches!(e, Expr::InitList(_)));
+        if any_nested && !all_nested {
+            return Err(err(
+                "mixed nested and flat initializer lists are not supported",
+            ));
+        }
+        if all_nested {
+            if elems.len() > dims[0] {
+                return Err(err("initializer list is too long"));
+            }
+            for (row, elem) in elems.iter().enumerate() {
+                let Expr::InitList(sub) = elem else {
+                    return Err(err("initializer list is too long"));
+                };
+                self.fill_list(base + (row * stride) as i32, &dims[1..], sub)?;
+            }
+            for cell in base + (elems.len() * stride) as i32..base + total as i32 {
+                self.set_value(cell, 0);
+            }
+            return Ok(());
+        }
+        if elems.len() > total {
+            return Err(err("initializer list is too long"));
+        }
+        for (offset, elem) in elems.iter().enumerate() {
+            let src = self.compile_expr(elem)?;
+            self.copy_value(src, base + offset as i32);
+        }
+        for cell in base + elems.len() as i32..base + total as i32 {
+            self.set_value(cell, 0);
+        }
         Ok(())
     }
 
@@ -913,6 +1048,28 @@ impl Emitter {
             Expr::Paren(inner) => self.array_size_of(inner),
             // A string literal sizes as its bytes plus the NUL.
             Expr::StringLit { cooked, .. } => Some(cooked.len() + 1),
+            // A subscript chain sizes as the product of the
+            // dimensions it leaves: a row of a two-dimensional
+            // array sizes as the row length, a full element
+            // as 1. Chains longer than the dimensions have no
+            // size here (the operand is unevaluated).
+            Expr::Index { .. } => match self.classify_chain(e) {
+                Ok(ChainClass::Array { dims, indices, .. }) => {
+                    if indices.len() > dims.len() {
+                        None
+                    } else {
+                        Some(dims[indices.len()..].iter().product())
+                    }
+                }
+                Ok(ChainClass::ParamArray { row_dims, indices, .. }) => {
+                    if indices.len() > row_dims.len() + 1 {
+                        None
+                    } else {
+                        Some(row_dims[indices.len().saturating_sub(1)..].iter().product())
+                    }
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -1077,59 +1234,141 @@ impl Emitter {
         Err(err("unsupported subscript base"))
     }
 
-    /// Cell holding the tape index of an element: `base + index` as
-    /// byte arithmetic. A constant array index is bounds-checked;
-    /// anything else wraps like all byte arithmetic.
-    fn index_address_single(&mut self, base: &Expr, index: &Expr) -> Result<i32, CompileError> {
-        match self.subscript_base(base)? {
-            SubBase::Array(cell_base, len) => {
-                if let Some(k) = Self::const_index(index) {
-                    if k < 0 || k as usize >= len {
+    /// Strides for a dimension list: stride[k] is the product
+    /// of the dimensions after k, so the linear offset is the
+    /// sum of index[k] * stride[k].
+    fn strides_for(dims: &[usize]) -> Vec<usize> {
+        let mut out = vec![1usize; dims.len()];
+        let mut acc = 1usize;
+        for k in (0..dims.len()).rev() {
+            out[k] = acc;
+            acc = acc.saturating_mul(dims[k]);
+        }
+        out
+    }
+
+    /// Planned chain offset: `Static` when every index is
+    /// constant (bounds-checked per dimension), `Dynamic`
+    /// carrying the constant prefix sum when any index is
+    /// variable. Pure: no cells are allocated and no code is
+    /// emitted, so callers can allocate in the same order as
+    /// the single-step paths did.
+    fn plan_chain_offset(
+        strides: &[usize],
+        bounds: &[usize],
+        indices: &[&Expr],
+    ) -> Result<ChainOffsetPlan, CompileError> {
+        debug_assert_eq!(strides.len(), indices.len());
+        debug_assert_eq!(bounds.len(), indices.len());
+        let mut static_sum: i64 = 0;
+        let mut dynamic = false;
+        for (k, index) in indices.iter().enumerate() {
+            match Self::const_index(index) {
+                Some(v) => {
+                    if v < 0 || v as usize >= bounds[k] {
                         return Err(err("array index out of bounds"));
                     }
-                    self.address_const(cell_base + k)
-                } else {
-                    let base_cell = self.address_const(cell_base)?;
-                    let idx = self.compile_expr(index)?;
-                    Ok(self.add_values(base_cell, idx))
+                    static_sum += v as i64 * strides[k] as i64;
                 }
+                None => dynamic = true,
             }
-            SubBase::Pointer(ptr_cell) => {
-                if let Some(k) = Self::const_index(index) {
-                    if k == 0 {
-                        Ok(ptr_cell)
-                    } else {
-                        let k_cell = self.const_value(k as u8);
-                        Ok(self.add_values(ptr_cell, k_cell))
-                    }
-                } else {
-                    let idx = self.compile_expr(index)?;
-                    Ok(self.add_values(ptr_cell, idx))
-                }
+        }
+        if dynamic {
+            Ok(ChainOffsetPlan::Dynamic(static_sum))
+        } else {
+            Ok(ChainOffsetPlan::Static(static_sum as i32))
+        }
+    }
+
+    /// Emit the variable part of a planned offset: compile each
+    /// variable index in order, multiply by its constant
+    /// stride, add the terms, and fold the constant prefix in
+    /// byte arithmetic (it wraps like every value here).
+    fn emit_chain_offset(
+        &mut self,
+        strides: &[usize],
+        indices: &[&Expr],
+        static_prefix: i64,
+    ) -> Result<i32, CompileError> {
+        let mut acc: Option<i32> = None;
+        for (k, index) in indices.iter().enumerate() {
+            if Self::const_index(index).is_some() {
+                continue;
             }
+            let idx = self.compile_expr(index)?;
+            let stride = strides[k];
+            let term = if stride == 1 {
+                idx
+            } else {
+                let cell = self.const_value(stride as u8);
+                self.multiply_values(idx, cell)
+            };
+            acc = Some(match acc {
+                None => term,
+                Some(prev) => self.add_values(prev, term),
+            });
+        }
+        let acc = acc.expect("a dynamic offset has a variable index");
+        if static_prefix == 0 {
+            Ok(acc)
+        } else {
+            let prefix = self.const_value(static_prefix as u8);
+            Ok(self.add_values(prefix, acc))
         }
     }
 
     /// Cell holding the tape index of the storage named by a
-    /// whole subscript expression: a single-step array or
-    /// pointer subscript goes through the existing path;
-    /// a pointer-valued chain goes through the chain address.
-    /// Multi-dimensional array chains land with the array
-    /// subscript support below; until then they are rejected
-    /// here, as the subscript helpers used to reject them.
+    /// whole subscript expression: array chains address
+    /// `base + linear offset` in byte arithmetic, parameter
+    /// chains add the offset to the runtime base address, and
+    /// pointer-valued chains step through loads.
     fn index_address(&mut self, e: &Expr) -> Result<i32, CompileError> {
         match self.classify_chain(e)? {
-            ChainClass::Array { indices, .. } | ChainClass::ParamArray { indices, .. }
-                if indices.len() > 1 =>
-            {
-                Err(err("multi-dimensional arrays are not supported"))
+            ChainClass::Array { base, dims, indices } => {
+                if indices.len() > dims.len() {
+                    return Err(err("too many subscripts"));
+                }
+                let strides = Self::strides_for(&dims);
+                match Self::plan_chain_offset(&strides, &dims, &indices)? {
+                    ChainOffsetPlan::Static(off) => self.address_const(base + off),
+                    ChainOffsetPlan::Dynamic(prefix) => {
+                        let base_cell = self.address_const(base)?;
+                        let off =
+                            self.emit_chain_offset(&strides, &indices, prefix)?;
+                        Ok(self.add_values(base_cell, off))
+                    }
+                }
             }
-            ChainClass::Array { .. } => match e {
-                Expr::Index { base, index } => self.index_address_single(base, index),
-                _ => Err(err("unsupported subscript base")),
-            },
-            ChainClass::ParamArray { .. } => {
-                Err(err("multi-dimensional arrays are not supported"))
+            ChainClass::ParamArray {
+                cell,
+                row_dims,
+                indices,
+            } => {
+                if indices.len() > row_dims.len() + 1 {
+                    return Err(err("too many subscripts"));
+                }
+                let mut full = vec![1usize];
+                full.extend_from_slice(&row_dims);
+                let strides = Self::strides_for(&full);
+                let mut bounds = vec![usize::MAX];
+                for k in 1..indices.len() {
+                    bounds.push(row_dims[k - 1]);
+                }
+                match Self::plan_chain_offset(&strides, &bounds, &indices)? {
+                    ChainOffsetPlan::Static(off) => {
+                        if off == 0 {
+                            Ok(cell)
+                        } else {
+                            let off_cell = self.const_value(off as u8);
+                            Ok(self.add_values(cell, off_cell))
+                        }
+                    }
+                    ChainOffsetPlan::Dynamic(prefix) => {
+                        let off =
+                            self.emit_chain_offset(&strides, &indices, prefix)?;
+                        Ok(self.add_values(cell, off))
+                    }
+                }
             }
             ChainClass::Pointer { root, indices } => {
                 self.pointer_chain_address(root, &indices)
@@ -1176,6 +1415,52 @@ impl Emitter {
         }
     }
 
+    /// Store destination for a multi-dimensional array element
+    /// (chain length equals dimension count): a static cell for
+    /// constant indices, a range dispatch over the array's
+    /// cells for variable ones (an out-of-range variable
+    /// offset stores nowhere, as for one dimension).
+    fn array_element_target(
+        &mut self,
+        base: i32,
+        dims: &[usize],
+        indices: &[&Expr],
+    ) -> Result<StoreTarget, CompileError> {
+        let strides = Self::strides_for(dims);
+        let total: usize = dims.iter().product();
+        match Self::plan_chain_offset(&strides, dims, indices)? {
+            ChainOffsetPlan::Static(off) => Ok(StoreTarget::Cell(base + off)),
+            ChainOffsetPlan::Dynamic(prefix) => {
+                let counter = self.emit_chain_offset(&strides, indices, prefix)?;
+                let n = total.min(256) as i32;
+                Ok(StoreTarget::Range {
+                    counter,
+                    cells: (base..base + n).collect(),
+                })
+            }
+        }
+    }
+
+    /// Value cell for a multi-dimensional array element: the
+    /// static cell itself for constant indices, a range load
+    /// for variable ones.
+    fn array_element_value(
+        &mut self,
+        base: i32,
+        dims: &[usize],
+        indices: &[&Expr],
+    ) -> Result<i32, CompileError> {
+        match self.array_element_target(base, dims, indices)? {
+            StoreTarget::Cell(cell) => Ok(cell),
+            StoreTarget::Range { counter, cells } => {
+                self.load_from_cells(counter, &cells)
+            }
+            StoreTarget::Any { .. } => {
+                unreachable!("array_element_target never builds an Any target")
+            }
+        }
+    }
+
     /// Store destination for an assignment target: a static cell,
     /// or a runtime address plus the cells a dispatch searches
     /// (an array range, or every byte address when absent).
@@ -1190,30 +1475,55 @@ impl Emitter {
             }
             Expr::Paren(inner) => self.store_target(inner),
             Expr::Index { base, index } => match self.classify_chain(e)? {
-                ChainClass::Array { .. } => match self.subscript_base(base)? {
-                    SubBase::Array(cell_base, len) => {
-                        if Self::const_index(index).is_some() {
-                            Ok(StoreTarget::Cell(self.static_index_cell(base, index)?))
-                        } else {
-                            // The dispatch counts the offset down, so the
-                            // counter is the index value itself; no
-                            // address is materialized, and the array may
-                            // live anywhere on the tape.
-                            let counter = self.compile_expr(index)?;
-                            let n = len.min(256) as i32;
-                            Ok(StoreTarget::Range {
-                                counter,
-                                cells: (cell_base..cell_base + n).collect(),
-                            })
+                ChainClass::Array {
+                    base: cell_base,
+                    dims,
+                    indices,
+                } => {
+                    if indices.len() > dims.len() {
+                        return Err(err("too many subscripts"));
+                    }
+                    if indices.len() < dims.len() {
+                        return Err(err("cannot assign to an array"));
+                    }
+                    if dims.len() == 1 {
+                        match self.subscript_base(base)? {
+                            SubBase::Array(cell_base, len) => {
+                                if Self::const_index(index).is_some() {
+                                    Ok(StoreTarget::Cell(
+                                        self.static_index_cell(base, index)?,
+                                    ))
+                                } else {
+                                    // The dispatch counts the offset down, so the
+                                    // counter is the index value itself; no
+                                    // address is materialized, and the array may
+                                    // live anywhere on the tape.
+                                    let counter = self.compile_expr(index)?;
+                                    let n = len.min(256) as i32;
+                                    Ok(StoreTarget::Range {
+                                        counter,
+                                        cells: (cell_base..cell_base + n).collect(),
+                                    })
+                                }
+                            }
+                            SubBase::Pointer(_) => {
+                                let addr = self.index_address(e)?;
+                                Ok(StoreTarget::Any { addr })
+                            }
                         }
+                    } else {
+                        self.array_element_target(cell_base, &dims, &indices)
                     }
-                    SubBase::Pointer(_) => {
-                        let addr = self.index_address(e)?;
-                        Ok(StoreTarget::Any { addr })
+                }
+                ChainClass::ParamArray { row_dims, indices, .. } => {
+                    if indices.len() > row_dims.len() + 1 {
+                        return Err(err("too many subscripts"));
                     }
-                },
-                ChainClass::ParamArray { .. } => {
-                    Err(err("multi-dimensional arrays are not supported"))
+                    if indices.len() <= row_dims.len() {
+                        return Err(err("cannot assign to an array"));
+                    }
+                    let addr = self.index_address(e)?;
+                    Ok(StoreTarget::Any { addr })
                 }
                 ChainClass::Pointer { root, indices } => {
                     let addr = self.pointer_chain_address(root, &indices)?;
@@ -1272,15 +1582,18 @@ impl Emitter {
                 }
             }
             Expr::Paren(inner) => self.static_address_cell(inner),
-            Expr::Index { base, index } => match self.subscript_base(base).ok()? {
-                SubBase::Array(cell_base, len) => {
-                    let k = Self::const_index(index)?;
-                    if k < 0 || k as usize >= len {
+            Expr::Index { .. } => match self.classify_chain(e) {
+                Ok(ChainClass::Array { base, dims, indices }) => {
+                    if indices.len() > dims.len() {
                         return None;
                     }
-                    Some(cell_base + k)
+                    let strides = Self::strides_for(&dims);
+                    match Self::plan_chain_offset(&strides, &dims, &indices) {
+                        Ok(ChainOffsetPlan::Static(off)) => Some(base + off),
+                        _ => None,
+                    }
                 }
-                SubBase::Pointer(_) => None,
+                _ => None,
             },
             _ => None,
         }
@@ -2143,27 +2456,52 @@ impl Emitter {
             // over the array's range (or every address, for a
             // pointer base).
             Expr::Index { base, index } => match self.classify_chain(e)? {
-                ChainClass::Array { .. } => match self.subscript_base(base)? {
-                    SubBase::Array(cell_base, len) => {
-                        if Self::const_index(index).is_some() {
-                            self.static_index_cell(base, index)
-                        } else {
-                            // As in `store_target`: the dispatch counts
-                            // the offset itself down.
-                            let counter = self.compile_expr(index)?;
-                            let n = len.min(256) as i32;
-                            let cells: Vec<i32> =
-                                (cell_base..cell_base + n).collect();
-                            self.load_from_cells(counter, &cells)
+                ChainClass::Array {
+                    base: cell_base,
+                    dims,
+                    indices,
+                } => {
+                    if indices.len() > dims.len() {
+                        return Err(err("too many subscripts"));
+                    }
+                    if indices.len() < dims.len() {
+                        // A short chain names a row, which decays
+                        // to its address.
+                        return self.index_address(e);
+                    }
+                    if dims.len() == 1 {
+                        match self.subscript_base(base)? {
+                            SubBase::Array(cell_base, len) => {
+                                if Self::const_index(index).is_some() {
+                                    self.static_index_cell(base, index)
+                                } else {
+                                    // As in `store_target`: the dispatch counts
+                                    // the offset itself down.
+                                    let counter = self.compile_expr(index)?;
+                                    let n = len.min(256) as i32;
+                                    let cells: Vec<i32> =
+                                        (cell_base..cell_base + n).collect();
+                                    self.load_from_cells(counter, &cells)
+                                }
+                            }
+                            SubBase::Pointer(_) => {
+                                let addr = self.index_address(e)?;
+                                self.load_through(addr)
+                            }
                         }
+                    } else {
+                        self.array_element_value(cell_base, &dims, &indices)
                     }
-                    SubBase::Pointer(_) => {
-                        let addr = self.index_address(e)?;
-                        self.load_through(addr)
+                }
+                ChainClass::ParamArray { row_dims, indices, .. } => {
+                    if indices.len() > row_dims.len() + 1 {
+                        return Err(err("too many subscripts"));
                     }
-                },
-                ChainClass::ParamArray { .. } => {
-                    Err(err("multi-dimensional arrays are not supported"))
+                    if indices.len() <= row_dims.len() {
+                        return self.index_address(e);
+                    }
+                    let addr = self.index_address(e)?;
+                    self.load_through(addr)
                 }
                 ChainClass::Pointer { root, indices } => {
                     let addr = self.pointer_chain_address(root, &indices)?;
@@ -2181,15 +2519,20 @@ impl Emitter {
         match e {
             Expr::Paren(inner) => self.string_bound(inner),
             Expr::Ident(name) => self.memory.array_info(name),
-            Expr::Index { base, index } => match self.subscript_base(base).ok()? {
-                SubBase::Array(cell_base, len) => {
-                    let k = Self::const_index(index)?;
-                    if k < 0 || k as usize >= len {
+            Expr::Index { .. } => match self.classify_chain(e) {
+                Ok(ChainClass::Array { base, dims, indices }) => {
+                    if indices.len() > dims.len() {
                         return None;
                     }
-                    Some((cell_base + k, len - k as usize))
+                    let strides = Self::strides_for(&dims);
+                    let off = match Self::plan_chain_offset(&strides, &dims, &indices) {
+                        Ok(ChainOffsetPlan::Static(off)) => off,
+                        _ => return None,
+                    };
+                    let total: usize = dims.iter().product();
+                    Some((base + off, total - off as usize))
                 }
-                SubBase::Pointer(_) => None,
+                _ => None,
             },
             _ => None,
         }
@@ -2979,6 +3322,38 @@ mod tests {
     }
 
     #[test]
+    fn multi_dimensional_arrays_run() {
+        // Nested and flat lists, unsized outer dimensions,
+        // typedef-composed dimensions, row decay, a
+        // multi-dimensional parameter, and `sizeof` of the
+        // whole array and of a row.
+        let bf = compile(
+            b"typedef int Row[3]; \
+              int get(int m[][3], int i, int j) { return m[i][j]; } \
+              int main() { \
+                int a[2][3] = {{1, 2, 3}, {4, 5, 6}}; \
+                int b[2][3] = {7, 8, 9, 10}; \
+                int c[][2] = {{1, 2}, {3, 4}, {5, 6}}; \
+                Row g[2] = {{9, 8, 7}, {6, 5, 4}}; \
+                int i = 1; int j = 2; \
+                int *p = a[1]; \
+                printf(\"%d,%d,%d,%d,\", a[0][0], a[1][2], a[i][j], b[1][1]); \
+                printf(\"%d,%d,%d,\", c[2][1], c[0][1], g[1][0]); \
+                printf(\"%d,%d,\", sizeof(a), sizeof(a[0])); \
+                printf(\"%d,\", get(a, 1, 0)); \
+                p[2] = 99; \
+                printf(\"%d,\", a[1][2]); \
+                int *q = *a; \
+                printf(\"%d\", *q); \
+              }",
+        )
+        .expect("multi-dimensional program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"1,6,6,0,6,2,6,6,3,4,99,1");
+    }
+
+    #[test]
     fn enums_compile_and_run() {
         let bf = compile(
             b"enum Color { RED, GREEN = 5, BLUE }; \
@@ -3646,7 +4021,27 @@ mod tests {
             ),
             (
                 b"int main() { char a[2]; printf(\"%d\", a[0][1]); }",
-                "multi-dimensional arrays are not supported",
+                "too many subscripts",
+            ),
+            (
+                b"int main() { int a[2][]; return 0; }",
+                "only the first array dimension may be unsized",
+            ),
+            (
+                b"int main() { char a[2][3] = \"hi\"; return 0; }",
+                "string initializer is not supported for multi-dimensional arrays",
+            ),
+            (
+                b"int main() { int a[2][2] = {{1, 2}, 3}; return 0; }",
+                "mixed nested and flat initializer lists are not supported",
+            ),
+            (
+                b"int main() { int a[2][2]; a[0] = 1; return 0; }",
+                "cannot assign to an array",
+            ),
+            (
+                b"int main() { int a[2][2][2]; a[0][1][2][3] = 1; return 0; }",
+                "too many subscripts",
             ),
             (b"int main() { char a[0]; }", "array size must be positive"),
             (

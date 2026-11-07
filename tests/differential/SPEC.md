@@ -84,9 +84,11 @@ source order, e.g.
   multi-word.
 - `postfix(op)`: `[e]` (`++`/`--`); `call`: `[callee, args...]`
   (callee is any postfix expression).
-- `index`: `[base, index]` — subscript; `base` must name an array or a
-  pointer. Repeated subscripts nest (`a[0][1]` parses and is rejected
-  in code generation, as multi-dimensional arrays are not supported).
+- `index`: `[base, index]` — subscript; chains nest (`a[i][j]`
+  for multi-dimensional arrays, `pp[i][j]` stepping through the
+  pointer each level loads). A chain longer than the array's
+  dimensions, or subscripting a scalar element, is rejected in
+  code generation.
 - `paren`: `[e]` — parentheses are kept as nodes, not transparent.
 - `int`: raw literal text — decimal, octal (`0` prefix; 8/9 there are a
   tokenizer error), hex (`0x`), binary (`0b`), with optional `u`/`l`
