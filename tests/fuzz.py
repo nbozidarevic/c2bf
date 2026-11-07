@@ -149,21 +149,21 @@ class Gen:
 
     # --- pure expressions: (text, lo, hi) ---------------------------
 
-    def expr(self, depth, allow_call=True):
+    def expr(self, depth, allow_call=True, allow_sizeof=True):
         rng = self.rng
         if depth <= 0 or rng.random() < 0.35:
             return self.leaf()
         roll = rng.random()
         if roll < 0.55:
-            return self.binop(depth)
+            return self.binop(depth, allow_sizeof)
         if roll < 0.68:
-            return self.ternary(depth)
+            return self.ternary(depth, allow_sizeof)
         if roll < 0.78 and allow_call and self.helpers:
-            return self.call(depth)
+            return self.call(depth, allow_sizeof)
         if roll < 0.86:
-            inner = self.expr(depth - 1, allow_call)
+            inner = self.expr(depth - 1, allow_call, allow_sizeof)
             return (f"({inner[0]})", inner[1], inner[2])
-        return self.unop(depth)
+        return self.unop(depth, allow_sizeof)
 
     def leaf(self):
         rng = self.rng
@@ -178,12 +178,12 @@ class Gen:
                         20, 24, 31, 32, 48, 64, 100, 127, 200, 255])
         return (str(v), v, v)
 
-    def binop(self, depth):
+    def binop(self, depth, allow_sizeof=True):
         rng = self.rng
         op = rng.choice(BINOPS)
         for _ in range(6):
-            l = self.expr(depth - 1)
-            r = self.expr(depth - 1)
+            l = self.expr(depth - 1, allow_sizeof=allow_sizeof)
+            r = self.expr(depth - 1, allow_sizeof=allow_sizeof)
             if op in ("+", "-", "*"):
                 iv = {"+": iv_add, "-": iv_sub, "*": iv_mul}[op](l[1:], r[1:])
             elif op in ("/", "%"):
@@ -224,33 +224,38 @@ class Gen:
             return (f"({l[0]} {op} {r[0]})", *iv)
         return self.leaf()
 
-    def ternary(self, depth):
-        cond = self.expr(depth - 1)
-        a = self.expr(depth - 1)
-        b = self.expr(depth - 1)
+    def ternary(self, depth, allow_sizeof=True):
+        cond = self.expr(depth - 1, allow_sizeof=allow_sizeof)
+        a = self.expr(depth - 1, allow_sizeof=allow_sizeof)
+        b = self.expr(depth - 1, allow_sizeof=allow_sizeof)
         iv = iv_join(a[1:], b[1:])
         if not fits(*iv):
             return a if fits(*a[1:]) else self.leaf()
         return (f"({cond[0]} ? {a[0]} : {b[0]})", *iv)
 
-    def call(self, depth):
+    def call(self, depth, allow_sizeof=True):
         name, ret_iv = self.rng.choice(list(self.helpers.items()))
-        arg = self.expr(depth - 1, allow_call=False)
+        arg = self.expr(depth - 1, allow_call=False,
+                        allow_sizeof=allow_sizeof)
         return (f"{name}({arg[0]})", *ret_iv)
 
-    def capped(self, depth, cap):
+    def capped(self, depth, cap, allow_sizeof=True):
         """Expression whose interval fits in [0, cap] (for `char`
         targets: C converts larger values implementation-defined,
-        so only 0..127 may flow into one)."""
+        so only 0..127 may flow into one). With
+        `allow_sizeof=False`, no `sizeof` subexpression is
+        emitted: `sizeof` has type `size_t`, and a `size_t`
+        value in a braced list element is a narrowing error
+        in C++, even when the value fits."""
         for _ in range(8):
-            e = self.expr(depth)
+            e = self.expr(depth, allow_sizeof=allow_sizeof)
             if e[2] <= cap:
                 return e
         v = self.rng.randint(0, cap)
         return (str(v), v, v)
 
-    def unop(self, depth):
-        inner = self.expr(depth - 1)
+    def unop(self, depth, allow_sizeof=True):
+        inner = self.expr(depth - 1, allow_sizeof=allow_sizeof)
         roll = self.rng.random()
         if roll < 0.45:
             return (f"(!{inner[0]})", 0, 1)
@@ -260,21 +265,24 @@ class Gen:
             return (f"((char){inner[0]})", *inner[1:])
         # sizeof only for char-typed storage: sizeof(int) is 4
         # in C but 1 here, while sizeof(char) is 1 in both, and
-        # sizeof(char[N]) is N in both.
-        cands = [n for n in self.chartypes]
-        if cands and roll < 0.85:
-            return (f"(sizeof({self.rng.choice(cands)}))", 1, 1)
-        char_arrays = [n for n, a in self.arrays.items() if a[3]]
-        if char_arrays:
-            name = self.rng.choice(char_arrays)
-            return (f"(sizeof({name}))", self.arrays[name][0], self.arrays[name][0])
-        char2d = [n for n in self.mdims
-                  if self.arrays[n][3]]
-        if char2d and roll < 0.92:
-            name = self.rng.choice(char2d)
-            cols = self.mdims[name][1]
-            r = self.rng.randrange(self.mdims[name][0])
-            return (f"(sizeof({name}[{r}]))", cols, cols)
+        # sizeof(char[N]) is N in both. Skipped entirely for
+        # braced-list elements (see capped()): the size_t
+        # result narrows there.
+        if allow_sizeof:
+            cands = [n for n in self.chartypes]
+            if cands and roll < 0.85:
+                return (f"(sizeof({self.rng.choice(cands)}))", 1, 1)
+            char_arrays = [n for n, a in self.arrays.items() if a[3]]
+            if char_arrays:
+                name = self.rng.choice(char_arrays)
+                return (f"(sizeof({name}))", self.arrays[name][0], self.arrays[name][0])
+            char2d = [n for n in self.mdims
+                      if self.arrays[n][3]]
+            if char2d and roll < 0.92:
+                name = self.rng.choice(char2d)
+                cols = self.mdims[name][1]
+                r = self.rng.randrange(self.mdims[name][0])
+                return (f"(sizeof({name}[{r}]))", cols, cols)
         return (f"(!{inner[0]})", 0, 1)
 
     def indexable(self):
@@ -428,7 +436,8 @@ class Gen:
         if is_char:
             elems = [self.char_elem() for _ in range(rng.randint(1, n))]
         else:
-            elems = [self.capped(2, cap) for _ in range(rng.randint(1, n))]
+            elems = [self.capped(2, cap, allow_sizeof=False)
+                     for _ in range(rng.randint(1, n))]
         lo = min(e[1] for e in elems)
         hi = max(e[2] for e in elems)
         if len(elems) < n:
@@ -456,6 +465,12 @@ class Gen:
                 r = rng.randrange(self.mdims[target][0])
                 self.ptrs[name] = ("arrayrow", target, is_char)
                 return f"{typ} *{name} = {target}[{r}];"
+            if target in self.mdims:
+                # A two-dimensional array name decays to a
+                # pointer to its first row, not to an element
+                # pointer: decay through the first row.
+                self.ptrs[name] = ("array", target, is_char)
+                return f"{typ} *{name} = {target}[0];"
             self.ptrs[name] = ("array", target, is_char)
             return f"{typ} *{name} = {target};"
         names = [n for n in self.env if n not in self.protected]
@@ -481,7 +496,9 @@ class Gen:
         cols = rng.randint(2, 3)
 
         def elem():
-            return self.char_elem() if is_char else self.capped(2, cap)
+            if is_char:
+                return self.char_elem()
+            return self.capped(2, cap, allow_sizeof=False)
 
         nested = rng.random() < 0.6
         zero_fill = False
