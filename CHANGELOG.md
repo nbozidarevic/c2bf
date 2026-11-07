@@ -10,6 +10,29 @@ the top, matching tag `v0.4.0`. Entries below are grouped by
 the roadmap phases that produced them. See `docs/versioning.md`
 for when and how versions change.
 
+## Unreleased
+
+- Fixed: assignment expressions yield the value stored,
+  captured in a fresh cell, instead of the target cell
+  (`(x = 1) + (x = 2)` is 3, not 4). Measured on a spike:
+  +4.81% BF bytes, +182 allocated cells, oracle suite
+  green. Decision record:
+  `docs/decisions/0017-assignment-value-capture.md`.
+- Parser: a typedef name hidden by a same-named variable,
+  parameter, or `for` declarator no longer expands in
+  specifier position; it is a parse error, matching C
+  scoping. Decision record:
+  `docs/decisions/0018-hardening-shadowing-extern-coverage.md`.
+- Fixed: using a name declared only as `extern` and never
+  defined is a compile error (undefined reference) instead
+  of allocating a zero cell. `sizeof` operands and uses in
+  uncalled functions do not count as uses.
+- Tests: differential fuzzer generates 3D arrays, `**`
+  helpers, one file-scope typedef per program, and `scanf`
+  `%s`/`%c` shapes (negative tokens stay ungenerated: they
+  would need dual C/byte intervals). 500-seed sweep: 468
+  pass, 32 skip (address limit), 0 mismatches.
+
 ## v0.4.0
 
 - Language: pointer-to-pointer (`int **pp`, depth at most 2,
