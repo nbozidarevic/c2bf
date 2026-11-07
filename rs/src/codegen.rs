@@ -30,36 +30,38 @@ use std::rc::Rc;
 #[derive(Debug)]
 pub struct ExpandedFunction {
     pub is_void: bool,
-    pub returns_pointer: bool,
+    pub returns_ptr_depth: u8,
     pub params: Vec<FnParam>,
     pub body: Block,
 }
 
 /// A function signature, from a prototype (or, for comparison, a
-/// definition): void-ness, pointer return, plus per-parameter
-/// pointer/array flags. Parameter names are ignored, as in C; all
-/// type spellings denote one byte here, so only the flags are
-/// compared.
+/// definition): void-ness, pointer-return depth, plus
+/// per-parameter pointer depth and array dimensions. Parameter
+/// names are ignored, as in C; all type spellings denote one
+/// byte here, so only the depth/dimensions are compared. For
+/// array parameters only the dimensions after the first are
+/// compared: the outermost parameter size is discarded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FuncSig {
     pub is_void: bool,
-    pub returns_pointer: bool,
+    pub returns_ptr_depth: u8,
     pub params: Vec<FnParam>,
 }
 
 impl FuncSig {
-    /// Whether two signatures agree: same void-ness, same pointer
-    /// return, same parameter count, same pointer/array flags per
-    /// parameter.
+    /// Whether two signatures agree: same void-ness, same
+    /// pointer-return depth, same parameter count, same pointer
+    /// depth and post-first dimensions per parameter.
     pub fn matches(&self, other: &FuncSig) -> bool {
         self.is_void == other.is_void
-            && self.returns_pointer == other.returns_pointer
+            && self.returns_ptr_depth == other.returns_ptr_depth
             && self.params.len() == other.params.len()
-            && self
-                .params
-                .iter()
-                .zip(other.params.iter())
-                .all(|(a, b)| a.pointer == b.pointer && a.array == b.array)
+            && self.params.iter().zip(other.params.iter()).all(|(a, b)| {
+                a.ptr_depth == b.ptr_depth
+                    && a.is_array() == b.is_array()
+                    && a.dims.iter().skip(1).eq(b.dims.iter().skip(1))
+            })
     }
 }
 
@@ -85,6 +87,12 @@ pub struct Emitter {
     /// `(returned_cell, result_cell)` of the innermost function being
     /// expanded, or `None` while compiling `main`.
     pub(crate) return_context: Option<(i32, i32)>,
+    /// Multi-dimensional array parameters, by scope-renamed name:
+    /// the dimensions after the first (the stride), recorded at
+    /// call expansion from the parameter signature. One-
+    /// dimensional array parameters decay to plain pointers and
+    /// are not recorded here.
+    pub(crate) param_dims: HashMap<Vec<u8>, Vec<usize>>,
 }
 
 /// Compile failure: mirrors a C++ `throw "..."` site.

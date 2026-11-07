@@ -76,6 +76,28 @@ enum SubBase {
     Pointer(i32),
 }
 
+/// What a flattened subscript chain is rooted at: a named
+/// array (with its dimensions), a multi-dimensional array
+/// parameter (with the dimensions after the first, the
+/// stride), or a pointer-valued expression whose value is an
+/// address (a pointer variable, a dereference, a call, ...).
+enum ChainClass<'a> {
+    Array {
+        base: i32,
+        dims: Vec<usize>,
+        indices: Vec<&'a Expr>,
+    },
+    ParamArray {
+        cell: i32,
+        row_dims: Vec<usize>,
+        indices: Vec<&'a Expr>,
+    },
+    Pointer {
+        root: &'a Expr,
+        indices: Vec<&'a Expr>,
+    },
+}
+
 /// A store destination for an assignment target.
 enum StoreTarget {
     /// Static cell: write directly.
@@ -185,7 +207,7 @@ impl<'a> Renamer<'a> {
             // the fresh name so the emitter's diagnostics still
             // decide (same-size re-clear, size mismatch, and
             // variable/array confusion).
-            let new_is_array = init.array_len.is_some() || init.array_unsized;
+            let new_is_array = !init.dims.is_empty();
             let existing = self
                 .scopes
                 .last()
@@ -212,15 +234,18 @@ impl<'a> Renamer<'a> {
                     fresh
                 }
             };
+            let mut dims = Vec::with_capacity(init.dims.len());
+            for dim in &init.dims {
+                dims.push(
+                    dim.as_ref()
+                        .map(|e| self.rename_expr(e))
+                        .transpose()?,
+                );
+            }
             inits.push(InitDecl {
                 name: fresh,
-                pointer: init.pointer,
-                array_len: init
-                    .array_len
-                    .as_ref()
-                    .map(|e| self.rename_expr(e))
-                    .transpose()?,
-                array_unsized: init.array_unsized,
+                ptr_depth: init.ptr_depth,
+                dims,
                 init: init.init.as_ref().map(|e| self.rename_expr(e)).transpose()?,
             });
         }
@@ -410,10 +435,26 @@ impl<'a> Renamer<'a> {
 /// and it must agree with any definition or earlier prototype of
 /// the same name. Parameter names may differ between a prototype
 /// and its definition; only the signature is compared.
+/// Array parameter dimensions after the first are the stride
+/// and must be sized: an unsized dimension there can only come
+/// from an unsized typedef alias (`typedef char S[]; f(S a[2])`),
+/// since the parser rejects a bare `[]` after the first bracket.
+fn check_param_dims(params: &[FnParam]) -> Result<(), CompileError> {
+    for p in params {
+        if p.dims.len() > 1 && p.dims[1..].iter().any(|d| d.is_none()) {
+            return Err(err(
+                "array parameter dimensions after the first must have a size",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn check_prototype(
     em: &Emitter,
     d: &FuncDecl,
 ) -> Result<FuncSig, CompileError> {
+    check_param_dims(&d.params)?;
     let mut seen: Vec<&[u8]> = Vec::with_capacity(d.params.len());
     for p in &d.params {
         if p.name.is_empty() {
@@ -429,13 +470,13 @@ fn check_prototype(
     }
     let sig = FuncSig {
         is_void: d.is_void,
-        returns_pointer: d.returns_pointer,
+        returns_ptr_depth: d.returns_ptr_depth,
         params: d.params.clone(),
     };
     if let Some(def) = em.functions.get(&d.name) {
         let def_sig = FuncSig {
             is_void: def.is_void,
-            returns_pointer: def.returns_pointer,
+            returns_ptr_depth: def.returns_ptr_depth,
             params: def.params.clone(),
         };
         if !sig.matches(&def_sig) {
@@ -479,6 +520,7 @@ fn rename_function(f: &FuncDef) -> Result<ExpandedFunction, CompileError> {
         scopes: vec![HashMap::new()],
         array_names: HashSet::new(),
     };
+    check_param_dims(&f.params)?;
     let mut params = Vec::with_capacity(f.params.len());
     for p in &f.params {
         let fresh = renamer.fresh(&p.name);
@@ -493,14 +535,14 @@ fn rename_function(f: &FuncDef) -> Result<ExpandedFunction, CompileError> {
         }
         params.push(FnParam {
             name: fresh,
-            pointer: p.pointer,
-            array: p.array,
+            ptr_depth: p.ptr_depth,
+            dims: p.dims.clone(),
         });
     }
     let body = renamer.rename_block(&f.body)?;
     Ok(ExpandedFunction {
         is_void: f.is_void,
-        returns_pointer: f.returns_pointer,
+        returns_ptr_depth: f.returns_ptr_depth,
         params,
         body,
     })
@@ -549,7 +591,7 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
                 let expanded = rename_function(f)?;
                 let def_sig = FuncSig {
                     is_void: expanded.is_void,
-                    returns_pointer: expanded.returns_pointer,
+                    returns_ptr_depth: expanded.returns_ptr_depth,
                     params: expanded.params.clone(),
                 };
                 if let Some(proto) = em.prototypes.get(&f.name) {
@@ -577,7 +619,7 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
             External::Typedef(_) => {}
             External::Decl(d) => {
                 for init in &d.inits {
-                    let is_array = init.array_len.is_some() || init.array_unsized;
+                    let is_array = !init.dims.is_empty();
                     if init.init.is_none() && !is_array {
                         continue;
                     }
@@ -660,7 +702,7 @@ impl Emitter {
     fn compile_decl(&mut self, d: &Decl) -> Result<(), CompileError> {
         // `int;` — no declarators, the base visitor emits nothing.
         for init in &d.inits {
-            if init.array_len.is_some() || init.array_unsized {
+            if !init.dims.is_empty() {
                 self.compile_array_decl(init)?;
                 continue;
             }
@@ -672,7 +714,7 @@ impl Emitter {
                 Some(e) => e,
             };
             let dest = self.memory.var_cell(&init.name);
-            if init.pointer {
+            if init.ptr_depth > 0 {
                 self.memory.mark_pointer(&init.name);
             }
             let src = self.compile_scalar_init(e)?;
@@ -708,11 +750,24 @@ impl Emitter {
         if self.memory.has_var(&init.name) {
             return Err(err("cannot redeclare a variable as an array"));
         }
+        // Multi-dimensional declarations land with the subscript
+        // support below; until then they are rejected here, as
+        // the parser used to reject them outright.
+        if init.dims.len() > 1 {
+            return Err(err("multi-dimensional arrays are not supported"));
+        }
         // A string initializer fills the elements (plus a NUL when
         // it fits); a braced list fills them in order, zero-filling
         // the rest; any other initializer is rejected, as before.
         // A list holding exactly one string literal is a string
         // initializer (`char a[] = {"hi"}`), sized with its NUL.
+        // One dimension only here (see the length check
+        // above); `None` is an unsized dimension.
+        let array_unsized = matches!(init.dims.first(), Some(None));
+        let array_len_expr = match init.dims.first() {
+            Some(Some(e)) => Some(e),
+            _ => None,
+        };
         let mut list_init: Option<&Vec<Expr>> = None;
         let string_init = match &init.init {
             Some(Expr::StringLit { cooked, .. }) => Some(cooked.clone()),
@@ -725,13 +780,13 @@ impl Emitter {
                     }
                 }
             }
-            Some(_) if init.array_unsized => {
+            Some(_) if array_unsized => {
                 return Err(err("unsized array requires a string initializer"));
             }
             Some(_) => return Err(err("array initializers are not supported")),
             None => None,
         };
-        let len = if init.array_unsized {
+        let len = if array_unsized {
             match &string_init {
                 Some(cooked) => cooked.len() + 1,
                 None => match list_init {
@@ -747,7 +802,7 @@ impl Emitter {
                 },
             }
         } else {
-            let len_expr = init.array_len.as_ref().expect("array declarator");
+            let len_expr = array_len_expr.expect("array declarator");
             let len = match len_expr {
                 Expr::Int(bytes) => int_literal_value(bytes),
                 _ => return Err(err("array size must be an integer literal")),
@@ -768,6 +823,7 @@ impl Emitter {
             }
             len
         };
+        self.memory.record_array_dims(&init.name, vec![len]);
         // Fill the elements: string bytes plus zero fill (a NUL
         // terminator when it fits), list elements in source order
         // plus zero fill, or plain clearing. Setting every element
@@ -912,10 +968,119 @@ impl Emitter {
         }
     }
 
+    /// Flatten a subscript chain: `a[i][j]` is root `a` with
+    /// indices `[i, j]` in source order; parentheses unwrap at
+    /// every level.
+    fn flatten_chain<'a>(e: &'a Expr) -> (&'a Expr, Vec<&'a Expr>) {
+        let mut indices = Vec::new();
+        let mut cur = e;
+        loop {
+            match cur {
+                Expr::Paren(inner) => cur = inner.as_ref(),
+                Expr::Index { base, index } => {
+                    indices.push(index.as_ref());
+                    cur = base.as_ref();
+                }
+                _ => break,
+            }
+        }
+        indices.reverse();
+        (cur, indices)
+    }
+
+    /// Classify a subscript chain by its root. A name that is
+    /// neither an array, a recorded parameter, nor a pointer
+    /// keeps the single-step subscript errors, so an unknown
+    /// or scalar base is diagnosed the same way as before.
+    fn classify_chain<'a>(&self, e: &'a Expr) -> Result<ChainClass<'a>, CompileError> {
+        let (root, indices) = Self::flatten_chain(e);
+        match root {
+            Expr::Ident(name) => {
+                if let Some((base, total)) = self.memory.array_info(name) {
+                    let dims = self
+                        .memory
+                        .array_dims(name)
+                        .unwrap_or_else(|| vec![total]);
+                    Ok(ChainClass::Array {
+                        base,
+                        dims,
+                        indices,
+                    })
+                } else if let Some(row_dims) = self.param_dims.get(name) {
+                    match self.memory.var_index(name) {
+                        Some(cell) => Ok(ChainClass::ParamArray {
+                            cell,
+                            row_dims: row_dims.clone(),
+                            indices,
+                        }),
+                        None => Err(err("pointer is not declared")),
+                    }
+                } else if self.memory.is_pointer(name) {
+                    match self.memory.var_index(name) {
+                        Some(_) => Ok(ChainClass::Pointer { root, indices }),
+                        None => Err(err("pointer is not declared")),
+                    }
+                } else if self.memory.has_var(name) {
+                    Err(err("subscript of non-array"))
+                } else {
+                    Err(err("subscript of undeclared array"))
+                }
+            }
+            _ => Ok(ChainClass::Pointer { root, indices }),
+        }
+    }
+
+    /// Cell holding the base address for the first subscript of
+    /// a pointer-valued chain root: a pointer variable's cell,
+    /// or whatever address a dereference, call, or string
+    /// literal evaluates to.
+    fn address_holder(&mut self, e: &Expr) -> Result<i32, CompileError> {
+        match e {
+            Expr::Paren(inner) => self.address_holder(inner),
+            Expr::Ident(name) => {
+                if let Some((base, _)) = self.memory.array_info(name) {
+                    self.address_const(base)
+                } else {
+                    Ok(self.memory.var_cell(name))
+                }
+            }
+            _ => self.compile_expr(e),
+        }
+    }
+
+    /// Cell holding the address of the last element of a
+    /// pointer-valued subscript chain: every step but the last
+    /// loads the pointer it names, then adds the next index in
+    /// byte arithmetic (`pp[i][j]` loads the pointer at
+    /// `pp + i`, adds `j`, and addresses through it). A
+    /// constant zero index adds nothing, so `p[0]` keeps the
+    /// existing emission.
+    fn pointer_chain_address(
+        &mut self,
+        root: &Expr,
+        indices: &[&Expr],
+    ) -> Result<i32, CompileError> {
+        let mut cur = self.address_holder(root)?;
+        for (k, index) in indices.iter().enumerate() {
+            let addr = match Self::const_index(index) {
+                Some(0) => cur,
+                _ => {
+                    let idx = self.compile_expr(index)?;
+                    self.add_values(cur, idx)
+                }
+            };
+            if k + 1 == indices.len() {
+                return Ok(addr);
+            }
+            cur = self.load_through(addr)?;
+        }
+        Err(err("unsupported subscript base"))
+    }
+
     /// Cell holding the tape index of an element: `base + index` as
     /// byte arithmetic. A constant array index is bounds-checked;
     /// anything else wraps like all byte arithmetic.
-    fn index_address(&mut self, base: &Expr, index: &Expr) -> Result<i32, CompileError> {
+    fn index_address_single(&mut self, base: &Expr, index: &Expr) -> Result<i32, CompileError> {
         match self.subscript_base(base)? {
             SubBase::Array(cell_base, len) => {
                 if let Some(k) = Self::const_index(index) {
@@ -945,6 +1110,33 @@ impl Emitter {
         }
     }
 
+    /// Cell holding the tape index of the storage named by a
+    /// whole subscript expression: a single-step array or
+    /// pointer subscript goes through the existing path;
+    /// a pointer-valued chain goes through the chain address.
+    /// Multi-dimensional array chains land with the array
+    /// subscript support below; until then they are rejected
+    /// here, as the subscript helpers used to reject them.
+    fn index_address(&mut self, e: &Expr) -> Result<i32, CompileError> {
+        match self.classify_chain(e)? {
+            ChainClass::Array { indices, .. } | ChainClass::ParamArray { indices, .. }
+                if indices.len() > 1 =>
+            {
+                Err(err("multi-dimensional arrays are not supported"))
+            }
+            ChainClass::Array { .. } => match e {
+                Expr::Index { base, index } => self.index_address_single(base, index),
+                _ => Err(err("unsupported subscript base")),
+            },
+            ChainClass::ParamArray { .. } => {
+                Err(err("multi-dimensional arrays are not supported"))
+            }
+            ChainClass::Pointer { root, indices } => {
+                self.pointer_chain_address(root, &indices)
+            }
+        }
+    }
+
     /// Cell holding the tape index of the storage named by `e`:
     /// a variable, an array (its base), an element (its address),
     /// or a dereference (the address its operand evaluates to).
@@ -959,7 +1151,7 @@ impl Emitter {
                 }
             }
             Expr::Paren(inner) => self.address_value(inner),
-            Expr::Index { base, index } => self.index_address(base, index),
+            Expr::Index { .. } => self.index_address(e),
             Expr::Unary { op, e: inner } if op.as_slice() == b"*" => self.compile_expr(inner),
             _ => Err(err("unsupported address expression")),
         }
@@ -972,9 +1164,11 @@ impl Emitter {
     fn needs_address_path(&self, e: &Expr) -> bool {
         match e {
             Expr::Paren(inner) => self.needs_address_path(inner),
-            Expr::Index { base, index } => match self.subscript_base(base) {
-                Ok(SubBase::Pointer(_)) => true,
-                Ok(SubBase::Array(..)) => Self::const_index(index).is_none(),
+            Expr::Index { .. } => match self.classify_chain(e) {
+                Ok(ChainClass::Pointer { .. }) | Ok(ChainClass::ParamArray { .. }) => true,
+                Ok(ChainClass::Array { indices, .. }) => {
+                    indices.iter().any(|i| Self::const_index(i).is_none())
+                }
                 Err(_) => false,
             },
             Expr::Unary { op, .. } => op.as_slice() == b"*",
@@ -995,25 +1189,34 @@ impl Emitter {
                 }
             }
             Expr::Paren(inner) => self.store_target(inner),
-            Expr::Index { base, index } => match self.subscript_base(base)? {
-                SubBase::Array(cell_base, len) => {
-                    if Self::const_index(index).is_some() {
-                        Ok(StoreTarget::Cell(self.static_index_cell(base, index)?))
-                    } else {
-                        // The dispatch counts the offset down, so the
-                        // counter is the index value itself; no
-                        // address is materialized, and the array may
-                        // live anywhere on the tape.
-                        let counter = self.compile_expr(index)?;
-                        let n = len.min(256) as i32;
-                        Ok(StoreTarget::Range {
-                            counter,
-                            cells: (cell_base..cell_base + n).collect(),
-                        })
+            Expr::Index { base, index } => match self.classify_chain(e)? {
+                ChainClass::Array { .. } => match self.subscript_base(base)? {
+                    SubBase::Array(cell_base, len) => {
+                        if Self::const_index(index).is_some() {
+                            Ok(StoreTarget::Cell(self.static_index_cell(base, index)?))
+                        } else {
+                            // The dispatch counts the offset down, so the
+                            // counter is the index value itself; no
+                            // address is materialized, and the array may
+                            // live anywhere on the tape.
+                            let counter = self.compile_expr(index)?;
+                            let n = len.min(256) as i32;
+                            Ok(StoreTarget::Range {
+                                counter,
+                                cells: (cell_base..cell_base + n).collect(),
+                            })
+                        }
                     }
+                    SubBase::Pointer(_) => {
+                        let addr = self.index_address(e)?;
+                        Ok(StoreTarget::Any { addr })
+                    }
+                },
+                ChainClass::ParamArray { .. } => {
+                    Err(err("multi-dimensional arrays are not supported"))
                 }
-                SubBase::Pointer(_) => {
-                    let addr = self.index_address(base, index)?;
+                ChainClass::Pointer { root, indices } => {
+                    let addr = self.pointer_chain_address(root, &indices)?;
                     Ok(StoreTarget::Any { addr })
                 }
             },
@@ -1090,8 +1293,37 @@ impl Emitter {
         match e {
             Expr::Ident(name) => self.memory.is_array(name),
             Expr::Paren(inner) => self.names_array(inner),
+            // A subscript chain names an array while indices
+            // remain: `a[i]` of a two-dimensional array is a
+            // row, not a modifiable element.
+            Expr::Index { .. } => match self.classify_chain(e) {
+                Ok(ChainClass::Array { dims, indices, .. }) => indices.len() < dims.len(),
+                Ok(ChainClass::ParamArray { row_dims, indices, .. }) => {
+                    indices.len() <= row_dims.len()
+                }
+                _ => false,
+            },
             _ => false,
         }
+    }
+
+    /// Base cell of a multi-dimensional array named (through
+    /// parentheses) by a dereference operand, if any: `*a`
+    /// for such an array is its first row. One-dimensional
+    /// arrays are unaffected (`*a` is the first element).
+    fn deref_row_base(&self, e: &Expr) -> Option<i32> {
+        let mut cur = e;
+        while let Expr::Paren(inner) = cur {
+            cur = inner.as_ref();
+        }
+        let Expr::Ident(name) = cur else {
+            return None;
+        };
+        let dims = self.memory.array_dims(name)?;
+        if dims.len() <= 1 {
+            return None;
+        }
+        self.memory.array_info(name).map(|(base, _)| base)
     }
 
     /// Reject dereferencing a plain scalar variable (or an
@@ -1813,8 +2045,14 @@ impl Emitter {
                 // Dereference: load the cell at the tape index the
                 // operand evaluates to. A scalar variable is not a
                 // pointer; anything else holds an address.
+                // Dereferencing a multi-dimensional array name
+                // yields its first row, which decays to the base
+                // address instead of loading the first element.
                 b"*" => {
                     self.check_deref_operand(e)?;
+                    if let Some(base) = self.deref_row_base(e) {
+                        return self.address_const(base);
+                    }
                     let addr = self.compile_expr(e)?;
                     self.load_through(addr)
                 }
@@ -1904,21 +2142,31 @@ impl Emitter {
             // like a variable; anything else loads through dispatch
             // over the array's range (or every address, for a
             // pointer base).
-            Expr::Index { base, index } => match self.subscript_base(base)? {
-                SubBase::Array(cell_base, len) => {
-                    if Self::const_index(index).is_some() {
-                        self.static_index_cell(base, index)
-                    } else {
-                        // As in `store_target`: the dispatch counts
-                        // the offset itself down.
-                        let counter = self.compile_expr(index)?;
-                        let n = len.min(256) as i32;
-                        let cells: Vec<i32> = (cell_base..cell_base + n).collect();
-                        self.load_from_cells(counter, &cells)
+            Expr::Index { base, index } => match self.classify_chain(e)? {
+                ChainClass::Array { .. } => match self.subscript_base(base)? {
+                    SubBase::Array(cell_base, len) => {
+                        if Self::const_index(index).is_some() {
+                            self.static_index_cell(base, index)
+                        } else {
+                            // As in `store_target`: the dispatch counts
+                            // the offset itself down.
+                            let counter = self.compile_expr(index)?;
+                            let n = len.min(256) as i32;
+                            let cells: Vec<i32> =
+                                (cell_base..cell_base + n).collect();
+                            self.load_from_cells(counter, &cells)
+                        }
                     }
+                    SubBase::Pointer(_) => {
+                        let addr = self.index_address(e)?;
+                        self.load_through(addr)
+                    }
+                },
+                ChainClass::ParamArray { .. } => {
+                    Err(err("multi-dimensional arrays are not supported"))
                 }
-                SubBase::Pointer(_) => {
-                    let addr = self.index_address(base, index)?;
+                ChainClass::Pointer { root, indices } => {
+                    let addr = self.pointer_chain_address(root, &indices)?;
                     self.load_through(addr)
                 }
             },
@@ -1971,6 +2219,25 @@ impl Emitter {
                 } else {
                     Ok(ScanfTarget::Through(self.address_value(inner)?))
                 }
+            }
+            // A dereference is itself an address-valued target:
+            // `scanf("%d", *pp)` reads into the cell `*pp`
+            // names, and `scanf("%d", *p)` into the cell `*p`
+            // names. The loaded address is the destination.
+            Expr::Unary { op, .. } if op.as_slice() == b"*" => {
+                Ok(ScanfTarget::Through(self.compile_expr(a)?))
+            }
+            // A subscript naming a pointer value is likewise
+            // address-valued (`scanf("%d", pp[0])` reads into
+            // the cell the pointer at `pp[0]` names); an array
+            // element subscript is not, and keeps the error.
+            Expr::Index { .. }
+                if matches!(
+                    self.classify_chain(a),
+                    Ok(ChainClass::Pointer { .. })
+                ) =>
+            {
+                Ok(ScanfTarget::Through(self.compile_expr(a)?))
             }
             _ => Err(err("scanf argument must be an address")),
         }
@@ -2280,8 +2547,19 @@ impl Emitter {
         }
         for (param, &arg) in def.params.iter().zip(arg_cells.iter()) {
             let cell = self.memory.var_cell(&param.name);
-            if param.pointer || param.array {
+            if param.ptr_depth > 0 || param.is_array() {
                 self.memory.mark_pointer(&param.name);
+            }
+            // Multi-dimensional array parameters record their
+            // stride (the dimensions after the first) for
+            // subscripting at call sites.
+            if param.dims.len() > 1 {
+                let row_dims: Vec<usize> = param.dims[1..]
+                    .iter()
+                    .copied()
+                    .map(|d| d.expect("parameter stride is sized"))
+                    .collect();
+                self.param_dims.insert(param.name.clone(), row_dims);
             }
             self.copy_value(arg, cell);
         }
@@ -2663,6 +2941,41 @@ mod tests {
         let mut out = Vec::new();
         crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
         assert_eq!(out, b"65");
+    }
+
+    #[test]
+    fn pointer_to_pointer_runs() {
+        // Two levels of indirection compose through the same
+        // dispatch: `**pp` reads and writes the ultimate
+        // target, `(*pp)[k]` and `pp[0][k]` step through the
+        // loaded pointer, and a `**` return carries an address
+        // through a call.
+        let bf = compile(
+            b"int **getpp(int **q) { return q; } \
+              int main() { \
+                int x = 10; int *p = &x; int **pp = &p; \
+                printf(\"%d,\", **pp); \
+                **pp = 42; \
+                printf(\"%d,\", x); \
+                int a[3] = {1, 2, 3}; int *q = a; int **qp = &q; \
+                printf(\"%d,%d,\", (*qp)[1], qp[0][2]); \
+                qp[0] = &a[2]; \
+                printf(\"%d,\", *q); \
+                printf(\"%d\", **getpp(pp)); \
+              }",
+        )
+        .expect("pointer-to-pointer program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"10,42,2,3,3,42");
+        // Return depth is part of the signature: depth 1 and
+        // depth 2 disagree in either direction.
+        let err = compile(b"int **f(); int *f() { return 0; } int main() {}")
+            .expect_err("return-depth conflict");
+        assert_eq!(err.msg, "conflicting prototype for function 'f'");
+        let err = compile(b"int f(int **q); int f(int *q) { return 0; } int main() {}")
+            .expect_err("param-depth conflict");
+        assert_eq!(err.msg, "conflicting prototype for function 'f'");
     }
 
     #[test]

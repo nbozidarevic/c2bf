@@ -26,6 +26,11 @@ pub struct Memory {
     /// variable's cell holds a tape index (a byte), like any scalar;
     /// the set only records which names are pointers.
     pointers: HashSet<Vec<u8>>,
+    /// Array name to dimension list (row-major). The total
+    /// element count lives in `arrays` beside this; the
+    /// dimensions say how subscripts stride. One-dimensional
+    /// arrays record a single dimension.
+    dims: HashMap<Vec<u8>, Vec<usize>>,
     /// Anonymous array ranges (string literal storage): base cell
     /// and length each. Like named arrays, they are never
     /// reclaimed, so the reclaim floor covers them.
@@ -133,6 +138,16 @@ impl Memory {
     /// Base cell and length of the array `name`, if declared.
     pub fn array_info(&self, name: &[u8]) -> Option<(i32, usize)> {
         self.arrays.get(name).copied()
+    }
+
+    /// Dimension list of the array `name`, if declared.
+    pub fn array_dims(&self, name: &[u8]) -> Option<Vec<usize>> {
+        self.dims.get(name).cloned()
+    }
+
+    /// Record the dimension list of the array `name`.
+    pub fn record_array_dims(&mut self, name: &[u8], dims: Vec<usize>) {
+        self.dims.insert(name.to_vec(), dims);
     }
 
     /// Reserve `len` consecutive cells for the array `name`, starting

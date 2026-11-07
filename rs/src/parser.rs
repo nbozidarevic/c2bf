@@ -239,9 +239,11 @@ fn storage_word(text: &[u8]) -> Option<StorageClass> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Spec {
     words: Vec<u8>,
-    pointer: bool,
-    array_len: Option<i32>,
-    array_unsized: bool,
+    /// Pointer depth carried by a typedef alias (`0`, `1`, `2`).
+    ptr_depth: u8,
+    /// Array dimensions carried by a typedef alias, one entry
+    /// per bracket (`None` for an unsized dimension).
+    dims: Vec<Option<i32>>,
     storage: Option<StorageClass>,
 }
 
@@ -249,15 +251,14 @@ impl Spec {
     fn plain(words: Vec<u8>) -> Self {
         Spec {
             words,
-            pointer: false,
-            array_len: None,
-            array_unsized: false,
+            ptr_depth: 0,
+            dims: Vec::new(),
             storage: None,
         }
     }
 
     fn is_array(&self) -> bool {
-        self.array_len.is_some() || self.array_unsized
+        !self.dims.is_empty()
     }
 }
 
@@ -476,9 +477,8 @@ impl<'a> Parser<'a> {
         }
         Ok(Spec {
             words: spec_words.join(&b' '),
-            pointer: alias.pointer,
-            array_len: alias.array_len,
-            array_unsized: alias.array_unsized,
+            ptr_depth: alias.ptr_depth,
+            dims: alias.dims.clone(),
             storage,
         })
     }
@@ -571,20 +571,33 @@ impl<'a> Parser<'a> {
         if self.at_spec_start() {
             let mark = self.p;
             let mut spec = self.parse_spec()?;
-            // A `*` before the name and a `(` after it is a
+            // `*`s before the name and a `(` after it are a
             // pointer-returning function declarator (`char
-            // *f()`); a `*` anywhere else belongs to the
-            // declaration below, so only take it when a name
-            // and a `(` follow. A second `*` is a pointer to
-            // a pointer and stays an error there.
-            if !spec.pointer
-                && self.at_punct(b"*")
-                && self.peek_at(1).kind == Kind::Ident
-                && self.peek_at(2).kind == Kind::Punct
-                && self.peek_at(2).text == b"("
+            // *f()`, `int **f()`); `*`s anywhere else belong
+            // to the declaration below, so only take them
+            // when a name and a `(` follow the run of stars.
+            // Depth above 2 (a third `*`, counting a pointer
+            // typedef) is an error.
+            let mut stars = 0isize;
+            while self.peek_at(stars).kind == Kind::Punct
+                && self.peek_at(stars).text == b"*"
             {
-                self.next_tok();
-                spec.pointer = true;
+                stars += 1;
+            }
+            if stars > 0
+                && self.peek_at(stars).kind == Kind::Ident
+                && self.peek_at(stars + 1).kind == Kind::Punct
+                && self.peek_at(stars + 1).text == b"("
+            {
+                if spec.ptr_depth + stars as u8 > 2 {
+                    return self.fail(
+                        "pointer to pointer to pointer is not supported".to_string(),
+                    );
+                }
+                for _ in 0..stars {
+                    self.next_tok();
+                }
+                spec.ptr_depth += stars as u8;
             }
             if self.at_ident() {
                 let name = self.next_tok().text;
@@ -614,26 +627,27 @@ impl<'a> Parser<'a> {
                 "storage class specifiers are not allowed with typedef".to_string(),
             );
         }
-        let mut pointer = false;
-        if self.at_punct(b"*") {
-            self.next_tok();
-            pointer = true;
-        }
-        if spec.pointer && pointer {
-            return self.fail("pointer to pointer is not supported".to_string());
-        }
-        pointer |= spec.pointer;
-        let name = self.expect_ident("declarator name")?.text;
-        let (mut array_len, mut array_unsized) = (spec.array_len, spec.array_unsized);
-        if self.at_punct(b"[") {
-            if array_len.is_some() || array_unsized {
+        // Stars add to the aliased depth (a pointer alias plus
+        // `*` is depth 2); a third level is an error.
+        let mut ptr_depth = spec.ptr_depth;
+        while self.at_punct(b"*") {
+            if ptr_depth >= 2 {
                 return self.fail(
-                    "multi-dimensional arrays are not supported".to_string(),
+                    "pointer to pointer to pointer is not supported".to_string(),
                 );
             }
             self.next_tok();
+            ptr_depth += 1;
+        }
+        let name = self.expect_ident("declarator name")?.text;
+        // Brackets prepend dimensions before the aliased ones
+        // (an array alias plus `[N]` is an outer dimension:
+        // `A b[2]` with `A` an array of 3 is a 2x3 array).
+        let mut declarator_dims = Vec::new();
+        while self.at_punct(b"[") {
+            self.next_tok();
             if self.at_punct(b"]") {
-                array_unsized = true;
+                declarator_dims.push(None);
             } else {
                 let len_expr = self.parse_assignment()?;
                 let Expr::Int(bytes) = len_expr else {
@@ -645,7 +659,7 @@ impl<'a> Parser<'a> {
                 if len <= 0 {
                     return self.fail("array size must be positive".to_string());
                 }
-                array_len = Some(len);
+                declarator_dims.push(Some(len));
             }
             self.expect_punct(b"]", "']'")?;
         }
@@ -658,12 +672,13 @@ impl<'a> Parser<'a> {
             );
         }
         self.expect_punct(b";", "';'")?;
+        let mut dims = declarator_dims;
+        dims.extend(spec.dims.iter().copied());
         let decl = TypedefDecl {
             name: name.clone(),
             spec: spec.words,
-            pointer,
-            array_len,
-            array_unsized,
+            ptr_depth,
+            dims,
         };
         if let Some(old) = self.typedefs.get(&name) {
             if *old != decl {
@@ -739,7 +754,7 @@ impl<'a> Parser<'a> {
             && self.peek_at(2).text == b"("
         {
             self.next_tok();
-            spec.pointer = true;
+            spec.ptr_depth = 1;
         }
         if self.at_ident()
             && self.peek_at(1).kind == Kind::Punct
@@ -838,18 +853,18 @@ impl<'a> Parser<'a> {
                     if is_qualifier(&spec.words) && self.is_type_tok() {
                         self.next_tok();
                     }
-                    // One `*` makes a pointer parameter; a second
-                    // `*` fails at the name. A pointer typedef may
-                    // not combine with `*`.
-                    let mut pointer = spec.pointer;
-                    if self.at_punct(b"*") {
-                        if pointer {
+                    // Stars add to the aliased depth; a third
+                    // level is an error.
+                    let mut ptr_depth = spec.ptr_depth;
+                    while self.at_punct(b"*") {
+                        if ptr_depth >= 2 {
                             return self.fail(
-                                "pointer to pointer is not supported".to_string(),
+                                "pointer to pointer to pointer is not supported"
+                                    .to_string(),
                             );
                         }
                         self.next_tok();
-                        pointer = true;
+                        ptr_depth += 1;
                     }
                     let name = if allow_unnamed
                         && (self.at_punct(b",")
@@ -860,27 +875,65 @@ impl<'a> Parser<'a> {
                     } else {
                         self.expect_ident("parameter name")?.text
                     };
-                    // An array parameter decays to a pointer; the
-                    // size, when present, is parsed and discarded.
-                    // An array typedef may not combine with `[]`.
-                    let mut array = spec.is_array();
-                    if self.at_punct(b"[") {
-                        if array {
-                            return self.fail(
-                                "multi-dimensional arrays are not supported".to_string(),
-                            );
-                        }
+                    // Brackets prepend dimensions before the
+                    // aliased ones. An array parameter decays to a
+                    // pointer: the outermost size is discarded,
+                    // the inner sizes are the stride. Every
+                    // dimension after the first declarator bracket
+                    // must be an integer literal; the first may be
+                    // empty or any expression, which is discarded
+                    // as before.
+                    let mut declarator_dims = Vec::new();
+                    let mut first_bracket = true;
+                    while self.at_punct(b"[") {
                         self.next_tok();
-                        if !self.at_punct(b"]") {
-                            let _ = self.parse_assignment()?;
+                        if self.at_punct(b"]") {
+                            if first_bracket {
+                                declarator_dims.push(None);
+                            } else {
+                                return self.fail(
+                                    "array size must be an integer literal".to_string(),
+                                );
+                            }
+                        } else {
+                            let size = self.parse_assignment()?;
+                            match size {
+                                Expr::Int(bytes) if !first_bracket => {
+                                    let len = int_text_value(&bytes);
+                                    if len <= 0 {
+                                        return self.fail(
+                                            "array size must be positive".to_string(),
+                                        );
+                                    }
+                                    declarator_dims.push(Some(len));
+                                }
+                                Expr::Int(bytes) => {
+                                    // Outermost dimension: recorded
+                                    // when literal, discarded as
+                                    // before when it is not.
+                                    declarator_dims.push(Some(int_text_value(&bytes)));
+                                }
+                                _ => {
+                                    if first_bracket {
+                                        declarator_dims.push(None);
+                                    } else {
+                                        return self.fail(
+                                            "array size must be an integer literal"
+                                                .to_string(),
+                                        );
+                                    }
+                                }
+                            }
                         }
+                        first_bracket = false;
                         self.expect_punct(b"]", "']'")?;
-                        array = true;
                     }
+                    let mut dims = declarator_dims;
+                    dims.extend(spec.dims.iter().copied());
                     params.push(FnParam {
                         name,
-                        pointer,
-                        array,
+                        ptr_depth,
+                        dims,
                     });
                     if !self.at_punct(b",") {
                         break;
@@ -912,8 +965,8 @@ impl<'a> Parser<'a> {
         self.scopes.pop();
         Ok(FuncDef {
             name,
-            is_void: spec.words.as_slice() == b"void" && !spec.pointer,
-            returns_pointer: spec.pointer,
+            is_void: spec.words.as_slice() == b"void" && spec.ptr_depth == 0,
+            returns_ptr_depth: spec.ptr_depth,
             params,
             body,
         })
@@ -927,8 +980,8 @@ impl<'a> Parser<'a> {
         self.expect_punct(b";", "';'")?;
         Ok(FuncDecl {
             name,
-            is_void: spec.words.as_slice() == b"void" && !spec.pointer,
-            returns_pointer: spec.pointer,
+            is_void: spec.words.as_slice() == b"void" && spec.ptr_depth == 0,
+            returns_ptr_depth: spec.ptr_depth,
             params,
         })
     }
@@ -991,10 +1044,13 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a braced initializer list, with the `{` ahead:
-    /// `{e, e, ...}`, with an optional trailing comma. An empty
-    /// list, a nested list, and designated initializers (`[i] =`
-    /// or `.name =`) are parse errors: only flat lists of value
-    /// expressions are supported.
+    /// `{e, e, ...}`, with an optional trailing comma. Lists may
+    /// nest (`{{1, 2}, {3, 4}}` for multi-dimensional arrays);
+    /// an empty list and designated initializers (`[i] =` or
+    /// `.name =`) are parse errors. Whether a nested list is
+    /// meaningful depends on the declarator: code generation
+    /// rejects nested lists for scalars and one-dimensional
+    /// arrays.
     fn parse_init_list(&mut self) -> Result<Expr, ParseError> {
         self.expect_punct(b"{", "'{'")?;
         if self.at_punct(b"}") {
@@ -1003,9 +1059,15 @@ impl<'a> Parser<'a> {
         let mut elems = Vec::new();
         loop {
             if self.at_punct(b"{") {
-                return self.fail(
-                    "nested initializer lists are not supported".to_string(),
-                );
+                elems.push(self.parse_init_list()?);
+                if self.at_punct(b",") {
+                    self.next_tok();
+                    if self.at_punct(b"}") {
+                        break;
+                    }
+                    continue;
+                }
+                break;
             }
             if self.at_punct(b"[") || self.at_punct(b".") {
                 return self.fail(
@@ -1027,42 +1089,41 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_init_declarator(&mut self, base: &Spec) -> Result<InitDecl, ParseError> {
-        // One `*` makes a pointer declarator (`char *p`); a second
-        // `*` fails at the name, so `char **p` is rejected. A
-        // pointer typedef may not combine with `*`, and an array
-        // typedef may not combine with `[]`.
-        let mut pointer = base.pointer;
-        if self.at_punct(b"*") {
-            if pointer {
-                return self.fail("pointer to pointer is not supported".to_string());
+        // Stars add to the aliased depth (`char **p` is depth 2);
+        // a third level is an error.
+        let mut ptr_depth = base.ptr_depth;
+        while self.at_punct(b"*") {
+            if ptr_depth >= 2 {
+                return self.fail(
+                    "pointer to pointer to pointer is not supported".to_string(),
+                );
             }
             self.next_tok();
-            pointer = true;
+            ptr_depth += 1;
         }
         let name = self.expect_ident("declarator name")?.text;
         // The name is in scope from here, including in its own
         // initializer, so a use of the name there is the variable,
         // not an enumerator of the same name.
         self.declare_name(&name);
-        let mut array_len = base
-            .array_len
-            .map(|len| Expr::Int(len.to_string().into_bytes()));
-        let mut array_unsized = base.array_unsized;
-        if self.at_punct(b"[") {
-            if array_len.is_some() || array_unsized {
-                return self.fail(
-                    "multi-dimensional arrays are not supported".to_string(),
-                );
-            }
+        // Brackets prepend dimensions before the aliased ones.
+        let mut declarator_dims = Vec::new();
+        while self.at_punct(b"[") {
             self.next_tok();
             if self.at_punct(b"]") {
-                // `name[]`: sized only by a string initializer.
-                array_unsized = true;
+                // `name[]`: sized only by a string or list
+                // initializer.
+                declarator_dims.push(None);
             } else {
-                array_len = Some(self.parse_assignment()?);
+                declarator_dims.push(Some(self.parse_assignment()?));
             }
             self.expect_punct(b"]", "']'")?;
         }
+        let mut dims = declarator_dims;
+        dims.extend(base.dims.iter().map(|d| {
+            d.as_ref()
+                .map(|len| Expr::Int(len.to_string().into_bytes()))
+        }));
         let init = if self.at_punct(b"=") {
             self.next_tok();
             if self.at_punct(b"{") {
@@ -1075,9 +1136,8 @@ impl<'a> Parser<'a> {
         };
         Ok(InitDecl {
             name,
-            pointer,
-            array_len,
-            array_unsized,
+            ptr_depth,
+            dims,
             init,
         })
     }
@@ -1239,7 +1299,7 @@ impl<'a> Parser<'a> {
             }
             _ => {}
         }
-        if spec.pointer || spec.is_array() {
+        if spec.ptr_depth > 0 || spec.is_array() {
             return self.fail(
                 "pointer and array typedefs are not supported in for declarations"
                     .to_string(),
@@ -2263,8 +2323,10 @@ mod tests {
             ),
             ("typedef int T = 1;", "take no initializer"),
             ("typedef int A, B;", "multiple typedef declarators"),
-            ("typedef int *P; P *q;", "pointer to pointer"),
-            ("typedef char A[3]; A b[2];", "multi-dimensional arrays"),
+            (
+                "typedef int *P; P **q;",
+                "pointer to pointer to pointer",
+            ),
             ("typedef char A[n];", "array size must be an integer literal"),
             ("typedef char A[0];", "array size must be positive"),
             ("typedef int T; int T x;", "beside a typedef name"),
@@ -2274,6 +2336,63 @@ mod tests {
             ),
         ];
         for (src, want) in cases {
+            match parse(src.as_bytes()) {
+                Err(e) => assert!(
+                    e.msg.contains(want),
+                    "for {:?}: got error {:?}, want {:?}",
+                    src,
+                    e.msg,
+                    want
+                ),
+                Ok(_) => panic!("accepted {:?}", src),
+            }
+        }
+    }
+
+    #[test]
+    fn pointer_depth_and_dimensions_parse() {
+        // One `(pointer)` marker per star, one size marker per
+        // bracket, in declarator order.
+        assert_sexp(
+            "int **pp;",
+            "(tu (decl int (initdecl pp (pointer) (pointer))))",
+        );
+        assert_sexp(
+            "int a[2][3];",
+            "(tu (decl int (initdecl a (int 2) (int 3))))",
+        );
+        assert_sexp(
+            "int f(int **pp, int a[][3]) { return 0; }",
+            "(tu (funcdef f (params (param pp (pointer) (pointer)) (param a (array) (array))) (compound (return (int 0)))))",
+        );
+        // Typedef composition: a pointer alias plus `*` is depth
+        // 2; an array alias plus `[N]` prepends a dimension.
+        assert_sexp(
+            "typedef int *P; P *q;",
+            "(tu (typedef P int (pointer)) (decl int (initdecl q (pointer) (pointer))))",
+        );
+        assert_sexp(
+            "typedef char A[3]; A b[2];",
+            "(tu (typedef A char (int 3)) (decl char (initdecl b (int 2) (int 3))))",
+        );
+        assert_sexp(
+            "typedef int **PP; typedef char Row[3]; Row m[2];",
+            "(tu (typedef PP int (pointer) (pointer)) (typedef Row char (int 3)) (decl char (initdecl m (int 2) (int 3))))",
+        );
+        // Nested initializer lists parse (code generation
+        // decides whether the declarator can use one).
+        assert_sexp(
+            "int a[2][2] = {{1, 2}, {3, 4}};",
+            "(tu (decl int (initdecl a (int 2) (int 2) (initlist (initlist (int 1) (int 2)) (initlist (int 3) (int 4))))))",
+        );
+        // A third level of indirection is still an error, as
+        // is a non-literal inner parameter dimension.
+        for (src, want) in [
+            ("int ***p;", "pointer to pointer to pointer"),
+            ("typedef int ***P;", "pointer to pointer to pointer"),
+            ("int f(int a[2][n]);", "array size must be an integer literal"),
+            ("int f(int a[2][0]);", "array size must be positive"),
+        ] {
             match parse(src.as_bytes()) {
                 Err(e) => assert!(
                     e.msg.contains(want),

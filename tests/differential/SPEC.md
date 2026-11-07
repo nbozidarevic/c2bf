@@ -34,20 +34,23 @@ source order, e.g.
   consumed, not shown; only `void`-ness is retained (invisibly) for
   code generation. `params` is `[param]*`, present only when the
   parameter list is non-empty (`()` and `(void)` both give no child).
-  `param(name)`: `[pointer?, array?]` — `pointer` for one `*`,
-  `array` for `name[]` or `name[N]` (the size is discarded).
+  `param(name)`: `[pointer*, array*]` — one `pointer` per `*`
+  (depth at most 2), one `array` per bracket for `name[]` or
+  `name[N]` (the sizes are discarded; the inner sizes are the
+  stride).
 - `decl(spec)`: `[initdecl]*` (`int;` has no children; declarators
   are comma-separated, in order). `spec` is one or more words
   (`unsigned int`, `const char`, `long long`), space-joined.
-- `initdecl(name)`: `[pointer?, (size | unsized)?, init?]` —
-  `pointer` (no children) when the declarator has one `*`, `size`
-  for an array declarator (`name[N]`, the size expression) or
-  `unsized` for `name[]` (sized by a string or braced
-  initializer), then the initializer. A second `*` is a parse
-  error; a string literal may initialize an array, as may a
+- `initdecl(name)`: `[pointer*, (size | unsized)*, init?]` —
+  one `pointer` (no children) per `*` (depth at most 2; a third
+  is a parse error), one `size`/`unsized` per dimension in order
+  (`size` for `name[N]`, the size expression; `unsized` for
+  `name[]`, sized by a string or braced initializer), then the
+  initializer. A string literal may initialize an array, as may a
   braced initializer list (an `initlist` node: element
-  expressions in order; empty, nested, and designated lists
-  are parse errors).
+  expressions in order; empty and designated lists are parse
+  errors, nested lists parse but are rejected in code generation
+  for scalar and one-dimensional declarators).
 - `compound`: block items in order. `exprstmt`: `[expr]`. `empty`: none.
 - `if`: `[cond, then]`; `ifelse`: `[cond, then, else]`.
 - `switch`: `[expr, body]`; `while`: `[cond, body]`.

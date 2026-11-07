@@ -19,11 +19,21 @@ pub enum External {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnParam {
     pub name: Vec<u8>,
-    /// `true` for a single-`*` pointer parameter.
-    pub pointer: bool,
-    /// `true` for an array parameter (`name[]` or `name[N]`); array
-    /// parameters decay to pointers, and the size is discarded.
-    pub array: bool,
+    /// Pointer depth: `0` for a scalar, `1` for `*`, `2` for
+    /// `**`. Depths above 2 are parse errors.
+    pub ptr_depth: u8,
+    /// Array dimensions (`name[N]`, `name[]`): one entry per
+    /// bracket, `None` for an unsized (empty) bracket. Array
+    /// parameters decay to pointers; the outermost size is
+    /// discarded, the inner sizes are the stride.
+    pub dims: Vec<Option<i32>>,
+}
+
+impl FnParam {
+    /// Whether this parameter is an array parameter.
+    pub fn is_array(&self) -> bool {
+        !self.dims.is_empty()
+    }
 }
 
 #[derive(Debug)]
@@ -33,10 +43,11 @@ pub struct FuncDef {
     /// other return types) because a `void` call used as a value
     /// must yield zero rather than a returned value.
     pub is_void: bool,
-    /// `true` when the function returns a pointer (a byte holding
-    /// a tape index). Set by a `*` return declarator or by a
-    /// pointer typedef as the return type.
-    pub returns_pointer: bool,
+    /// Pointer depth of the return type: `0` for a scalar, `1`
+    /// for a `*` return declarator, `2` for `**`. Set by a
+    /// `*` return declarator or by a pointer typedef as the
+    /// return type.
+    pub returns_ptr_depth: u8,
     pub params: Vec<FnParam>,
     pub body: Block,
 }
@@ -48,7 +59,7 @@ pub struct FuncDef {
 pub struct FuncDecl {
     pub name: Vec<u8>,
     pub is_void: bool,
-    pub returns_pointer: bool,
+    pub returns_ptr_depth: u8,
     pub params: Vec<FnParam>,
 }
 
@@ -61,11 +72,13 @@ pub struct TypedefDecl {
     /// Space-joined aliased specifier words (`int`,
     /// `unsigned int`).
     pub spec: Vec<u8>,
-    pub pointer: bool,
-    /// Sized array alias: element count, evaluated at definition
-    /// (array sizes must be integer literals, as for arrays).
-    pub array_len: Option<i32>,
-    pub array_unsized: bool,
+    /// Pointer depth of the alias (`0`, `1`, `2`).
+    pub ptr_depth: u8,
+    /// Array dimensions of the alias, one entry per bracket:
+    /// a sized dimension holds the element count, evaluated
+    /// at definition (array sizes must be integer literals,
+    /// as for arrays), `None` is an unsized dimension.
+    pub dims: Vec<Option<i32>>,
 }
 
 #[derive(Debug)]
@@ -78,13 +91,14 @@ pub struct Decl {
 #[derive(Debug)]
 pub struct InitDecl {
     pub name: Vec<u8>,
-    /// `true` for a single-`*` pointer declarator (`char *p`).
-    pub pointer: bool,
-    /// Array size expression for `name[N]`; `None` for scalars.
-    pub array_len: Option<Expr>,
-    /// `true` for an unsized declarator (`name[]`); only a string
-    /// initializer may size it.
-    pub array_unsized: bool,
+    /// Pointer depth of the declarator (`0`, `1`, `2`).
+    pub ptr_depth: u8,
+    /// Array dimensions, one entry per bracket: `Some` holds
+    /// the size expression for `name[N]`, `None` an unsized
+    /// declarator (`name[]`); empty for scalars. Only the
+    /// outermost dimension may be unsized, and only a string
+    /// or list initializer may size it.
+    pub dims: Vec<Option<Expr>>,
     pub init: Option<Expr>,
 }
 
@@ -254,12 +268,12 @@ fn dump_params(params: &[FnParam], out: &mut Vec<u8>) {
         } else {
             open_text(out, "param", &p.name);
         }
-        if p.pointer {
+        for _ in 0..p.ptr_depth {
             out.push(b' ');
             open(out, "pointer");
             close(out);
         }
-        if p.array {
+        for _ in &p.dims {
             out.push(b' ');
             open(out, "array");
             close(out);
@@ -294,19 +308,17 @@ fn dump_external(e: &External, out: &mut Vec<u8>) {
             open_text(out, "typedef", &t.name);
             out.push(b' ');
             escape_into(out, &t.spec);
-            if t.pointer {
+            for _ in 0..t.ptr_depth {
                 out.push(b' ');
                 open(out, "pointer");
                 close(out);
             }
-            if let Some(len) = t.array_len {
+            for dim in &t.dims {
                 out.push(b' ');
-                open_text(out, "int", len.to_string().as_bytes());
-                close(out);
-            }
-            if t.array_unsized {
-                out.push(b' ');
-                open(out, "unsized");
+                match dim {
+                    Some(len) => open_text(out, "int", len.to_string().as_bytes()),
+                    None => open(out, "unsized"),
+                }
                 close(out);
             }
             close(out);
@@ -319,19 +331,20 @@ fn dump_decl(d: &Decl, out: &mut Vec<u8>) {
     for init in &d.inits {
         out.push(b' ');
         open_text(out, "initdecl", &init.name);
-        if init.pointer {
+        for _ in 0..init.ptr_depth {
             out.push(b' ');
             open(out, "pointer");
             close(out);
         }
-        if let Some(len) = &init.array_len {
+        for dim in &init.dims {
             out.push(b' ');
-            dump_expr(len, out);
-        }
-        if init.array_unsized {
-            out.push(b' ');
-            open(out, "unsized");
-            close(out);
+            match dim {
+                Some(len) => dump_expr(len, out),
+                None => {
+                    open(out, "unsized");
+                    close(out);
+                }
+            }
         }
         if let Some(e) = &init.init {
             out.push(b' ');
