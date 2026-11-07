@@ -453,6 +453,19 @@ impl<'a> Parser<'a> {
             spec.storage = storage;
             return Ok(spec);
         };
+        // A typedef name is hidden in any enclosing scope where
+        // a variable, parameter, or `for` declarator of the same
+        // name is declared (the same scope tracking that hides
+        // enumerators): using it as a specifier there is a
+        // parse error, as in C, rather than silently expanding
+        // the alias. The name is visible again when the scope
+        // ends, because `scopes` pops with the block.
+        if self.is_declared(&words[at]) {
+            return self.fail(format!(
+                "typedef name '{}' is hidden by a declaration of the same name",
+                String::from_utf8_lossy(&words[at])
+            ));
+        }
         if words
             .iter()
             .filter(|w| self.typedefs.contains_key(w.as_slice()))
@@ -2431,6 +2444,45 @@ mod tests {
                 Ok(_) => panic!("accepted {:?}", src),
             }
         }
+    }
+
+    #[test]
+    fn typedef_shadowing() {
+        // A typedef name hidden by a declaration of the same
+        // name in an enclosing scope does not expand in
+        // specifier position: block, parameter, `for`, and
+        // file scope all hide it, as in C.
+        for src in [
+            "typedef int T; int main() { int T = 1; T x = 2; return 0; }",
+            "typedef int T; int f(int T) { T x = 1; return 0; }",
+            "typedef int T; int main() { for (int T = 0; T < 1; T++) { T x = 1; } return 0; }",
+            "typedef int T; int T = 1; T x = 2;",
+        ] {
+            match parse(src.as_bytes()) {
+                Err(e) => assert!(
+                    e.msg.contains("is hidden by a declaration"),
+                    "for {:?}: got error {:?}",
+                    src,
+                    e.msg
+                ),
+                Ok(_) => panic!("accepted shadowed typedef use: {:?}", src),
+            }
+        }
+        // The alias is visible again when the shadowing scope
+        // ends, and the shadowing name itself still works as
+        // a value.
+        assert_sexp(
+            "typedef int T; int main() { { int T = 1; } T x = 2; return x; }",
+            "(tu (typedef T int) (funcdef main (compound (compound (decl int (initdecl T (int 1)))) (decl int (initdecl x (int 2))) (return (ident x)))))",
+        );
+        assert_sexp(
+            "typedef int T; int main() { int T = 1; return T; }",
+            "(tu (typedef T int) (funcdef main (compound (decl int (initdecl T (int 1))) (return (ident T)))))",
+        );
+        assert_sexp(
+            "typedef int T; int f(int T) { return T; } int main() { T x = 3; return x; }",
+            "(tu (typedef T int) (funcdef f (params (param T)) (compound (return (ident T)))) (funcdef main (compound (decl int (initdecl x (int 3))) (return (ident x)))))",
+        );
     }
 
     #[test]

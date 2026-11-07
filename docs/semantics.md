@@ -280,16 +280,16 @@ call site.
   optional parameter names: `int f(int);` declares `f` without a
   body and emits nothing. A prototype must agree with its
   definition and with any earlier prototype: same void-ness,
-  same pointer return, same parameter count, same pointer/array
-  flags per parameter; parameter names and type spellings may
-  differ (all spellings denote one byte). Repeated compatible
-  prototypes are allowed; a conflicting one is a compile error.
-  Calling a function with only a prototype is a compile error
-  (there is no body to expand); an uncalled prototype compiles.
-  No function pointers. A pointer return may be spelled
-  directly (`char *f()`) or through a typedef alias (see
-  Typedefs); both spellings carry the same signature. A second
-  `*` is a pointer to a pointer and is not supported.
+  same pointer-return depth, same parameter count, same pointer
+  depth and post-first dimensions per parameter; parameter names
+  and type spellings may differ (all spellings denote one byte).
+  Repeated compatible prototypes are allowed; a conflicting one
+  is a compile error. Calling a function with only a prototype
+  is a compile error (there is no body to expand); an uncalled
+  prototype compiles. No function pointers. A pointer return
+  may be spelled directly (`char *f()`, `int **f()`) or
+  through a typedef alias (see Typedefs); both spellings
+  carry the same signature. A third `*` is an error.
 - Declarations are lexically scoped: a declaration in a nested
   block shadows an outer one (each gets its own cells). A
   declaration at the top level of a function body may not reuse
@@ -324,9 +324,12 @@ nothing.
   body is a parse error (like prototypes). An alias is visible
   from its definition onward, in source order; uses before the
   definition treat the name as an opaque specifier word, as any
-  unknown word pair already does. A typedef name does not hide
-  behind a variable of the same name: the alias always wins in
-  specifier position, a documented deviation from C scoping.
+  unknown word pair already does. A typedef name is hidden in
+  any scope where a variable, parameter, or `for` declarator
+  of the same name is declared: using it as a specifier there
+  is a parse error, and it is visible again when that scope
+  ends, matching C scoping (a name used as a value is
+  unaffected; only specifier position hides the alias).
 - One declarator per declaration, no initializer, no comma list.
   The declarator may add `*` or `[]` to a scalar alias, and
   the additions compose with the aliased flags: a pointer
