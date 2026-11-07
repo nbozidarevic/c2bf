@@ -1,6 +1,7 @@
 # Temporary golden snapshot for the pointer-to-pointer fixture.
 # Never merged as a standing workflow; removed after the
-# snapshot is committed.
+# snapshot is committed. Re-triggered once the crate
+# compiles at the snapshot commit.
 name: golden-snapshot
 
 on:
