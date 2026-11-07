@@ -124,13 +124,19 @@ BINOPS = ["+", "-", "*", "/", "%", "<<", ">>", "&", "|", "^",
 
 class Gen:
     """One program. `env` maps scalar names to (lo, hi) intervals;
-    `arrays` maps names to (length, (lo, hi), is_string)."""
+    `arrays` maps names to (length, (lo, hi), is_string). `mdims`
+    maps two-dimensional array names to their [rows, cols];
+    their `arrays` entry keeps the total length. `pptrs` maps
+    pointer-to-pointer names to the pointer they are bound to;
+    bindings are fixed at declaration, like `ptrs`."""
 
     def __init__(self, rng):
         self.rng = rng
         self.env = {}
         self.arrays = {}
         self.ptrs = {}
+        self.mdims = {}
+        self.pptrs = {}
         self.chartypes = set()
         self.helpers = {}
         self.protected = set()
@@ -262,20 +268,75 @@ class Gen:
         if char_arrays:
             name = self.rng.choice(char_arrays)
             return (f"(sizeof({name}))", self.arrays[name][0], self.arrays[name][0])
+        char2d = [n for n in self.mdims
+                  if self.arrays[n][3]]
+        if char2d and roll < 0.92:
+            name = self.rng.choice(char2d)
+            cols = self.mdims[name][1]
+            r = self.rng.randrange(self.mdims[name][0])
+            return (f"(sizeof({name}[{r}]))", cols, cols)
         return (f"(!{inner[0]})", 0, 1)
 
     def indexable(self):
-        """(name, length) of an array usable for reads/writes."""
-        if not self.arrays:
+        """(name, length) of a one-dimensional array usable for
+        reads/writes; two-dimensional arrays are handled by
+        `indexable2d` (a single subscript names a row there,
+        whose value is an address the models disagree on)."""
+        names = [n for n in self.arrays if n not in self.mdims]
+        if not names:
             return None
-        name = self.rng.choice(list(self.arrays))
+        name = self.rng.choice(names)
         length = self.arrays[name][0]
         return (name, length)
+
+    def indexable2d(self):
+        """(name, rows, cols) of a two-dimensional array."""
+        if not self.mdims:
+            return None
+        name = self.rng.choice(list(self.mdims))
+        rows, cols = self.mdims[name]
+        return (name, rows, cols)
+
+    def ptr_target_iv(self, ppname):
+        """Interval of the ultimate target of a
+        pointer-to-pointer: the scalar interval, or the whole
+        array interval (a join over all its elements)."""
+        tgt = self.pptrs[ppname]
+        kind, ultimate, _ = self.ptrs[tgt]
+        if kind == "var":
+            return self.env[ultimate]
+        return self.arrays[ultimate][1]
+
+    def ptr_target_len(self, ppname):
+        """Subscript bound for `(*pp)[k]`: None for a scalar
+        target, the row length for a row pointer, the total
+        length for an array pointer."""
+        tgt = self.pptrs[ppname]
+        kind, ultimate, _ = self.ptrs[tgt]
+        if kind == "var":
+            return None
+        if kind == "arrayrow":
+            return self.mdims[ultimate][1]
+        return self.arrays[ultimate][0]
 
     def readable_expr(self, depth):
         """Expression usable as an rvalue, including array reads;
         intervals still hold."""
         rng = self.rng
+        if rng.random() < 0.1 and self.mdims:
+            got = self.indexable2d()
+            if got:
+                name, rows, cols = got
+                iv = self.arrays[name][1]
+                if rng.random() < 0.6:
+                    i = rng.randrange(rows)
+                    j = rng.randrange(cols)
+                    return (f"{name}[{i}][{j}]", *iv)
+                i = self.expr(depth - 1)
+                j = self.expr(depth - 1)
+                if (0 <= i[1] and i[2] < rows
+                        and 0 <= j[1] and j[2] < cols):
+                    return (f"{name}[{i[0]}][{j[0]}]", *iv)
         if rng.random() < 0.22:
             got = self.indexable()
             if got:
@@ -292,10 +353,32 @@ class Gen:
             kind, target, is_char = self.ptrs[pname]
             if kind == "var":
                 return (f"*{pname}", *self.env[target])
-            length = self.arrays[target][0]
+            if kind == "arrayrow":
+                length = self.mdims[target][1]
+            else:
+                length = self.arrays[target][0]
             iv = self.arrays[target][1]
             k = rng.randrange(length)
             return (f"{pname}[{k}]", *iv)
+        if self.pptrs and rng.random() < 0.25:
+            ppname = rng.choice(list(self.pptrs))
+            iv = self.ptr_target_iv(ppname)
+            length = self.ptr_target_len(ppname)
+            if length is not None and rng.random() < 0.65:
+                if rng.random() < 0.6:
+                    k = rng.randrange(length)
+                    form = rng.choice([f"(*{ppname})[{k}]",
+                                       f"{ppname}[0][{k}]"])
+                    return (form, *iv)
+                idx = self.expr(depth - 1)
+                if 0 <= idx[1] and idx[2] < length:
+                    form = rng.choice([f"(*{ppname})[{idx[0]}]",
+                                       f"{ppname}[0][{idx[0]}]"])
+                    return (form, *iv)
+            # A dereferenced pointer value is an address and
+            # must never be printed or used as a number; only
+            # the double dereference carries a value interval.
+            return (f"**{ppname}", *iv)
         return self.expr(depth)
 
     # --- declarations ---------------------------------------------
@@ -365,8 +448,15 @@ class Gen:
         if self.arrays and rng.random() < 0.5:
             target = rng.choice(list(self.arrays))
             length, _, _, is_char = self.arrays[target]
-            self.ptrs[name] = ("array", target, is_char)
             typ = "char" if is_char else "int"
+            if target in self.mdims and rng.random() < 0.5:
+                # Row decay: the pointer names one row; its
+                # length is the row length, its interval the
+                # whole-array join.
+                r = rng.randrange(self.mdims[target][0])
+                self.ptrs[name] = ("arrayrow", target, is_char)
+                return f"{typ} *{name} = {target}[{r}];"
+            self.ptrs[name] = ("array", target, is_char)
             return f"{typ} *{name} = {target};"
         names = [n for n in self.env if n not in self.protected]
         if not names:
@@ -376,6 +466,76 @@ class Gen:
         self.ptrs[name] = ("var", target, is_char)
         typ = "char" if is_char else "int"
         return f"{typ} *{name} = &{target};"
+
+    def decl_md_array(self):
+        """One two-dimensional array, at most 3x3, filled by a
+        flat or nested list with zero fill folded into the
+        interval (a short row or a truncated flat list leaves
+        zeroes behind)."""
+        rng = self.rng
+        name = self.fresh("m")
+        is_char = rng.random() < 0.5
+        typ = "char" if is_char else "int"
+        cap = 127 if is_char else 255
+        rows = rng.randint(2, 3)
+        cols = rng.randint(2, 3)
+
+        def elem():
+            return self.char_elem() if is_char else self.capped(2, cap)
+
+        nested = rng.random() < 0.6
+        zero_fill = False
+        if nested:
+            grid = []
+            for _ in range(rows):
+                n = rng.randint(1, cols)
+                grid.append([elem() for _ in range(n)])
+                if n < cols:
+                    zero_fill = True
+            lo = min(e[1] for row in grid for e in row)
+            hi = max(e[2] for row in grid for e in row)
+            if zero_fill:
+                lo = 0
+            self.arrays[name] = (rows * cols, (lo, hi), False, is_char)
+            self.mdims[name] = [rows, cols]
+            text = ", ".join(
+                "{" + ", ".join(e[0] for e in row) + "}" for row in grid)
+            return f"{typ} {name}[{rows}][{cols}] = {{{text}}};"
+        total = rows * cols
+        n = rng.randint(1, total)
+        elems = [elem() for _ in range(n)]
+        lo = min(e[1] for e in elems)
+        hi = max(e[2] for e in elems)
+        if n < total:
+            lo = 0
+        self.arrays[name] = (total, (lo, hi), False, is_char)
+        self.mdims[name] = [rows, cols]
+        inits = ", ".join(e[0] for e in elems)
+        return f"{typ} {name}[{rows}][{cols}] = {{{inits}}};"
+
+    def decl_pp(self):
+        """A pointer-to-pointer bound to an existing pointer.
+        The binding never changes: rebinding or incrementing
+        a pointer would advance by a cell here and by
+        sizeof(int) in C, so only dereference chains are
+        generated for it."""
+        rng = self.rng
+        if not self.ptrs:
+            return None
+        name = self.fresh("pp")
+        # Bind mostly to array pointers: only those give a
+        # chain form (`(*pp)[k]`), scalar targets only give
+        # `**pp`.
+        array_ptrs = [n for n, p in self.ptrs.items()
+                      if p[0] in ("array", "arrayrow")]
+        if array_ptrs and rng.random() < 0.7:
+            target = rng.choice(array_ptrs)
+        else:
+            target = rng.choice(list(self.ptrs))
+        is_char = self.ptrs[target][2]
+        self.pptrs[name] = target
+        typ = "char" if is_char else "int"
+        return f"{typ} **{name} = &{target};"
 
     # --- statements -------------------------------------------------
 
@@ -453,6 +613,29 @@ class Gen:
             self.env[name] = (e[1], e[2])
             return
         if roll < 0.4:
+            if self.mdims and rng.random() < 0.35:
+                got = self.indexable2d()
+                if got:
+                    name, rows, cols = got
+                    old = self.arrays[name]
+                    _, iv, _, is_char = old
+                    cap = 127 if is_char else 255
+                    e = self.capped(depth, cap)
+                    if rng.random() < 0.6:
+                        i = rng.randrange(rows)
+                        j = rng.randrange(cols)
+                        lines.append(f"{name}[{i}][{j}] = {e[0]};")
+                    else:
+                        i = self.expr(depth - 1)
+                        j = self.expr(depth - 1)
+                        if (0 <= i[1] and i[2] < rows
+                                and 0 <= j[1] and j[2] < cols):
+                            lines.append(f"{name}[{i[0]}][{j[0]}] = {e[0]};")
+                        else:
+                            return
+                    self.arrays[name] = (old[0], iv_join(iv, (e[1], e[2])),
+                                         old[2], old[3])
+                    return
             got = self.indexable()
             if got:
                 name, length = got
@@ -471,6 +654,44 @@ class Gen:
                 self.arrays[name] = (length, iv_join(iv, (e[1], e[2])),
                                      self.arrays[name][2], is_char)
                 return
+        if roll < 0.47 and self.pptrs and rng.random() < 0.6:
+            ppname = rng.choice(list(self.pptrs))
+            tgt = self.pptrs[ppname]
+            kind, ultimate, is_char = self.ptrs[tgt]
+            cap = 127 if is_char else 255
+            e = self.capped(depth, cap)
+            length = self.ptr_target_len(ppname)
+            if length is not None and rng.random() < 0.65:
+                form = None
+                if rng.random() < 0.6:
+                    k = rng.randrange(length)
+                    form = rng.choice([f"(*{ppname})[{k}]",
+                                       f"{ppname}[0][{k}]"])
+                else:
+                    idx = self.expr(depth - 1)
+                    if 0 <= idx[1] and idx[2] < length:
+                        form = rng.choice([f"(*{ppname})[{idx[0]}]",
+                                           f"{ppname}[0][{idx[0]}]"])
+                if form is not None:
+                    lines.append(f"{form} = {e[0]};")
+                    old = self.arrays[ultimate]
+                    self.arrays[ultimate] = (
+                        old[0], iv_join(old[1], (e[1], e[2])), old[2], old[3])
+                    return
+            if kind == "var" and rng.random() < 0.25:
+                lo, hi = self.env[ultimate]
+                if hi < cap:
+                    lines.append(f"(**{ppname})++;")
+                    self.env[ultimate] = (lo + 1, hi + 1)
+                    return
+            lines.append(f"**{ppname} = {e[0]};")
+            if kind == "var":
+                self.env[ultimate] = (e[1], e[2])
+            else:
+                old = self.arrays[ultimate]
+                self.arrays[ultimate] = (
+                    old[0], iv_join(old[1], (e[1], e[2])), old[2], old[3])
+            return
         if roll < 0.47 and self.ptrs:
             pname = rng.choice(list(self.ptrs))
             kind, target, is_char = self.ptrs[pname]
@@ -480,11 +701,14 @@ class Gen:
                 lines.append(f"*{pname} = {e[0]};")
                 self.env[target] = (e[1], e[2])
             else:
-                length = self.arrays[target][0]
+                if kind == "arrayrow":
+                    length = self.mdims[target][1]
+                else:
+                    length = self.arrays[target][0]
                 k = rng.randrange(length)
                 lines.append(f"{pname}[{k}] = {e[0]};")
                 old = self.arrays[target]
-                self.arrays[target] = (length, iv_join(old[1], (e[1], e[2])),
+                self.arrays[target] = (old[0], iv_join(old[1], (e[1], e[2])),
                                         old[2], old[3])
             return
         if roll < 0.52 and self.assignable():
@@ -627,11 +851,41 @@ class Gen:
         for _ in range(n):
             self.stmt(depth, loop, lines, pure, allow_while, allow_loop)
 
+    def chain_read(self, depth):
+        """A `(*pp)[k]` / `pp[0][k]` read, or None when no
+        pointer-to-pointer has an array ultimate, or the index
+        does not fit in bounds."""
+        rng = self.rng
+        eligible = [n for n in self.pptrs
+                    if self.ptr_target_len(n) is not None]
+        if not eligible:
+            return None
+        ppname = rng.choice(eligible)
+        length = self.ptr_target_len(ppname)
+        iv = self.ptr_target_iv(ppname)
+        if rng.random() < 0.6:
+            k = rng.randrange(length)
+            form = rng.choice([f"(*{ppname})[{k}]",
+                               f"{ppname}[0][{k}]"])
+            return (form, *iv)
+        idx = self.expr(depth - 1)
+        if 0 <= idx[1] and idx[2] < length:
+            form = rng.choice([f"(*{ppname})[{idx[0]}]",
+                               f"{ppname}[0][{idx[0]}]"])
+            return (form, *iv)
+        return None
+
     def gen_printf(self, lines):
         rng = self.rng
         parts = []
         args = []
         for _ in range(rng.randint(1, 3)):
+            if rng.random() < 0.15:
+                got = self.chain_read(2)
+                if got is not None:
+                    parts.append("%d")
+                    args.append(got[0])
+                    continue
             roll = rng.random()
             if roll < 0.14:
                 strings = [n for n, a in self.arrays.items() if a[2]]
@@ -702,16 +956,20 @@ class Gen:
 
     def gen_helper(self):
         rng = self.rng
-        saved = (self.env, self.arrays, self.chartypes, self.ptrs)
+        saved = (self.env, self.arrays, self.chartypes, self.ptrs,
+                 self.mdims, self.pptrs)
         self.env = {"hp": (0, 255)}
         self.arrays = {}
         self.chartypes = set()
         self.ptrs = {}
+        self.mdims = {}
+        self.pptrs = {}
         lines = []
         if rng.random() < 0.6:
             lines.append(self.decl_scalar())
         ret = self.readable_expr(2)
-        self.env, self.arrays, self.chartypes, self.ptrs = saved
+        (self.env, self.arrays, self.chartypes, self.ptrs,
+         self.mdims, self.pptrs) = saved
         self.helpers["helper"] = (ret[1], ret[2])
         body = "\n".join("  " + l for l in lines)
         tail = f"  return {ret[0]};"
@@ -728,13 +986,28 @@ def gen_program(seed):
     lines = []
     for _ in range(rng.randint(2, 4)):
         roll = rng.random()
-        if roll < 0.5:
+        if roll < 0.42:
             lines.append(g.decl_scalar())
-        elif roll < 0.8:
+        elif roll < 0.66:
             lines.append(g.decl_array())
-        else:
+        elif roll < 0.78:
             decl = g.decl_pointer()
             lines.append(decl if decl else g.decl_scalar())
+        elif roll < 0.86 and not g.mdims:
+            lines.append(g.decl_md_array())
+        elif roll < 0.86:
+            lines.append(g.decl_array())
+        else:
+            decl = g.decl_pp()
+            lines.append(decl if decl else g.decl_scalar())
+    # A pointer-to-pointer declaration needs a pointer declared
+    # before it, which the loop above only sometimes provides;
+    # bind one afterwards half the time a pointer exists, so
+    # dereference chains get steady coverage.
+    if g.ptrs and not g.pptrs and rng.random() < 0.5:
+        decl = g.decl_pp()
+        if decl:
+            lines.append(decl)
     stdin_parts = []
     if rng.random() < 0.4:
         decls, line, tokens = g.gen_scanf()

@@ -93,6 +93,25 @@ keeps a `[lo, hi]` bound):
   documented `scanf` deviations (terminator consumed, `%i`
   `09` handling) would make the two models legitimately
   disagree there.
+- Pointer-to-pointer bindings are fixed at declaration
+  (`**pp = &p`) and never rebound or incremented: pointer
+  arithmetic advances by one cell here and by `sizeof(int)`
+  in C, so only dereference chains are generated. `**pp`
+  reads and writes carry the ultimate target's interval
+  (the whole-array join for array targets); `(*pp)[k]` and
+  `pp[0][k]` carry the array interval with `k` in bounds.
+  A dereferenced pointer value is never printed or used as
+  a number: addresses differ between the models. About one
+  program in ten declares a `**` binding, and a handful per
+  300 seeds exercise a chain subscript.
+- Multi-dimensional arrays are at most 2D and 3x3, at most
+  one per program, filled by flat or nested lists with zero
+  fill folded into the interval. Both indices are in range
+  (constant or interval-bounded). A row subscript appears
+  only as a pointer initializer (`*p = a[r]`), never as a
+  printed value or a `%s` argument. `sizeof` of a row is
+  generated only for `char` arrays, where element counts
+  agree (see the `sizeof` rule above).
 - Expressions are pure: no assignments, increments, or calls
   with side effects inside them, so evaluation order cannot
   change the result. Helper functions are pure too (one
@@ -145,10 +164,13 @@ keeps a `[lo, hi]` bound):
   mismatches and skips within cap.
 
 Not covered (yet): `scanf %s`/`%c` input, negative `scanf`
-tokens, recursion, function pointers, `goto`, structs,
-multi-dimensional arrays, pointer-to-pointer, and floats. Each
-is either unsupported or needs its own agreement argument
-before the generator may emit it.
+tokens, recursion, function pointers, `goto`, structs, and
+floats. Each is either unsupported or needs its own
+agreement argument before the generator may emit it.
+Three-dimensional arrays, `**` returns and parameters, and
+typedef-composed dimensions are supported by the compiler
+but not generated: the generator caps dimensions at 2D and
+generates no helper signatures beyond one scalar parameter.
 
 ## Extending the generator
 
