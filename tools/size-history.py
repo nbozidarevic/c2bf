@@ -254,6 +254,18 @@ MILESTONES = [
         "break on 159 (was 181) and continue on 214 (was 229); "
         "runtime footprints backfilled for all 51 fixtures.",
     ),
+    (
+        "fc99c9e4821fe32d5eefac34ee0676ec940c948f",
+        "Pointer-to-pointer + multi-dimensional arrays",
+        "Pointer depth (at most 2) and array dimensions "
+        "become lists in the AST, and subscript chains "
+        "address through loads (0016). All 51 existing "
+        "fixtures are byte-identical, with allocated cells "
+        "and runtime footprints unchanged. Adds two "
+        "fixtures: ptrptr (14,138,504 BF bytes on 532 "
+        "cells) and multidim (4,935,462 BF bytes on 619 "
+        "cells).",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
