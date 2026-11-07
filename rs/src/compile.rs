@@ -2557,7 +2557,7 @@ impl Emitter {
                 let row_dims: Vec<usize> = param.dims[1..]
                     .iter()
                     .copied()
-                    .map(|d| d.expect("parameter stride is sized"))
+                    .map(|d| d.expect("parameter stride is sized") as usize)
                     .collect();
                 self.param_dims.insert(param.name.clone(), row_dims);
             }
