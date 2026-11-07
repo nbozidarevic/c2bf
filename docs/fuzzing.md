@@ -106,14 +106,43 @@ keeps a `[lo, hi]` bound):
   a number: addresses differ between the models. About one
   program in ten declares a `**` binding, and a handful per
   300 seeds exercise a chain subscript.
-- Multi-dimensional arrays are at most 2D and 3x3, at most
-  one per program, filled by flat or nested lists with zero
-  fill folded into the interval. Both indices are in range
-  (constant or interval-bounded). A row subscript appears
-  only as a pointer initializer (`*p = a[r]`), never as a
-  printed value or a `%s` argument. `sizeof` of a row is
+- Multi-dimensional arrays are at most 3D, each dimension
+  2..3, at most one per program, filled by flat or nested
+  lists with zero fill folded into the interval. Every index
+  is in range (constant or interval-bounded). A row
+  subscript appears only as a pointer initializer (`*p =
+  a[r]` for 2D arrays), never as a printed value or a `%s`
+  argument; a 3D array name decays through its first rows
+  to the first element instead. `sizeof` of a row is
   generated only for `char` arrays, where element counts
-  agree (see the `sizeof` rule above).
+  agree (see the `sizeof` rule above). List elements never
+  contain `sizeof`: a `size_t` value in a braced-list
+  element is a narrowing error in C++, even when the value
+  fits.
+- One file-scope typedef per program at most, pointer or
+  array alias, spelled through in declarations (`TPA *pp`
+  for depth 2, `TAA m[n]` for composed dimensions). Alias
+  uses are rare by construction (the alias must precede a
+  declaration of matching element type); the same paths
+  are covered by hand fixtures and parser tests.
+- Helper functions are occasionally `**` helpers
+  (`int helper(int **hp) { return **hp; }`, `char` flavor
+  too), called only with the address of a pointer of the
+  matching element type. The return interval is the wide
+  bound for the ultimate target, narrowed by the usual
+  `fits()` and `capped()` retries.
+- `scanf` appears in exactly one of three shapes per
+  program: the existing numeric prologue, one `%s` into a
+  one-dimensional char array with a word short enough to
+  fit (token plus NUL), or one `%c` as the only conversion,
+  reading one letter. At most one kind appears, so the
+  terminator-consumed deviation can never affect a later
+  `%c` conversion. Negative `scanf` tokens are not
+  generated: a negative token's C value and byte value
+  differ, and tracking both would need dual intervals
+  through every expression the value flows into; the
+  defined wrap-back behavior stays covered by the `io`
+  fixture instead.
 - Expressions are pure: no assignments, increments, or calls
   with side effects inside them, so evaluation order cannot
   change the result. Helper functions are pure too (one
@@ -169,10 +198,11 @@ Not covered (yet): `scanf %s`/`%c` input, negative `scanf`
 tokens, recursion, function pointers, `goto`, structs, and
 floats. Each is either unsupported or needs its own
 agreement argument before the generator may emit it.
-Three-dimensional arrays, `**` returns and parameters, and
-typedef-composed dimensions are supported by the compiler
-but not generated: the generator caps dimensions at 2D and
-generates no helper signatures beyond one scalar parameter.
+Not generated: `scanf` with negative tokens (see the
+`scanf` bullet above), and functions taking
+multi-dimensional array parameters (helpers take one
+scalar or one `**` parameter only; array parameters are
+covered by the `multidim` fixture).
 
 ## Extending the generator
 

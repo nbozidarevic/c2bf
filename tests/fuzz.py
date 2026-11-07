@@ -137,6 +137,7 @@ class Gen:
         self.ptrs = {}
         self.mdims = {}
         self.pptrs = {}
+        self.aliases = {}
         self.chartypes = set()
         self.helpers = {}
         self.protected = set()
@@ -234,7 +235,21 @@ class Gen:
         return (f"({cond[0]} ? {a[0]} : {b[0]})", *iv)
 
     def call(self, depth, allow_sizeof=True):
-        name, ret_iv = self.rng.choice(list(self.helpers.items()))
+        name, (ret_iv, is_pp, is_char) = self.rng.choice(
+            list(self.helpers.items()))
+        if is_pp:
+            # A `**` parameter takes the address of a pointer
+            # of the matching element type; the returned
+            # interval is the wide (0..255) / (0..127) bound
+            # for whatever that pointer ultimately names.
+            # With no such pointer in scope, there is no
+            # well-typed call: fall back to a leaf.
+            eligible = [n for n, p in self.ptrs.items()
+                        if p[2] == is_char]
+            if not eligible:
+                return self.leaf()
+            pname = self.rng.choice(eligible)
+            return (f"{name}(&{pname})", *ret_iv)
         arg = self.expr(depth - 1, allow_call=False,
                         allow_sizeof=allow_sizeof)
         return (f"{name}({arg[0]})", *ret_iv)
@@ -280,9 +295,14 @@ class Gen:
                       if self.arrays[n][3]]
             if char2d and roll < 0.92:
                 name = self.rng.choice(char2d)
-                cols = self.mdims[name][1]
-                r = self.rng.randrange(self.mdims[name][0])
-                return (f"(sizeof({name}[{r}]))", cols, cols)
+                dims = self.mdims[name]
+                # sizeof of one row: the product of the
+                # remaining dimensions.
+                size = 1
+                for d in dims[1:]:
+                    size *= d
+                r = self.rng.randrange(dims[0])
+                return (f"(sizeof({name}[{r}]))", size, size)
         return (f"(!{inner[0]})", 0, 1)
 
     def indexable(self):
@@ -298,12 +318,28 @@ class Gen:
         return (name, length)
 
     def indexable2d(self):
-        """(name, rows, cols) of a two-dimensional array."""
+        """(name, dims) of a multi-dimensional array."""
         if not self.mdims:
             return None
         name = self.rng.choice(list(self.mdims))
-        rows, cols = self.mdims[name]
-        return (name, rows, cols)
+        return (name, self.mdims[name])
+
+    def subscript_text(self, name, depth):
+        """A fully-subscripted access `name[i][j]...` with every
+        index in range, or None: constant indices most of the
+        time, interval-bounded variable indices otherwise."""
+        rng = self.rng
+        dims = self.mdims[name]
+        if rng.random() < 0.6:
+            idx = [str(rng.randrange(d)) for d in dims]
+            return "".join(f"[{k}]" for k in idx)
+        parts = []
+        for d in dims:
+            e = self.expr(depth - 1)
+            if not (0 <= e[1] and e[2] < d):
+                return None
+            parts.append(e[0])
+        return "".join(f"[{k}]" for k in parts)
 
     def ptr_target_iv(self, ppname):
         """Interval of the ultimate target of a
@@ -334,17 +370,11 @@ class Gen:
         if rng.random() < 0.1 and self.mdims:
             got = self.indexable2d()
             if got:
-                name, rows, cols = got
+                name, _ = got
                 iv = self.arrays[name][1]
-                if rng.random() < 0.6:
-                    i = rng.randrange(rows)
-                    j = rng.randrange(cols)
-                    return (f"{name}[{i}][{j}]", *iv)
-                i = self.expr(depth - 1)
-                j = self.expr(depth - 1)
-                if (0 <= i[1] and i[2] < rows
-                        and 0 <= j[1] and j[2] < cols):
-                    return (f"{name}[{i[0]}][{j[0]}]", *iv)
+                sub = self.subscript_text(name, depth)
+                if sub is not None:
+                    return (f"{name}{sub}", *iv)
         if rng.random() < 0.22:
             got = self.indexable()
             if got:
@@ -458,19 +488,23 @@ class Gen:
             target = rng.choice(list(self.arrays))
             length, _, _, is_char = self.arrays[target]
             typ = "char" if is_char else "int"
-            if target in self.mdims and rng.random() < 0.5:
+            if len(self.mdims.get(target, [])) == 2 and rng.random() < 0.5:
                 # Row decay: the pointer names one row; its
                 # length is the row length, its interval the
-                # whole-array join.
+                # whole-array join. (A row of a 3D array is
+                # itself an array, not an element pointer, so
+                # row decay only applies to 2D arrays.)
                 r = rng.randrange(self.mdims[target][0])
                 self.ptrs[name] = ("arrayrow", target, is_char)
                 return f"{typ} *{name} = {target}[{r}];"
             if target in self.mdims:
-                # A two-dimensional array name decays to a
+                # A multi-dimensional array name decays to a
                 # pointer to its first row, not to an element
-                # pointer: decay through the first row.
+                # pointer: decay through the first row (or
+                # rows) to the first element.
+                zeros = "[0]" * (len(self.mdims[target]) - 1)
                 self.ptrs[name] = ("array", target, is_char)
-                return f"{typ} *{name} = {target}[0];"
+                return f"{typ} *{name} = {target}{zeros};"
             self.ptrs[name] = ("array", target, is_char)
             return f"{typ} *{name} = {target};"
         names = [n for n in self.env if n not in self.protected]
@@ -482,53 +516,103 @@ class Gen:
         typ = "char" if is_char else "int"
         return f"{typ} *{name} = &{target};"
 
-    def decl_md_array(self):
-        """One two-dimensional array, at most 3x3, filled by a
-        flat or nested list with zero fill folded into the
-        interval (a short row or a truncated flat list leaves
-        zeroes behind)."""
+    def gen_typedef(self):
+        """One file-scope typedef, pointer or array alias.
+        Uses are spelled through the alias in declarations;
+        the alias name never collides with a variable stem."""
         rng = self.rng
-        name = self.fresh("m")
+        if rng.random() < 0.5:
+            is_char = rng.random() < 0.5
+            typ = "char" if is_char else "int"
+            self.aliases["TPA"] = ("ptr", 1, is_char)
+            return f"typedef {typ} *TPA;"
         is_char = rng.random() < 0.5
         typ = "char" if is_char else "int"
+        dim = rng.randint(2, 3)
+        self.aliases["TAA"] = ("array", [dim], is_char)
+        return f"typedef {typ} TAA[{dim}];"
+
+    def decl_md_array(self):
+        """One multi-dimensional array: 2D, or 3D with
+        probability ~1/3, each dimension 2..3, filled by a
+        flat or nested list with zero fill folded into the
+        interval (a short list at any level leaves zeroes
+        behind). With an array alias, the dimensions compose
+        through it instead."""
+        rng = self.rng
+        name = self.fresh("m")
+        alias = self.aliases.get("TAA")
+        use_alias = alias is not None and rng.random() < 0.6
+        if use_alias:
+            is_char = alias[2]
+            dims = [rng.randint(2, 3), alias[1][0]]
+        else:
+            is_char = rng.random() < 0.5
+            ndim = 3 if rng.random() < 0.35 else 2
+            dims = [rng.randint(2, 3) for _ in range(ndim)]
+        typ = "char" if is_char else "int"
         cap = 127 if is_char else 255
-        rows = rng.randint(2, 3)
-        cols = rng.randint(2, 3)
+        total = 1
+        for d in dims:
+            total *= d
 
         def elem():
             if is_char:
                 return self.char_elem()
             return self.capped(2, cap, allow_sizeof=False)
 
-        nested = rng.random() < 0.6
-        zero_fill = False
-        if nested:
-            grid = []
-            for _ in range(rows):
-                n = rng.randint(1, cols)
-                grid.append([elem() for _ in range(n)])
-                if n < cols:
-                    zero_fill = True
-            lo = min(e[1] for row in grid for e in row)
-            hi = max(e[2] for row in grid for e in row)
-            if zero_fill:
+        if rng.random() < 0.6:
+            text, lo, hi = self.init_list_text(dims, is_char)
+        else:
+            n = rng.randint(1, total)
+            elems = [elem() for _ in range(n)]
+            lo = min(e[1] for e in elems)
+            hi = max(e[2] for e in elems)
+            if n < total:
                 lo = 0
-            self.arrays[name] = (rows * cols, (lo, hi), False, is_char)
-            self.mdims[name] = [rows, cols]
-            text = ", ".join(
-                "{" + ", ".join(e[0] for e in row) + "}" for row in grid)
-            return f"{typ} {name}[{rows}][{cols}] = {{{text}}};"
-        total = rows * cols
-        n = rng.randint(1, total)
-        elems = [elem() for _ in range(n)]
-        lo = min(e[1] for e in elems)
-        hi = max(e[2] for e in elems)
-        if n < total:
-            lo = 0
+            text = "{" + ", ".join(e[0] for e in elems) + "}"
         self.arrays[name] = (total, (lo, hi), False, is_char)
-        self.mdims[name] = [rows, cols]
-        inits = ", ".join(e[0] for e in elems)
-        return f"{typ} {name}[{rows}][{cols}] = {{{inits}}};"
+        self.mdims[name] = dims
+        if use_alias:
+            return f"TAA {name}[{dims[0]}] = {text};"
+        dims_text = "".join(f"[{d}]" for d in dims)
+        return f"{typ} {name}{dims_text} = {text};"
+
+    def init_list_text(self, dims, is_char):
+        """(text, lo, hi) for a nested braced list filling
+        dimensions `dims`, outermost first, with zero fill
+        folded into the interval (a short list at any level
+        leaves zeroes behind)."""
+        rng = self.rng
+        cap = 127 if is_char else 255
+
+        def elem():
+            if is_char:
+                return self.char_elem()
+            return self.capped(2, cap, allow_sizeof=False)
+
+        def build(ds):
+            if len(ds) == 1:
+                n = rng.randint(1, ds[0])
+                elems = [elem() for _ in range(n)]
+                text = "{" + ", ".join(e[0] for e in elems) + "}"
+                return (text, min(e[1] for e in elems),
+                        max(e[2] for e in elems), n < ds[0])
+            parts = []
+            lo, hi, zf = 255, 0, False
+            n = rng.randint(1, ds[0])
+            for _ in range(n):
+                text, l, h, z = build(ds[1:])
+                parts.append(text)
+                lo, hi, zf = min(lo, l), max(hi, h), zf or z
+            if n < ds[0]:
+                zf = True
+            return ("{" + ", ".join(parts) + "}", lo, hi, zf)
+
+        text, lo, hi, zf = build(dims)
+        if zf:
+            lo = 0
+        return (text, lo, hi)
 
     def decl_pp(self):
         """A pointer-to-pointer bound to an existing pointer.
@@ -539,6 +623,18 @@ class Gen:
         rng = self.rng
         if not self.ptrs:
             return None
+        # A pointer alias plus `*` is depth 2: spell the
+        # binding through it when one exists and the element
+        # types match.
+        if "TPA" in self.aliases and rng.random() < 0.7:
+            is_char = self.aliases["TPA"][2]
+            eligible = [n for n, p in self.ptrs.items()
+                        if p[2] == is_char]
+            if eligible:
+                target = rng.choice(eligible)
+                name = self.fresh("pp")
+                self.pptrs[name] = target
+                return f"TPA *{name} = &{target};"
         name = self.fresh("pp")
         # Bind mostly to array pointers: only those give a
         # chain form (`(*pp)[k]`), scalar targets only give
@@ -633,23 +729,15 @@ class Gen:
             if self.mdims and rng.random() < 0.35:
                 got = self.indexable2d()
                 if got:
-                    name, rows, cols = got
+                    name, _ = got
                     old = self.arrays[name]
                     _, iv, _, is_char = old
                     cap = 127 if is_char else 255
                     e = self.capped(depth, cap)
-                    if rng.random() < 0.6:
-                        i = rng.randrange(rows)
-                        j = rng.randrange(cols)
-                        lines.append(f"{name}[{i}][{j}] = {e[0]};")
-                    else:
-                        i = self.expr(depth - 1)
-                        j = self.expr(depth - 1)
-                        if (0 <= i[1] and i[2] < rows
-                                and 0 <= j[1] and j[2] < cols):
-                            lines.append(f"{name}[{i[0]}][{j[0]}] = {e[0]};")
-                        else:
-                            return
+                    sub = self.subscript_text(name, depth)
+                    if sub is None:
+                        return
+                    lines.append(f"{name}{sub} = {e[0]};")
                     self.arrays[name] = (old[0], iv_join(iv, (e[1], e[2])),
                                          old[2], old[3])
                     return
@@ -971,8 +1059,57 @@ class Gen:
         line = f'scanf("{" ".join(specs)}", {", ".join(args)});'
         return decls, line, " ".join(tokens)
 
+    def gen_scanf_string(self):
+        """One `%s` conversion into an existing one-dimensional
+        char array, with a word short enough to fit: the token
+        plus NUL fit in the array in both models, and the
+        rest of the array keeps its previous contents in
+        both. At most one scanf kind appears per program, so
+        the terminator-consumed deviation can never affect
+        a later `%c` conversion. Returns (line, token) or
+        None when no suitable array exists."""
+        rng = self.rng
+        cands = [n for n, a in self.arrays.items()
+                 if a[3] and n not in self.mdims and a[0] >= 2]
+        if not cands:
+            return None
+        name = rng.choice(cands)
+        length, iv, is_string, _ = self.arrays[name]
+        word = "".join(rng.choice("abcdefgxyz")
+                       for _ in range(rng.randint(1, length - 1)))
+        ords = [ord(c) for c in word]
+        new_iv = iv_join(iv_join(iv, (min(ords), max(ords))), (0, 0))
+        self.arrays[name] = (length, new_iv, is_string, True)
+        return f'scanf("%s", {name});', word
+
+    def gen_scanf_char(self):
+        """One `%c` conversion as the program's only scanf:
+        it reads exactly one letter, whose value is the new
+        variable's exact interval. Keeping it the only scanf
+        kind avoids every documented `%c` deviation (no
+        preceding number or string conversion whose
+        terminator handling could differ)."""
+        rng = self.rng
+        name = self.fresh("s")
+        ch = rng.choice("abcdefgxyz")
+        self.env[name] = (ord(ch), ord(ch))
+        self.chartypes.add(name)
+        return [f"char {name} = 0;"], f'scanf("%c", &{name});', ch
+
     def gen_helper(self):
         rng = self.rng
+        if rng.random() < 0.25:
+            # A `**` helper: the body needs no generated
+            # state, so no save/restore is involved. The
+            # return interval is the wide bound for the
+            # ultimate target; callers narrow it with fits()
+            # and capped() retries like any wide interval.
+            is_char = rng.random() < 0.5
+            typ = "char" if is_char else "int"
+            self.helpers["helper"] = ((0, 127) if is_char else (0, 255),
+                                      True, is_char)
+            return (f"{typ} helper({typ} **hp) {{\n"
+                    f"  return **hp;\n}}")
         saved = (self.env, self.arrays, self.chartypes, self.ptrs,
                  self.mdims, self.pptrs)
         self.env = {"hp": (0, 255)}
@@ -987,7 +1124,7 @@ class Gen:
         ret = self.readable_expr(2)
         (self.env, self.arrays, self.chartypes, self.ptrs,
          self.mdims, self.pptrs) = saved
-        self.helpers["helper"] = (ret[1], ret[2])
+        self.helpers["helper"] = ((ret[1], ret[2]), False, False)
         body = "\n".join("  " + l for l in lines)
         tail = f"  return {ret[0]};"
         return f"int helper(int hp) {{\n{body}\n{tail}\n}}"
@@ -999,6 +1136,9 @@ def gen_program(seed):
     chunks = ["#include <stdio.h>", ""]
     if rng.random() < 0.35:
         chunks.append(g.gen_helper())
+        chunks.append("")
+    if rng.random() < 0.3:
+        chunks.append(g.gen_typedef())
         chunks.append("")
     lines = []
     for _ in range(rng.randint(2, 4)):
@@ -1026,8 +1166,20 @@ def gen_program(seed):
         if decl:
             lines.append(decl)
     stdin_parts = []
-    if rng.random() < 0.4:
+    scan_roll = rng.random()
+    if scan_roll < 0.4:
         decls, line, tokens = g.gen_scanf()
+        lines.extend(decls)
+        lines.append(line)
+        stdin_parts.append(tokens)
+    elif scan_roll < 0.58:
+        got = g.gen_scanf_string()
+        if got is not None:
+            line, tokens = got
+            lines.append(line)
+            stdin_parts.append(tokens)
+    elif scan_roll < 0.7:
+        decls, line, tokens = g.gen_scanf_char()
         lines.extend(decls)
         lines.append(line)
         stdin_parts.append(tokens)
