@@ -8,12 +8,13 @@ that, matching tag `v0.3.0`, `0.3.1` from the release below
 that, matching tag `v0.3.1`, `0.4.0` from the release below
 that, matching tag `v0.4.0`, `0.4.1` from the release below
 that, matching tag `v0.4.1`, `0.5.0` from the release below
-that, matching tag `v0.5.0`, and `0.6.0` from the release at
-the top, matching tag `v0.6.0`. Entries below are grouped by
+that, matching tag `v0.5.0`, `0.6.0` from the release below
+that, matching tag `v0.6.0`, and `0.6.1` from the release at
+the top, matching tag `v0.6.1`. Entries below are grouped by
 the roadmap phases that produced them. See `docs/versioning.md`
 for when and how versions change.
 
-## Unreleased
+## v0.6.1
 
 - Fixed: `scanf` number conversions (`%d`, `%u`, `%o`, `%x`,
   `%i`) ending exactly at end of input no longer spin
