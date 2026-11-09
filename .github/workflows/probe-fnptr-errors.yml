@@ -30,5 +30,5 @@ jobs:
           printf 'int g(int x) { return x; } int main() { g = 1; return 0; }' > /tmp/probe/c8.c
           for f in /tmp/probe/c*.c; do
             echo "== $f"
-            ./rs/target/release/bfcompile "$f" > /tmp/probe/out.bf 2>/tmp/probe/err.txt; echo "exit: $? size: $(wc -c < /tmp/probe/out.bf)"; head -c 200 /tmp/probe/err.txt; echo
+            if ./rs/target/release/bfcompile "$f" > /tmp/probe/out.bf 2>/tmp/probe/err.txt; then echo "exit: 0 size: $(wc -c < /tmp/probe/out.bf)"; else echo "exit: 1 size: $(wc -c < /tmp/probe/out.bf)"; head -c 200 /tmp/probe/err.txt; echo; fi
           done
