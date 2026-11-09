@@ -3248,7 +3248,8 @@ impl Emitter {
             let cell = self.memory.var_cell(&param.name);
             if let Some(sig) = &param.fn_sig {
                 self.fnptrs.insert(param.name.clone());
-                self.fnptr_sigs.insert(param.name.clone(), sig.clone());
+                self.fnptr_sigs
+                    .insert(param.name.clone(), (**sig).clone());
             } else {
                 if param.ptr_depth > 0 || param.is_array() {
                     self.memory.mark_pointer(&param.name);
@@ -3336,7 +3337,8 @@ impl Emitter {
             }
         }
         for (idx, fname, def) in candidates {
-            let guard = self.is_equal(id_cell, self.const_value((idx + 1) as u8))?;
+            let id_const = self.const_value((idx + 1) as u8);
+            let guard = self.is_equal(id_cell, id_const)?;
             let arg_cells = arg_cells.clone();
             self.perform_if(guard, move |em| {
                 let checkpoint = em.checkpoint();
