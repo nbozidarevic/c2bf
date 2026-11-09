@@ -31,6 +31,8 @@ use std::rc::Rc;
 pub struct ExpandedFunction {
     pub is_void: bool,
     pub returns_ptr_depth: u8,
+    /// As [`crate::ast::FuncDef::returns_fn_sig`].
+    pub returns_fn_sig: Option<Box<FuncSig>>,
     pub params: Vec<FnParam>,
     pub body: Block,
 }

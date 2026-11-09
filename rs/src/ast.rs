@@ -41,21 +41,32 @@ pub struct FnParam {
 /// here, so only the shape is compared. For array
 /// parameters only the dimensions after the first are
 /// compared: the outermost parameter size is discarded.
+/// `returns_fn_sig` is the signature of a function
+/// pointer the function returns (`None` for scalar and
+/// pointer returns); such a signature is never void and
+/// never has a return pointer depth.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FuncSig {
     pub is_void: bool,
     pub returns_ptr_depth: u8,
     pub params: Vec<FnParam>,
+    pub returns_fn_sig: Option<Box<FuncSig>>,
 }
 
 impl FuncSig {
     /// Whether two signatures agree: same void-ness, same
-    /// pointer-return depth, same parameter count, same
+    /// pointer-return depth, same returned function-pointer
+    /// signature (recursively), same parameter count, same
     /// pointer depth, dimensions, and nested signatures per
     /// parameter.
     pub fn matches(&self, other: &FuncSig) -> bool {
         self.is_void == other.is_void
             && self.returns_ptr_depth == other.returns_ptr_depth
+            && match (&self.returns_fn_sig, &other.returns_fn_sig) {
+                (None, None) => true,
+                (Some(x), Some(y)) => x.matches(y),
+                _ => false,
+            }
             && self.params.len() == other.params.len()
             && self.params.iter().zip(other.params.iter()).all(|(a, b)| {
                 a.ptr_depth == b.ptr_depth
@@ -89,6 +100,11 @@ pub struct FuncDef {
     /// `*` return declarator or by a pointer typedef as the
     /// return type.
     pub returns_ptr_depth: u8,
+    /// Signature of a function pointer the function returns
+    /// (`None` for scalar, pointer, and void returns). Set by
+    /// a function-pointer typedef or the direct
+    /// `(*f(params))(params)` spelling as the return type.
+    pub returns_fn_sig: Option<Box<FuncSig>>,
     pub params: Vec<FnParam>,
     pub body: Block,
 }
@@ -101,6 +117,8 @@ pub struct FuncDecl {
     pub name: Vec<u8>,
     pub is_void: bool,
     pub returns_ptr_depth: u8,
+    /// As [`FuncDef::returns_fn_sig`].
+    pub returns_fn_sig: Option<Box<FuncSig>>,
     pub params: Vec<FnParam>,
 }
 
@@ -120,6 +138,12 @@ pub struct TypedefDecl {
     /// at definition (array sizes must be integer literals,
     /// as for arrays), `None` is an unsized dimension.
     pub dims: Vec<Option<i32>>,
+    /// Function-pointer signature of the alias, for
+    /// `typedef int (*cb)(int);` and composed forms. `None`
+    /// for scalar, pointer, and array aliases. Present with
+    /// `ptr_depth == 0`; `dims` may hold an array-of-
+    /// function-pointers dimension.
+    pub fn_sig: Option<FuncSig>,
 }
 
 #[derive(Debug)]
@@ -336,6 +360,10 @@ fn dump_fn_sig(sig: &FuncSig, out: &mut Vec<u8>) {
         open(out, "pointer");
         close(out);
     }
+    if let Some(ret) = &sig.returns_fn_sig {
+        out.push(b' ');
+        dump_fn_sig(ret, out);
+    }
     close(out);
 }
 
@@ -404,6 +432,10 @@ fn dump_external(e: &External, out: &mut Vec<u8>) {
                     None => open(out, "unsized"),
                 }
                 close(out);
+            }
+            if let Some(sig) = &t.fn_sig {
+                out.push(b' ');
+                dump_fn_sig(sig, out);
             }
             close(out);
         }

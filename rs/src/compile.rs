@@ -482,12 +482,14 @@ fn check_prototype(
     let sig = FuncSig {
         is_void: d.is_void,
         returns_ptr_depth: d.returns_ptr_depth,
+        returns_fn_sig: d.returns_fn_sig.clone(),
         params: d.params.clone(),
     };
     if let Some(def) = em.functions.get(&d.name) {
         let def_sig = FuncSig {
             is_void: def.is_void,
             returns_ptr_depth: def.returns_ptr_depth,
+            returns_fn_sig: def.returns_fn_sig.clone(),
             params: def.params.clone(),
         };
         if !sig.matches(&def_sig) {
@@ -555,6 +557,7 @@ fn rename_function(f: &FuncDef) -> Result<ExpandedFunction, CompileError> {
     Ok(ExpandedFunction {
         is_void: f.is_void,
         returns_ptr_depth: f.returns_ptr_depth,
+        returns_fn_sig: f.returns_fn_sig.clone(),
         params,
         body,
     })
@@ -610,6 +613,7 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
                 let def_sig = FuncSig {
                     is_void: expanded.is_void,
                     returns_ptr_depth: expanded.returns_ptr_depth,
+                    returns_fn_sig: expanded.returns_fn_sig.clone(),
                     params: expanded.params.clone(),
                 };
                 if let Some(proto) = em.prototypes.get(&f.name) {
@@ -3073,6 +3077,7 @@ impl Emitter {
                 let sig = self.functions.get(name).map(|def| FuncSig {
                     is_void: def.is_void,
                     returns_ptr_depth: def.returns_ptr_depth,
+                    returns_fn_sig: def.returns_fn_sig.clone(),
                     params: def.params.clone(),
                 });
                 if let Some(sig) = sig {
@@ -3526,6 +3531,7 @@ impl Emitter {
                 let def_sig = FuncSig {
                     is_void: def.is_void,
                     returns_ptr_depth: def.returns_ptr_depth,
+                    returns_fn_sig: def.returns_fn_sig.clone(),
                     params: def.params.clone(),
                 };
                 if def_sig.matches(sig) {

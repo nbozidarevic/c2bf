@@ -244,6 +244,9 @@ struct Spec {
     /// Array dimensions carried by a typedef alias, one entry
     /// per bracket (`None` for an unsized dimension).
     dims: Vec<Option<i32>>,
+    /// Function-pointer signature carried by a typedef alias
+    /// (`typedef int (*cb)(int);`), if any.
+    fn_sig: Option<FuncSig>,
     storage: Option<StorageClass>,
 }
 
@@ -253,6 +256,7 @@ impl Spec {
             words,
             ptr_depth: 0,
             dims: Vec::new(),
+            fn_sig: None,
             storage: None,
         }
     }
@@ -492,6 +496,7 @@ impl<'a> Parser<'a> {
             words: spec_words.join(&b' '),
             ptr_depth: alias.ptr_depth,
             dims: alias.dims.clone(),
+            fn_sig: alias.fn_sig.clone(),
             storage,
         })
     }
@@ -602,6 +607,11 @@ impl<'a> Parser<'a> {
                 && self.peek_at(stars + 1).kind == Kind::Punct
                 && self.peek_at(stars + 1).text == b"("
             {
+                if spec.fn_sig.is_some() {
+                    return self.fail(
+                        "pointer to function pointer is not supported".to_string(),
+                    );
+                }
                 if spec.ptr_depth + stars as u8 > 2 {
                     return self.fail(
                         "pointer to pointer to pointer is not supported".to_string(),
@@ -615,10 +625,15 @@ impl<'a> Parser<'a> {
             if self.at_ident() {
                 let name = self.next_tok().text;
                 if self.at_punct(b"(") {
+                    let returns_fn_sig = spec.fn_sig.clone();
                     if self.after_param_list_is_semicolon() {
-                        return Ok(External::FuncDecl(self.parse_funcdecl(spec, name)?));
+                        return Ok(External::FuncDecl(
+                            self.parse_funcdecl(spec, name, returns_fn_sig)?,
+                        ));
                     }
-                    return Ok(External::FuncDef(self.parse_funcdef(spec, name)?));
+                    return Ok(External::FuncDef(
+                        self.parse_funcdef(spec, name, returns_fn_sig)?,
+                    ));
                 }
             }
             self.p = mark;
@@ -651,6 +666,64 @@ impl<'a> Parser<'a> {
             }
             self.next_tok();
             ptr_depth += 1;
+        }
+        if spec.fn_sig.is_some() && ptr_depth > 0 {
+            return self.fail(
+                "pointer to function pointer is not supported".to_string(),
+            );
+        }
+        if self.at_punct(b"(") {
+            // Parenthesized function-pointer declarator:
+            // `typedef int (*cb)(int);`. The star inside the
+            // parentheses is the function-pointer star; stars
+            // before it are the pointed-to return type's.
+            let (inner, name) = self.parse_paren_stars_name(false)?;
+            if !self.at_punct(b"(") {
+                return self.fail(
+                    "parenthesized typedef declarators without a parameter list are not supported"
+                        .to_string(),
+                );
+            }
+            if inner != 1 {
+                return self.fail(if inner == 0 {
+                    "parenthesized function declarators are not supported"
+                        .to_string()
+                } else {
+                    "pointer to function pointer is not supported".to_string()
+                });
+            }
+            let sig = self.parse_fn_sig_params(&spec, ptr_depth)?;
+            if self.at_punct(b"[") {
+                return self.fail(
+                    "arrays of function pointers are not supported".to_string(),
+                );
+            }
+            if self.at_punct(b"=") {
+                return self.fail("typedef declarators take no initializer".to_string());
+            }
+            if self.at_punct(b",") {
+                return self.fail(
+                    "multiple typedef declarators are not supported".to_string(),
+                );
+            }
+            self.expect_punct(b";", "';'")?;
+            let decl = TypedefDecl {
+                name: name.clone(),
+                spec: spec.words,
+                ptr_depth: 0,
+                dims: Vec::new(),
+                fn_sig: Some(sig),
+            };
+            if let Some(old) = self.typedefs.get(&name) {
+                if *old != decl {
+                    return self.fail(format!(
+                        "conflicting typedef for '{}'",
+                        String::from_utf8_lossy(&name)
+                    ));
+                }
+            }
+            self.typedefs.insert(name, decl.clone());
+            return Ok(External::Typedef(decl));
         }
         let name = self.expect_ident("declarator name")?.text;
         // Brackets prepend dimensions before the aliased ones
@@ -687,11 +760,18 @@ impl<'a> Parser<'a> {
         self.expect_punct(b";", "';'")?;
         let mut dims = declarator_dims;
         dims.extend(spec.dims.iter().copied());
+        if spec.fn_sig.is_some() && dims.len() > 1 {
+            return self.fail(
+                "multi-dimensional function-pointer arrays are not supported"
+                    .to_string(),
+            );
+        }
         let decl = TypedefDecl {
             name: name.clone(),
             spec: spec.words,
             ptr_depth,
             dims,
+            fn_sig: spec.fn_sig.clone(),
         };
         if let Some(old) = self.typedefs.get(&name) {
             if *old != decl {
@@ -775,10 +855,10 @@ impl<'a> Parser<'a> {
         {
             let name = self.next_tok().text;
             if self.after_param_list_is_semicolon() {
-                let d = self.parse_funcdecl(spec, name)?;
+                let d = self.parse_funcdecl(spec, name, None)?;
                 return Ok(External::FuncDecl(d));
             }
-            let f = self.parse_funcdef(spec, name)?;
+            let f = self.parse_funcdef(spec, name, None)?;
             return Ok(External::FuncDef(f));
         }
         if self.at_punct(b";") {
@@ -881,6 +961,14 @@ impl<'a> Parser<'a> {
                         self.next_tok();
                         ptr_depth += 1;
                     }
+                    // Stars on top of a function-pointer typedef
+                    // are a pointer to a function pointer.
+                    if spec.fn_sig.is_some() && ptr_depth > 0 {
+                        return self.fail(
+                            "pointer to function pointer is not supported"
+                                .to_string(),
+                        );
+                    }
                     if self.at_punct(b"(") {
                         // Parenthesized parameter declarator, as
                         // in init declarators: a parameter list
@@ -890,6 +978,15 @@ impl<'a> Parser<'a> {
                         let (inner, paren_name) =
                             self.parse_paren_stars_name(allow_unnamed)?;
                         if self.at_punct(b"(") {
+                            // A function-pointer typedef does not
+                            // compose with a parenthesized
+                            // declarator (see parse_init_declarator).
+                            if spec.fn_sig.is_some() {
+                                return self.fail(
+                                    "typedef function-pointer types do not support parenthesized declarators"
+                                        .to_string(),
+                                );
+                            }
                             if inner != 1 {
                                 return self.fail(if inner == 0 {
                                     "parenthesized function declarators are not supported"
@@ -918,6 +1015,12 @@ impl<'a> Parser<'a> {
                             self.next_tok();
                             continue;
                         }
+                        if spec.fn_sig.is_some() && inner > 1 {
+                            return self.fail(
+                                "pointer to function pointer is not supported"
+                                    .to_string(),
+                            );
+                        }
                         let total_depth = ptr_depth + inner;
                         if total_depth > 2 {
                             return self.fail(
@@ -932,9 +1035,13 @@ impl<'a> Parser<'a> {
                         }
                         params.push(FnParam {
                             name: paren_name,
-                            ptr_depth: total_depth,
+                            ptr_depth: if spec.fn_sig.is_some() {
+                                0
+                            } else {
+                                total_depth
+                            },
                             dims: spec.dims.clone(),
-                            fn_sig: None,
+                            fn_sig: spec.fn_sig.clone(),
                         });
                         if !self.at_punct(b",") {
                             break;
@@ -1006,11 +1113,17 @@ impl<'a> Parser<'a> {
                     }
                     let mut dims = declarator_dims;
                     dims.extend(spec.dims.iter().copied());
+                    if spec.fn_sig.is_some() && !dims.is_empty() {
+                        return self.fail(
+                            "arrays of function pointers are not supported"
+                                .to_string(),
+                        );
+                    }
                     params.push(FnParam {
                         name,
                         ptr_depth,
                         dims,
-                        fn_sig: None,
+                        fn_sig: spec.fn_sig.clone(),
                     });
                     if !self.at_punct(b",") {
                         break;
@@ -1023,7 +1136,12 @@ impl<'a> Parser<'a> {
         Ok(params)
     }
 
-    fn parse_funcdef(&mut self, spec: Spec, name: Vec<u8>) -> Result<FuncDef, ParseError> {
+    fn parse_funcdef(
+        &mut self,
+        spec: Spec,
+        name: Vec<u8>,
+        returns_fn_sig: Option<FuncSig>,
+    ) -> Result<FuncDef, ParseError> {
         let params = self.parse_params(false)?;
         // The function name lives in the file scope (so a later
         // call to it is not mistaken for an enumerator), and the
@@ -1042,14 +1160,22 @@ impl<'a> Parser<'a> {
         self.scopes.pop();
         Ok(FuncDef {
             name,
-            is_void: spec.words.as_slice() == b"void" && spec.ptr_depth == 0,
+            is_void: spec.words.as_slice() == b"void"
+                && spec.ptr_depth == 0
+                && returns_fn_sig.is_none(),
             returns_ptr_depth: spec.ptr_depth,
+            returns_fn_sig: returns_fn_sig.map(Box::new),
             params,
             body,
         })
     }
 
-    fn parse_funcdecl(&mut self, spec: Spec, name: Vec<u8>) -> Result<FuncDecl, ParseError> {
+    fn parse_funcdecl(
+        &mut self,
+        spec: Spec,
+        name: Vec<u8>,
+        returns_fn_sig: Option<FuncSig>,
+    ) -> Result<FuncDecl, ParseError> {
         if let Some(file) = self.scopes.first_mut() {
             file.insert(name.clone());
         }
@@ -1057,8 +1183,11 @@ impl<'a> Parser<'a> {
         self.expect_punct(b";", "';'")?;
         Ok(FuncDecl {
             name,
-            is_void: spec.words.as_slice() == b"void" && spec.ptr_depth == 0,
+            is_void: spec.words.as_slice() == b"void"
+                && spec.ptr_depth == 0
+                && returns_fn_sig.is_none(),
             returns_ptr_depth: spec.ptr_depth,
+            returns_fn_sig: returns_fn_sig.map(Box::new),
             params,
         })
     }
@@ -1191,7 +1320,12 @@ impl<'a> Parser<'a> {
     /// Parse a function-pointer parameter list after a
     /// parenthesized declarator head, and build its
     /// signature. Nested function-pointer parameters and
-    /// array return types are rejected.
+    /// array return types are rejected. When the base
+    /// specifier is itself a function-pointer typedef, the
+    /// pointed-to function returns a function pointer of
+    /// that signature; returning a pointer to one, or a
+    /// function pointer that itself returns one, is
+    /// rejected.
     fn parse_fn_sig_params(
         &mut self,
         base: &Spec,
@@ -1200,6 +1334,18 @@ impl<'a> Parser<'a> {
         if !base.dims.is_empty() {
             return self.fail("function return type cannot be an array".to_string());
         }
+        if let Some(inner) = &base.fn_sig {
+            if returns_ptr_depth > 0 {
+                return self.fail(
+                    "pointer to function pointer is not supported".to_string(),
+                );
+            }
+            if inner.returns_fn_sig.is_some() {
+                return self.fail(
+                    "nested function pointer returns are not supported".to_string(),
+                );
+            }
+        }
         let params = self.parse_params(true)?;
         if params.iter().any(|p| p.fn_sig.is_some()) {
             return self.fail(
@@ -1207,9 +1353,12 @@ impl<'a> Parser<'a> {
             );
         }
         Ok(FuncSig {
-            is_void: base.words.as_slice() == b"void" && returns_ptr_depth == 0,
+            is_void: base.words.as_slice() == b"void"
+                && returns_ptr_depth == 0
+                && base.fn_sig.is_none(),
             returns_ptr_depth,
             params,
+            returns_fn_sig: base.fn_sig.clone().map(Box::new),
         })
     }
 
@@ -1240,6 +1389,13 @@ impl<'a> Parser<'a> {
             self.next_tok();
             ptr_depth += 1;
         }
+        // Stars on top of a function-pointer typedef are a
+        // pointer to a function pointer, which is deferred.
+        if base.fn_sig.is_some() && ptr_depth > 0 {
+            return self.fail(
+                "pointer to function pointer is not supported".to_string(),
+            );
+        }
         if self.at_punct(b"(") {
             // Parenthesized declarator: `(*fp)(params)` is a
             // function pointer, `(*fp)` alone is a plain
@@ -1252,6 +1408,16 @@ impl<'a> Parser<'a> {
             let (inner, name) = self.parse_paren_stars_name(false)?;
             self.declare_name(&name);
             if self.at_punct(b"(") {
+                // A function-pointer typedef does not compose
+                // with a parenthesized declarator: the
+                // parameter list here would make the pointed-to
+                // function return another function pointer.
+                if base.fn_sig.is_some() {
+                    return self.fail(
+                        "typedef function-pointer types do not support parenthesized declarators"
+                            .to_string(),
+                    );
+                }
                 if inner != 1 {
                     return self.fail(if inner == 0 {
                         "parenthesized function declarators are not supported"
@@ -1276,6 +1442,11 @@ impl<'a> Parser<'a> {
                     init,
                 });
             }
+            if base.fn_sig.is_some() && inner > 1 {
+                return self.fail(
+                    "pointer to function pointer is not supported".to_string(),
+                );
+            }
             let total_depth = ptr_depth + inner;
             if total_depth > 2 {
                 return self.fail(
@@ -1292,9 +1463,9 @@ impl<'a> Parser<'a> {
             let init = self.parse_opt_init()?;
             return Ok(InitDecl {
                 name,
-                ptr_depth: total_depth,
+                ptr_depth: if base.fn_sig.is_some() { 0 } else { total_depth },
                 dims,
-                fn_sig: None,
+                fn_sig: base.fn_sig.clone(),
                 init,
             });
         }
@@ -1321,6 +1492,11 @@ impl<'a> Parser<'a> {
             d.as_ref()
                 .map(|len| Expr::Int(len.to_string().into_bytes()))
         }));
+        if base.fn_sig.is_some() && !dims.is_empty() {
+            return self.fail(
+                "arrays of function pointers are not supported".to_string(),
+            );
+        }
         let init = if self.at_punct(b"=") {
             self.next_tok();
             if self.at_punct(b"{") {
@@ -1335,7 +1511,7 @@ impl<'a> Parser<'a> {
             name,
             ptr_depth,
             dims,
-            fn_sig: None,
+            fn_sig: base.fn_sig.clone(),
             init,
         })
     }
@@ -1504,6 +1680,12 @@ impl<'a> Parser<'a> {
         if spec.ptr_depth > 0 || spec.is_array() {
             return self.fail(
                 "pointer and array typedefs are not supported in for declarations"
+                    .to_string(),
+            );
+        }
+        if spec.fn_sig.is_some() {
+            return self.fail(
+                "function pointer typedefs are not supported in for declarations"
                     .to_string(),
             );
         }
@@ -2585,6 +2767,55 @@ mod tests {
                     src,
                     e.msg,
                     want
+                ),
+                Ok(_) => panic!("accepted {:?}", src),
+            }
+        }
+    }
+
+    #[test]
+    fn typedef_fnptr_parse() {
+        assert_sexp(
+            "typedef int (*cb)(int);",
+            "(tu (typedef cb int (fnsig (params (param)))))",
+        );
+        assert_sexp(
+            "typedef int (*cb)(int); int main() { cb fp = 0; }",
+            "(tu (typedef cb int (fnsig (params (param)))) (funcdef main (compound (decl int (initdecl fp (fnsig (params (param))) (int 0))))))",
+        );
+        assert_sexp(
+            "typedef int (*cb)(int); cb f(cb x) { return x; }",
+            "(tu (typedef cb int (fnsig (params (param)))) (funcdef f (params (param x (fnsig (params (param))))) (compound (return (ident x)))))",
+        );
+        assert_sexp(
+            "typedef char *(*scb)(int); int main() { scb gp = 0; }",
+            "(tu (typedef scb char (fnsig (params (param)) (pointer))) (funcdef main (compound (decl char (initdecl gp (fnsig (params (param)) (pointer)) (int 0))))))",
+        );
+        assert_sexp(
+            "typedef int (*cb)(int); typedef cb (*get)(void);",
+            "(tu (typedef cb int (fnsig (params (param)))) (typedef get int (fnsig (fnsig (params (param))))))",
+        );
+        assert_err(
+            "typedef int (*cb)(int);\ntypedef cb *p;",
+            2,
+            13,
+            "pointer to function pointer is not supported",
+        );
+        for (src, want) in [
+            (
+                "typedef int (*cb)(int); int main() { cb (*fp)(int); }",
+                "do not support parenthesized declarators",
+            ),
+            (
+                "typedef int (*cb)(int); int main() { for (cb fp = 0;;) { } return 0; }",
+                "not supported in for declarations",
+            ),
+        ] {
+            match parse(src.as_bytes()) {
+                Err(e) => assert!(
+                    e.msg.contains(want),
+                    "for {:?}: got error {:?}, want {:?}",
+                    src, e.msg, want
                 ),
                 Ok(_) => panic!("accepted {:?}", src),
             }

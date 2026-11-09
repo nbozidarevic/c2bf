@@ -39,13 +39,20 @@ source order, e.g.
   `name[]` or `name[N]` (the sizes are discarded; the inner
   sizes are the stride), and one `fnsig` for a
   function-pointer parameter (`int (*cb)(int)`).
-  `fnsig`: `[params?, (void)?, pointer*]` — the pointed
+  `fnsig`: `[params?, (void)?, pointer*, fnsig?]` — the pointed
   function's parameter list (omitted when empty), a `void`
-  child for a void return, and one `pointer` per `*` of
-  return pointer depth.
+  child for a void return, one `pointer` per `*` of
+  return pointer depth, and a trailing `fnsig` when the
+  pointed-to function returns a function pointer.
 - `decl(spec)`: `[initdecl]*` (`int;` has no children; declarators
   are comma-separated, in order). `spec` is one or more words
   (`unsigned int`, `const char`, `long long`), space-joined.
+- `typedef(name)`: `[spec-word, pointer*, (int | unsized)*, fnsig?]` —
+  the aliased specifier words, one `pointer` per `*`, one
+  `int`/`unsized` per array dimension, and one `fnsig` for
+  a function-pointer alias (`typedef int (*cb)(int);`).
+  A typedef for an array of function pointers carries
+  both dimensions and `fnsig`.
 - `initdecl(name)`: `[pointer*, (size | unsized)*, fnsig?, init?]` —
   one `pointer` (no children) per `*` (depth at most 2; a third
   is a parse error), one `size`/`unsized` per dimension in order,
