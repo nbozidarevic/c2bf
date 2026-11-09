@@ -276,6 +276,16 @@ MILESTONES = [
         "grow by 182 across 17 fixtures. Runtime footprints "
         "reproduce every prior entry exactly.",
     ),
+    (
+        "dac4e96e6baff0128f679da013f24d1d5c22e53b",
+        "Function pointers",
+        "Function-pointer variables hold callee IDs, and "
+        "indirect calls dispatch over matching signatures "
+        "(0019). All 53 existing fixtures are "
+        "byte-identical, with allocated cells unchanged. "
+        "Adds one fixture: fnptr (1,726,728 BF bytes on "
+        "525 cells).",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
