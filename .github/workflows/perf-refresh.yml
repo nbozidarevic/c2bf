@@ -1,0 +1,31 @@
+name: perf-refresh
+
+# TEMPORARY: regenerate docs/perf.md with the function-pointer
+# corpus (workflow_dispatch is not permitted for this token).
+# Removed once the refreshed doc lands.
+on:
+  push:
+    branches: [master]
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build bench
+        run: cargo build --release --manifest-path rs/Cargo.toml
+
+      - name: Generate perf results
+        run: ./rs/target/release/c2bf-bench --write docs/perf.md
+
+      - name: Upload perf doc
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-doc
+          path: docs/perf.md
+          if-no-files-found: error
