@@ -147,8 +147,11 @@ the deviation is stated here as defined behavior, pinned by tests.
 - `scanf` `%d` honors a leading `-`: the value is negated with
   wrapping (`-5` reads as 251, and `-5 + 5` prints `0`); `+` and
   other skipped characters before the digits are ignored, as
-  before. Pinned by the `io` oracle fixture (wrap-back form) and
-  unit tests.
+  before. A number ending exactly at end of input reads its
+  accumulated value: the reader detects EOF by a zero
+  sentinel, as `%s` does, and a NUL byte in the input reads
+  the same way. Pinned by the `io` oracle fixture (wrap-back
+  form), the `scanf_eof` fixture, and unit tests.
 - `scanf` `%s` skips leading whitespace (bytes 9–13 and 32),
   then stores the longest run of non-whitespace bytes plus a NUL
   terminator. Into an array (including a constant element
@@ -181,8 +184,9 @@ the deviation is stated here as defined behavior, pinned by tests.
   otherwise decimal; `%x` accepts an optional `0x` prefix.
   `%o` reads octal digits only. `%i` on `09` yields `0` as in C,
   but the `9` is consumed here (C leaves it unread), so fixtures
-  avoid that shape. Pinned by the `formats` oracle fixture and
-  unit tests.
+  avoid that shape. Numeric `%o`/`%x`/`%i` conversions end at
+  EOF the same way `%d` does (zero sentinel). Pinned by the
+  `formats` oracle fixture and unit tests.
 
 ## Execution
 

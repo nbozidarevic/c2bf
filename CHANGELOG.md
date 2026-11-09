@@ -13,6 +13,19 @@ the top, matching tag `v0.6.0`. Entries below are grouped by
 the roadmap phases that produced them. See `docs/versioning.md`
 for when and how versions change.
 
+## Unreleased
+
+- Fixed: `scanf` number conversions (`%d`, `%u`, `%o`, `%x`,
+  `%i`) ending exactly at end of input no longer spin
+  forever: the readers detect EOF with a zero sentinel, as
+  `%s` already did, and return the accumulated value.
+  Pinned by the `scanf_eof` oracle fixture and unit tests.
+  Decision record:
+  `docs/decisions/0021-scanf-eof-sentinel.md`.
+- Tests: differential fuzzer stdin now sometimes omits its
+  trailing newline, so sweeps exercise EOF-terminated
+  `scanf` conversions.
+
 ## v0.6.0
 
 - Language: forward-only `goto` (`goto done;` to a label

@@ -5349,6 +5349,86 @@ mod tests {
     }
 
     #[test]
+    fn scanf_numbers_end_at_eof() {
+        // Numbers ending exactly at end of input (no trailing
+        // newline) used to spin forever: the reader re-read its
+        // last digit, since `,` leaves the cell unchanged at
+        // EOF. The zero-sentinel reads terminate them with the
+        // accumulated value. Inputs here deliberately have no
+        // trailing newline.
+        let run = |src: &[u8], input: &[u8]| {
+            let bf = compile(src).expect("scanf program compiles");
+            let mut out = Vec::new();
+            let mut input = std::io::Cursor::new(input);
+            crate::runner::run(&bf, &mut input, &mut out).expect("bf runs");
+            out
+        };
+        assert_eq!(
+            run(
+                b"int main() { int a = 0; scanf(\"%d\", &a); printf(\"%d\", a); }",
+                b"20",
+            ),
+            b"20"
+        );
+        assert_eq!(
+            run(
+                b"int main() { int a = 0; scanf(\"%d\", &a); printf(\"%d\", a); }",
+                b"-5",
+            ),
+            b"251"
+        );
+        assert_eq!(
+            run(
+                b"int main() { int a = 0; scanf(\"%d\", &a); printf(\"%d\", a); }",
+                b"  42",
+            ),
+            b"42"
+        );
+        assert_eq!(
+            run(
+                b"int main() { int a = 0; scanf(\"%d\", &a); printf(\"%d\", a); }",
+                b"",
+            ),
+            b"0"
+        );
+        assert_eq!(
+            run(
+                b"int main() { int a = 0; int b = 0; scanf(\"%d %d\", &a, &b); printf(\"%d,%d\", a, b); }",
+                b"20 7",
+            ),
+            b"20,7"
+        );
+        assert_eq!(
+            run(
+                b"int main() { int a = 0; scanf(\"%i\", &a); printf(\"%d\", a); }",
+                b"0x1f",
+            ),
+            b"31"
+        );
+        assert_eq!(
+            run(
+                b"int main() { int a = 0; scanf(\"%o\", &a); printf(\"%d\", a); }",
+                b"17",
+            ),
+            b"15"
+        );
+        assert_eq!(
+            run(
+                b"int main() { int a = 0; scanf(\"%x\", &a); printf(\"%d\", a); }",
+                b"1f",
+            ),
+            b"31"
+        );
+        assert_eq!(
+            run(
+                b"int main() { int a = 0; char s[8] = \"\"; scanf(\"%d\", &a); scanf(\"%s\", s); printf(\"%d,%s\", a, s); }",
+                b"20 hello",
+            ),
+            b"20,hello"
+        );
+    }
+
+    #[test]
     fn io_format_errors() {
         let cases: &[(&[u8], &str)] = &[
             (b"int main() { printf(\"%5d\", 1); }", "Unexpected printf format"),

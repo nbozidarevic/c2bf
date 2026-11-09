@@ -1363,6 +1363,14 @@ impl Emitter {
     /// skipped before the digits, as before. The sign only applies
     /// to characters skipped before the first digit: a `-` after
     /// digits start terminates the number, unchanged.
+    ///
+    /// End of input ends the number like a non-digit: every read
+    /// presets the cell to zero (`read_char_into`), and the
+    /// runner leaves the cell unchanged at EOF, so a zero byte
+    /// means EOF — the `%s` reader's sentinel, applied here.
+    /// Without the nonzero gate on the skip loop, a number
+    /// ending exactly at EOF spun forever, re-reading its last
+    /// digit. A NUL byte in the input reads the same way.
     pub fn read_as_number(&mut self, a: i32) -> Result<(), CompileError> {
         let reader = self.const_value(0);
         let result = self.const_value(0);
@@ -1371,15 +1379,18 @@ impl Emitter {
         let ten = self.const_value(10);
         let minus = self.const_value(b'-');
         let negative = self.const_value(0);
-        self.move_pointer(reader);
-        self.emit(",");
+        let eof_zero = self.const_value(0);
+        self.read_char_into(reader);
         self.perform_while(
             |em| {
                 // GCC right-to-left here (measured: the divergence window
                 // shows the nine-cell duplicated second).
                 let above = em.greater_than(reader, nine)?;
                 let below = em.less_than(reader, zero)?;
-                em.logical_or(below, above)
+                let skip = em.logical_or(below, above)?;
+                let is_eof = em.is_equal(reader, eof_zero)?;
+                let not_eof = em.negate(is_eof)?;
+                em.logical_and(skip, not_eof)
             },
             |em| {
                 let is_minus = em.is_equal(reader, minus)?;
@@ -1387,8 +1398,7 @@ impl Emitter {
                     em.set_value(negative, 1);
                     Ok(())
                 })?;
-                em.move_pointer(reader);
-                em.emit(",");
+                em.read_char_into(reader);
                 Ok(())
             },
         )?;
@@ -1407,8 +1417,7 @@ impl Emitter {
                 let dig = em.subtract_values(reader, zero);
                 let acc = em.add_values(dig, shifted);
                 em.move_value(acc, result);
-                em.move_pointer(reader);
-                em.emit(",");
+                em.read_char_into(reader);
                 Ok(())
             },
         )?;
@@ -1433,7 +1442,10 @@ impl Emitter {
     /// constant cell otherwise. As for `%d`, characters before
     /// the first digit are skipped (a `-` records the sign), the
     /// terminating character is consumed, and a `-` negates with
-    /// wrapping.
+    /// wrapping. End of input ends the number like an invalid
+    /// digit: reads preset to zero (the `%s` sentinel), and the
+    /// skip loop gates on the cell being nonzero, so a number
+    /// ending exactly at EOF terminates instead of spinning.
     pub fn read_as_number_base(
         &mut self,
         a: i32,
@@ -1457,8 +1469,7 @@ impl Emitter {
             NumericBase::Hex => self.const_value(16),
             NumericBase::Auto => self.const_value(10),
         };
-        self.move_pointer(reader);
-        self.emit(",");
+        self.read_char_into(reader);
         // Skip until a digit for the current base starts the
         // number (decimal digits for `%i` before any prefix is
         // seen; the prefix check below runs first for `%x`). The
@@ -1476,6 +1487,13 @@ impl Emitter {
         let skip = self.memory.temp_cell();
         self.scan_digit_into(reader, base_cell, &bounds, scan_value, scan_valid)?;
         self.negate_into(scan_valid, skip)?;
+        // EOF reads as zero (preset read): a zero cell must end
+        // the skip loop, not skip forever, as for `%d`/`%s`.
+        let is_eof = self.is_equal(reader, zero_cell)?;
+        self.perform_if(is_eof, |em| {
+            em.set_value(skip, 0);
+            Ok(())
+        })?;
         self.move_pointer(skip);
         self.emit("[");
         let is_minus = self.is_equal(reader, minus)?;
@@ -1483,10 +1501,14 @@ impl Emitter {
             em.set_value(negative, 1);
             Ok(())
         })?;
-        self.move_pointer(reader);
-        self.emit(",");
+        self.read_char_into(reader);
         self.scan_digit_into(reader, base_cell, &bounds, scan_value, scan_valid)?;
         self.negate_into(scan_valid, skip)?;
+        let is_eof = self.is_equal(reader, zero_cell)?;
+        self.perform_if(is_eof, |em| {
+            em.set_value(skip, 0);
+            Ok(())
+        })?;
         self.move_pointer(skip);
         self.emit("]");
         self.release_temps(checkpoint);
@@ -1511,14 +1533,12 @@ impl Emitter {
             let seven = self.const_value(b'7');
             let is_zero = self.is_equal(reader, bounds.zero)?;
             self.perform_if(is_zero, |em| {
-                em.move_pointer(reader);
-                em.emit(",");
+                em.read_char_into(reader);
                 let is_x_lo = em.is_equal(reader, x_lo)?;
                 let is_x_hi = em.is_equal(reader, x_hi)?;
                 let is_x = em.logical_or(is_x_lo, is_x_hi)?;
                 em.perform_if(is_x, |em| {
-                    em.move_pointer(reader);
-                    em.emit(",");
+                    em.read_char_into(reader);
                     if base == NumericBase::Auto {
                         em.set_value(base_cell, 16);
                     }
@@ -1569,8 +1589,7 @@ impl Emitter {
         let shifted = self.multiply_values(result, base_cell);
         let acc = self.add_values(scan_value, shifted);
         self.move_value(acc, result);
-        self.move_pointer(reader);
-        self.emit(",");
+        self.read_char_into(reader);
         self.scan_digit_into(reader, base_cell, &bounds, scan_value, scan_valid)?;
         let go_next = self.logical_and(scan_valid, not_done)?;
         self.move_value(go_next, go);

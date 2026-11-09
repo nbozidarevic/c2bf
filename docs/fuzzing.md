@@ -105,7 +105,10 @@ keeps a `[lo, hi]` bound):
   error in C++.
 - `scanf` appears only as a prologue reading 2–3 numbers into
   fresh `int` variables, with well-formed tokens (decimal, hex,
-  `0x`-prefixed, or octal) in 0..200, trailing newline included.
+  `0x`-prefixed, or octal) in 0..200, usually ending in a
+  trailing newline: about one program in five ends its input
+  at EOF instead, so number conversions must terminate there
+  (zero sentinel).
   No negative tokens, no `%s`, and no `%c` after a number: the
   documented `scanf` deviations (terminator consumed, `%i`
   `09` handling) would make the two models legitimately

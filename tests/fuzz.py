@@ -1316,7 +1316,13 @@ def gen_program(seed):
     body = "\n".join("  " + line for line in lines)
     chunks.append(f"int main() {{\n{body}\n}}")
     src = "\n".join(chunks) + "\n"
-    stdin = ("\n".join(stdin_parts) + "\n") if stdin_parts else ""
+    if stdin_parts:
+        # About one program in five ends its input at EOF, so
+        # number/string conversions must terminate there (zero
+        # sentinel); the rest keep the trailing newline.
+        stdin = "\n".join(stdin_parts) + ("\n" if rng.random() < 0.8 else "")
+    else:
+        stdin = ""
     return src, stdin
 
 
