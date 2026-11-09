@@ -52,7 +52,9 @@ it: the 500-seed sweep after the function-pointer
 extensions passed 459 seeds, skipped 41 (8.2%), and
 mismatched none (earlier sweeps: 476 passed / 24 skipped
 before 0016, 460 / 40 after it, 468 / 32 after the
-hardening batch).
+hardening batch). The 500-seed sweep after the goto
+extensions (0020) passed 461 seeds, skipped 39 (7.8%),
+and mismatched none.
 
 ## Generator guarantees
 
