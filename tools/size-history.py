@@ -286,6 +286,21 @@ MILESTONES = [
         "Adds one fixture: fnptr (1,726,728 BF bytes on "
         "525 cells).",
     ),
+    (
+        "2d5bafdeeec20587a200288e621e1273c978e97d",
+        "Forward-only goto",
+        "Forward-only `goto` with one flag cell per label "
+        "(0020). All 54 existing fixtures are "
+        "byte-identical, with allocated cells and runtime "
+        "footprints unchanged. Adds ten fixtures: goto_fwd "
+        "(28,219 BF bytes on 67 cells), goto_fwd_struct "
+        "(28,040 on 70), goto_cleanup (49,605 on 91), "
+        "goto_cleanup_struct (48,650 on 116), goto_loop "
+        "(38,600 on 76), goto_loop_struct (38,456 on 91), "
+        "goto_for (33,200 on 79), goto_for_struct (32,948 "
+        "on 79), goto_dowhile (35,890 on 80), and "
+        "goto_dowhile_struct (33,653 on 79).",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
