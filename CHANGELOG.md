@@ -24,7 +24,9 @@ for when and how versions change.
   `docs/decisions/0021-scanf-eof-sentinel.md`.
 - Tests: differential fuzzer stdin now sometimes omits its
   trailing newline, so sweeps exercise EOF-terminated
-  `scanf` conversions.
+  `scanf` conversions. 500-seed sweep (goto segments plus
+  EOF-terminated inputs): 458 pass, 42 skip (address
+  limit), 0 mismatches.
 
 ## v0.6.0
 

@@ -54,7 +54,10 @@ mismatched none (earlier sweeps: 476 passed / 24 skipped
 before 0016, 460 / 40 after it, 468 / 32 after the
 hardening batch). The 500-seed sweep after the goto
 extensions (0020) passed 461 seeds, skipped 39 (7.8%),
-and mismatched none.
+and mismatched none. The 500-seed sweep after the scanf
+EOF fix (0021), with goto segments and EOF-terminated
+inputs, passed 458 seeds, skipped 42 (8.4%), and
+mismatched none.
 
 ## Generator guarantees
 
