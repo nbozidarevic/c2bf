@@ -251,10 +251,37 @@ call site.
   parameter names are compile errors. A definition without `main`
   is valid but emits nothing unless called. `printf` and `scanf`
   keep their built-in meanings and cannot be redefined.
+- Function pointers: `int (*fp)(int)` holds a callee ID
+  (assigned in translation-unit order, `0` for null). A
+  function designator (`f`, `&f`) yields its ID, and
+  dereferencing a function pointer (`*fp`, `**fp`) yields
+  the same ID again. An indirect call (`fp(args)`,
+  `(*fp)(args)`) evaluates its arguments once, then
+  dispatches on the ID over the defined functions whose
+  signature matches the pointer's declared signature;
+  only the pointed-to body runs. Calling a null pointer
+  runs no body and yields zero, defined here (a crash in
+  C). Recursion through a pointer is rejected exactly
+  like direct recursion. Assignment checks signature
+  compatibility (void-ness, return depth, parameter
+  depths/dimensions, recursively); only designators,
+  function pointers of a compatible signature, and the
+  null constant `0` may initialize or assign one.
+  Arithmetic, compound assignment, and increment on
+  function pointers are compile errors, as are stores
+  through a dereferenced function pointer. Comparison
+  (`==`, `!=`, `!`) tests identity/nullness. Still
+  unsupported, each a parse or compile error:
+  function-pointer returns, typedef function-pointer
+  types, arrays of function pointers, pointers to
+  function pointers, nested function-pointer parameters,
+  and parenthesized pointer-to-array declarators.
 - Parameters are values, except pointer (`*`) and array (`[]`/`[N]`)
   parameters, which receive an address. Array parameters decay to
   pointers, and the size is discarded. Arguments evaluate
   left-to-right into temporaries before any parameter is bound.
+  A function-pointer parameter receives a callee ID like a
+  variable of the same type.
   A multi-dimensional array parameter decays to a pointer to
   its first row: the outermost size is discarded and the inner
   dimensions are the stride, so `m[i][j]` addresses through
@@ -279,15 +306,16 @@ call site.
   body and emits nothing. A prototype must agree with its
   definition and with any earlier prototype: same void-ness,
   same pointer-return depth, same parameter count, same pointer
-  depth and post-first dimensions per parameter; parameter names
+  depth and post-first dimensions per parameter, and same
+  nested function-pointer signatures; parameter names
   and type spellings may differ (all spellings denote one byte).
   Repeated compatible prototypes are allowed; a conflicting one
   is a compile error. Calling a function with only a prototype
   is a compile error (there is no body to expand); an uncalled
-  prototype compiles. No function pointers. A pointer return
-  may be spelled directly (`char *f()`, `int **f()`) or
-  through a typedef alias (see Typedefs); both spellings
-  carry the same signature. A third `*` is an error.
+  prototype compiles. A pointer return may be spelled
+  directly (`char *f()`, `int **f()`) or through a typedef
+  alias (see Typedefs); both spellings carry the same
+  signature. A third `*` is an error.
 - Declarations are lexically scoped: a declaration in a nested
   block shadows an outer one (each gets its own cells). A
   declaration at the top level of a function body may not reuse

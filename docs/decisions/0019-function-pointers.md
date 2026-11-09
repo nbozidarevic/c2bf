@@ -79,6 +79,23 @@ the generator's interval merges track the target exactly;
 a merge that disagrees makes the binding unknown, and an
 unknown binding is compared but never called.
 
+## Validation
+
+The oracle fixture `fnptr` agrees with g++ (a null call
+is deliberately absent there: it segfaults under g++, so
+null calls are covered by unit tests only), and
+one-dimensional direct-call emission is byte-identical
+for every prior fixture. The 500-seed differential sweep
+with function-pointer generation passed 459 seeds,
+skipped 41 (8.2%, within the 10% cap), and mismatched
+none; the skip rate rose from 32 (6.4%), leaving 9 seeds
+of headroom, which the next cell-hungry change must
+reckon with. Issues found and fixed on the way: two
+compile errors in the dispatch (a `Box` deref, a double
+mutable borrow), a test case that put an arity call in
+`main`'s return operand (never compiled, by design), and
+a null call in the oracle fixture itself.
+
 ## Rejected
 
 - Tape addresses for functions: no code address exists

@@ -11,6 +11,23 @@ the top, matching tag `v0.4.1`. Entries below are grouped by
 the roadmap phases that produced them. See `docs/versioning.md`
 for when and how versions change.
 
+## Unreleased
+
+- Language: function pointers (`int (*fp)(int)`) holding
+  callee IDs, with signature-checked assignment,
+  dereference collapsing, and indirect calls dispatching
+  over matching definitions (`fp(args)`, `(*fp)(args)`).
+  Null calls yield zero; arithmetic on function pointers
+  and stores through dereferenced function pointers are
+  compile errors. Pinned by the `fnptr` oracle fixture.
+  Decision record:
+  `docs/decisions/0019-function-pointers.md`.
+- Tests: differential fuzzer generates function-pointer
+  variables bound to the helper or null, indirect calls,
+  comparisons, and rebinding with symbolic binding
+  tracking. 500-seed sweep: 459 pass, 41 skip (address
+  limit), 0 mismatches.
+
 ## v0.4.1
 
 - Fixed: assignment expressions yield the value stored,
