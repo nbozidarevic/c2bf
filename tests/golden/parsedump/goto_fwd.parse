@@ -1,0 +1,1 @@
+(tu (funcdef main (compound (decl int (initdecl x (int 1))) (goto done) (exprstmt (assign = (ident x) (int 2))) (exprstmt (call (ident printf) (string %d,) (ident x))) (goto-label done (exprstmt (call (ident printf) (string %d) (ident x)))))))

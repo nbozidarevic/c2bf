@@ -1,0 +1,1 @@
+(tu (funcdef main (compound (decl int (initdecl x (int 0))) (exprstmt (call (ident scanf) (string %d) (unary & (ident x)))) (if (binop != (ident x) (int 0)) (compound (dowhile (compound (exprstmt (assign = (ident x) (binop + (ident x) (int 1))))) (binop < (ident x) (int 3))))) (exprstmt (call (ident printf) (string %d) (ident x))))))

@@ -1,0 +1,1 @@
+(tu (funcdef main (compound (decl int (initdecl x (int 1))) (if (int 0) (compound (exprstmt (assign = (ident x) (int 2))) (exprstmt (call (ident printf) (string %d,) (ident x))))) (exprstmt (call (ident printf) (string %d) (ident x))))))
