@@ -32,3 +32,10 @@ jobs:
             echo "== $f"
             if ./rs/target/release/bfcompile "$f" > /tmp/probe/out.bf 2>/tmp/probe/err.txt; then echo "exit: 0 size: $(wc -c < /tmp/probe/out.bf)"; else echo "exit: 1 size: $(wc -c < /tmp/probe/out.bf)"; head -c 200 /tmp/probe/err.txt; echo; fi
           done
+          echo "== c2 parsedump"
+          ./rs/target/release/parsedump /tmp/probe/c2.c
+          echo "== c2 bf content"
+          ./rs/target/release/bfcompile /tmp/probe/c2.c; echo
+          printf 'int g(int x) { return x; } int main() { int (*fp)(int) = g; printf("%%d", fp(1, 2)); }' > /tmp/probe/c2b.c
+          echo "== c2b (printf variant)"
+          if ./rs/target/release/bfcompile /tmp/probe/c2b.c > /tmp/probe/c2b.bf 2>/tmp/probe/c2b.err; then echo "exit: 0"; ./rs/target/release/c2bf run -c /tmp/probe/c2b.bf; echo "run exit: $?"; else echo "exit: 1"; cat /tmp/probe/c2b.err; fi
