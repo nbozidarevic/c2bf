@@ -105,10 +105,10 @@ fn escape_val(c: u8) -> Option<u8> {
     }
 }
 
-const KEYWORDS: [&[u8]; 16] = [
+const KEYWORDS: [&[u8]; 17] = [
     b"int", b"char", b"short", b"void", b"if", b"else", b"switch", b"case",
     b"default", b"while", b"do", b"for", b"break", b"continue", b"return",
-    b"sizeof",
+    b"sizeof", b"goto",
 ];
 
 fn is_keyword(word: &[u8]) -> bool {

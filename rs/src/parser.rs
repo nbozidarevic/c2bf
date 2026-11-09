@@ -1350,7 +1350,11 @@ impl<'a> Parser<'a> {
         if self.at_kw(b"while") || self.at_kw(b"do") || self.at_kw(b"for") {
             return self.parse_iteration();
         }
-        if self.at_kw(b"break") || self.at_kw(b"continue") || self.at_kw(b"return") {
+        if self.at_kw(b"break")
+            || self.at_kw(b"continue")
+            || self.at_kw(b"return")
+            || self.at_kw(b"goto")
+        {
             return self.parse_jump();
         }
         if self.at_kw(b"case")
@@ -1535,6 +1539,11 @@ impl<'a> Parser<'a> {
 
     fn parse_jump(&mut self) -> Result<Stmt, ParseError> {
         let kw = self.next_tok().text;
+        if kw == b"goto" {
+            let name = self.expect_ident("label name")?.text;
+            self.expect_punct(b";", "';'")?;
+            return Ok(Stmt::Goto { name });
+        }
         if kw == b"return" && !self.at_punct(b";") {
             let e = self.parse_expression()?;
             self.expect_punct(b";", "';'")?;
@@ -2490,6 +2499,14 @@ mod tests {
         assert_sexp(
             "int f() { while (1) { break; continue; } return; }",
             "(tu (funcdef f (compound (while (int 1) (compound (break) (continue))) (return))))",
+        );
+    }
+
+    #[test]
+    fn goto_and_label() {
+        assert_sexp(
+            "int f() { goto done; x = 1; done: x = 2; }",
+            "(tu (funcdef f (compound (goto done) (exprstmt (assign = (ident x) (int 1))) (goto-label done (exprstmt (assign = (ident x) (int 2)))))))",
         );
     }
 

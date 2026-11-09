@@ -195,6 +195,9 @@ pub enum Stmt {
     Return(Option<Expr>),
     Break,
     Continue,
+    Goto {
+        name: Vec<u8>,
+    },
     Case {
         label: Expr,
         body: Box<Stmt>,
@@ -543,6 +546,10 @@ fn dump_stmt(s: &Stmt, out: &mut Vec<u8>) {
         }
         Stmt::Continue => {
             open(out, "continue");
+            close(out);
+        }
+        Stmt::Goto { name } => {
+            open_text(out, "goto", name);
             close(out);
         }
         Stmt::Case { label, body } => {

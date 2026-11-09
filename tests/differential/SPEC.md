@@ -68,7 +68,8 @@ source order, e.g.
   multi-word, as in `decl`).
 - `return`: `[expr]?`; `break`, `continue`: none (kind is the keyword).
 - `case`: `[label, body]` (label is an assignment-expression);
-  `default`: `[body]`; `goto-label(name)`: `[body]`.
+  `default`: `[body]`; `goto-label(name)`: `[body]`;
+  `goto(name)`: none.
 - `comma`: `[first, rest...]` (2+; only built when a comma is present).
 - `assign(op)`: `[lhs, rhs]`, right-associative; `op` is one of
   `= += -= *= /= %= &= |= ^= <<= >>=`. Non-lvalue `lhs` (other than
