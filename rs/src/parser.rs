@@ -881,6 +881,67 @@ impl<'a> Parser<'a> {
                         self.next_tok();
                         ptr_depth += 1;
                     }
+                    if self.at_punct(b"(") {
+                        // Parenthesized parameter declarator, as
+                        // in init declarators: a parameter list
+                        // after it makes a function-pointer
+                        // parameter, otherwise a plain pointer
+                        // parameter with redundant parentheses.
+                        let (inner, paren_name) =
+                            self.parse_paren_stars_name(allow_unnamed)?;
+                        if self.at_punct(b"(") {
+                            if inner != 1 {
+                                return self.fail(if inner == 0 {
+                                    "parenthesized function declarators are not supported"
+                                        .to_string()
+                                } else {
+                                    "pointer to function pointer is not supported"
+                                        .to_string()
+                                });
+                            }
+                            let sig = self.parse_fn_sig_params(&spec, ptr_depth)?;
+                            if self.at_punct(b"[") {
+                                return self.fail(
+                                    "arrays of function pointers are not supported"
+                                        .to_string(),
+                                );
+                            }
+                            params.push(FnParam {
+                                name: paren_name,
+                                ptr_depth: 0,
+                                dims: Vec::new(),
+                                fn_sig: Some(Box::new(sig)),
+                            });
+                            if !self.at_punct(b",") {
+                                break;
+                            }
+                            self.next_tok();
+                            continue;
+                        }
+                        let total_depth = ptr_depth + inner;
+                        if total_depth > 2 {
+                            return self.fail(
+                                "pointer to pointer to pointer is not supported"
+                                    .to_string(),
+                            );
+                        }
+                        if self.at_punct(b"[") {
+                            return self.fail(
+                                "pointer to array is not supported".to_string(),
+                            );
+                        }
+                        params.push(FnParam {
+                            name: paren_name,
+                            ptr_depth: total_depth,
+                            dims: spec.dims.clone(),
+                            fn_sig: None,
+                        });
+                        if !self.at_punct(b",") {
+                            break;
+                        }
+                        self.next_tok();
+                        continue;
+                    }
                     let name = if allow_unnamed
                         && (self.at_punct(b",")
                             || self.at_punct(b")")
@@ -949,6 +1010,7 @@ impl<'a> Parser<'a> {
                         name,
                         ptr_depth,
                         dims,
+                        fn_sig: None,
                     });
                     if !self.at_punct(b",") {
                         break;
@@ -1103,6 +1165,68 @@ impl<'a> Parser<'a> {
         Ok(Expr::InitList(elems))
     }
 
+    /// Consume a parenthesized declarator head `( * * name )`
+    /// and return the inner star count and the name (empty
+    /// for an unnamed parameter when `allow_unnamed` and the
+    /// next token is `)`).
+    fn parse_paren_stars_name(
+        &mut self,
+        allow_unnamed: bool,
+    ) -> Result<(u8, Vec<u8>), ParseError> {
+        self.expect_punct(b"(", "'('")?;
+        let mut inner = 0u8;
+        while self.at_punct(b"*") {
+            inner += 1;
+            self.next_tok();
+        }
+        let name = if allow_unnamed && self.at_punct(b")") {
+            Vec::new()
+        } else {
+            self.expect_ident("declarator name")?.text
+        };
+        self.expect_punct(b")", "')'")?;
+        Ok((inner, name))
+    }
+
+    /// Parse a function-pointer parameter list after a
+    /// parenthesized declarator head, and build its
+    /// signature. Nested function-pointer parameters and
+    /// array return types are rejected.
+    fn parse_fn_sig_params(
+        &mut self,
+        base: &Spec,
+        returns_ptr_depth: u8,
+    ) -> Result<FuncSig, ParseError> {
+        if !base.dims.is_empty() {
+            return self.fail("function return type cannot be an array".to_string());
+        }
+        let params = self.parse_params(true)?;
+        if params.iter().any(|p| p.fn_sig.is_some()) {
+            return self.fail(
+                "nested function pointer parameters are not supported".to_string(),
+            );
+        }
+        Ok(FuncSig {
+            is_void: base.words.as_slice() == b"void" && returns_ptr_depth == 0,
+            returns_ptr_depth,
+            params,
+        })
+    }
+
+    /// Parse an optional `= init` tail for a declarator.
+    fn parse_opt_init(&mut self) -> Result<Option<Expr>, ParseError> {
+        if self.at_punct(b"=") {
+            self.next_tok();
+            if self.at_punct(b"{") {
+                Ok(Some(self.parse_init_list()?))
+            } else {
+                Ok(Some(self.parse_assignment()?))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
     fn parse_init_declarator(&mut self, base: &Spec) -> Result<InitDecl, ParseError> {
         // Stars add to the aliased depth (`char **p` is depth 2);
         // a third level is an error.
@@ -1115,6 +1239,64 @@ impl<'a> Parser<'a> {
             }
             self.next_tok();
             ptr_depth += 1;
+        }
+        if self.at_punct(b"(") {
+            // Parenthesized declarator: `(*fp)(params)` is a
+            // function pointer, `(*fp)` alone is a plain
+            // pointer declarator with redundant parentheses.
+            // The star inside the parentheses is the
+            // function-pointer star; stars before it are the
+            // return type's. A second inner star is a pointer
+            // to a function pointer and is rejected, as is a
+            // parameter list after a bare parenthesized name.
+            let (inner, name) = self.parse_paren_stars_name(false)?;
+            self.declare_name(&name);
+            if self.at_punct(b"(") {
+                if inner != 1 {
+                    return self.fail(if inner == 0 {
+                        "parenthesized function declarators are not supported"
+                            .to_string()
+                    } else {
+                        "pointer to function pointer is not supported"
+                            .to_string()
+                    });
+                }
+                let sig = self.parse_fn_sig_params(base, ptr_depth)?;
+                if self.at_punct(b"[") {
+                    return self.fail(
+                        "arrays of function pointers are not supported".to_string(),
+                    );
+                }
+                let init = self.parse_opt_init()?;
+                return Ok(InitDecl {
+                    name,
+                    ptr_depth: 0,
+                    dims: Vec::new(),
+                    fn_sig: Some(sig),
+                    init,
+                });
+            }
+            let total_depth = ptr_depth + inner;
+            if total_depth > 2 {
+                return self.fail(
+                    "pointer to pointer to pointer is not supported".to_string(),
+                );
+            }
+            if self.at_punct(b"[") {
+                return self.fail("pointer to array is not supported".to_string());
+            }
+            let dims = base.dims.iter().map(|d| {
+                d.as_ref()
+                    .map(|len| Expr::Int(len.to_string().into_bytes()))
+            }).collect();
+            let init = self.parse_opt_init()?;
+            return Ok(InitDecl {
+                name,
+                ptr_depth: total_depth,
+                dims,
+                fn_sig: None,
+                init,
+            });
         }
         let name = self.expect_ident("declarator name")?.text;
         // The name is in scope from here, including in its own
@@ -1153,6 +1335,7 @@ impl<'a> Parser<'a> {
             name,
             ptr_depth,
             dims,
+            fn_sig: None,
             init,
         })
     }
@@ -2485,6 +2668,88 @@ mod tests {
             "typedef int T; int f(int T) { return T; } int main() { T x = 3; return x; }",
             "(tu (typedef T int) (funcdef f (params (param T)) (compound (return (ident T)))) (funcdef main (compound (decl int (initdecl x (int 3))) (return (ident x)))))",
         );
+    }
+
+    #[test]
+    fn function_pointer_declarators_parse() {
+        // One `(fnsig ...)` child per function-pointer
+        // declarator, carrying the pointed function's
+        // parameters, void-ness, and return pointer depth.
+        assert_sexp(
+            "int (*fp)(int);",
+            "(tu (decl int (initdecl fp (fnsig (params (param))))))",
+        );
+        assert_sexp(
+            "int (*fp)(int x, char *y);",
+            "(tu (decl int (initdecl fp (fnsig (params (param x) (param y (pointer)))))))",
+        );
+        assert_sexp(
+            "int *(*fp)(int);",
+            "(tu (decl int (initdecl fp (fnsig (params (param)) (pointer)))))",
+        );
+        assert_sexp(
+            "void (*cb)(void);",
+            "(tu (decl void (initdecl cb (fnsig (void)))))",
+        );
+        assert_sexp(
+            "int f(int (*cb)(int));",
+            "(tu (funcdecl f (params (param cb (fnsig (params (param)))))))",
+        );
+        assert_sexp(
+            "int (*fp)();",
+            "(tu (decl int (initdecl fp (fnsig))))",
+        );
+        assert_sexp(
+            "int f(int (*)(int));",
+            "(tu (funcdecl f (params (param (fnsig (params (param)))))))",
+        );
+        // A return-pointer alias composes with the
+        // parenthesized star as the return depth.
+        assert_sexp(
+            "typedef int *P; P (*fp)(int);",
+            "(tu (typedef P int (pointer)) (decl int (initdecl fp (fnsig (params (param)) (pointer)))))",
+        );
+        // Redundant parentheses around a plain declarator
+        // parse as the plain declarator.
+        assert_sexp(
+            "int (*p) = 0;",
+            "(tu (decl int (initdecl p (pointer) (int 0))))",
+        );
+        assert_sexp(
+            "int (x) = 1;",
+            "(tu (decl int (initdecl x (int 1))))",
+        );
+        // Deferred forms are parse errors with their own
+        // messages.
+        for (src, want) in [
+            ("int (**fp)(int);", "pointer to function pointer"),
+            ("int (*fp)(int)[3];", "arrays of function pointers"),
+            ("int (*fp)[3];", "pointer to array"),
+            (
+                "typedef char A[3]; A (*fp)(int);",
+                "function return type cannot be an array",
+            ),
+            ("typedef int (*cb)(int);", "declarator name"),
+            (
+                "int f(int (*cb)(int (*g)(int)));",
+                "nested function pointer parameters",
+            ),
+            (
+                "int (fp)(int);",
+                "parenthesized function declarators",
+            ),
+        ] {
+            match parse(src.as_bytes()) {
+                Err(e) => assert!(
+                    e.msg.contains(want),
+                    "for {:?}: got error {:?}, want {:?}",
+                    src,
+                    e.msg,
+                    want
+                ),
+                Ok(_) => panic!("accepted {:?}", src),
+            }
+        }
     }
 
     #[test]

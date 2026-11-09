@@ -35,35 +35,10 @@ pub struct ExpandedFunction {
     pub body: Block,
 }
 
-/// A function signature, from a prototype (or, for comparison, a
-/// definition): void-ness, pointer-return depth, plus
-/// per-parameter pointer depth and array dimensions. Parameter
-/// names are ignored, as in C; all type spellings denote one
-/// byte here, so only the depth/dimensions are compared. For
-/// array parameters only the dimensions after the first are
-/// compared: the outermost parameter size is discarded.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FuncSig {
-    pub is_void: bool,
-    pub returns_ptr_depth: u8,
-    pub params: Vec<FnParam>,
-}
-
-impl FuncSig {
-    /// Whether two signatures agree: same void-ness, same
-    /// pointer-return depth, same parameter count, same pointer
-    /// depth and post-first dimensions per parameter.
-    pub fn matches(&self, other: &FuncSig) -> bool {
-        self.is_void == other.is_void
-            && self.returns_ptr_depth == other.returns_ptr_depth
-            && self.params.len() == other.params.len()
-            && self.params.iter().zip(other.params.iter()).all(|(a, b)| {
-                a.ptr_depth == b.ptr_depth
-                    && a.is_array() == b.is_array()
-                    && a.dims.iter().skip(1).eq(b.dims.iter().skip(1))
-            })
-    }
-}
+/// A function signature, from a prototype, a definition, or
+/// a function-pointer declarator. Defined in `ast` so the
+/// parser can build one; re-exported here for the emitter.
+pub use crate::ast::FuncSig;
 
 /// Code emitter: cell allocator, output bytes, tracked data pointer.
 #[derive(Debug, Default)]

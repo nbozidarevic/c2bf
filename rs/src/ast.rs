@@ -27,6 +27,47 @@ pub struct FnParam {
     /// parameters decay to pointers; the outermost size is
     /// discarded, the inner sizes are the stride.
     pub dims: Vec<Option<i32>>,
+    /// Function-pointer signature for a parenthesized
+    /// declarator (`int (*cb)(int)`): `None` for every other
+    /// parameter. Present only with `ptr_depth == 0` and no
+    /// dimensions; the signature carries the return type.
+    pub fn_sig: Option<Box<FuncSig>>,
+}
+
+/// A function signature: void-ness, pointer-return depth,
+/// plus per-parameter pointer depth, dimensions, and
+/// nested function-pointer signatures. Parameter names are
+/// ignored, as in C; all type spellings denote one byte
+/// here, so only the shape is compared. For array
+/// parameters only the dimensions after the first are
+/// compared: the outermost parameter size is discarded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FuncSig {
+    pub is_void: bool,
+    pub returns_ptr_depth: u8,
+    pub params: Vec<FnParam>,
+}
+
+impl FuncSig {
+    /// Whether two signatures agree: same void-ness, same
+    /// pointer-return depth, same parameter count, same
+    /// pointer depth, dimensions, and nested signatures per
+    /// parameter.
+    pub fn matches(&self, other: &FuncSig) -> bool {
+        self.is_void == other.is_void
+            && self.returns_ptr_depth == other.returns_ptr_depth
+            && self.params.len() == other.params.len()
+            && self.params.iter().zip(other.params.iter()).all(|(a, b)| {
+                a.ptr_depth == b.ptr_depth
+                    && a.is_array() == b.is_array()
+                    && a.dims.iter().skip(1).eq(b.dims.iter().skip(1))
+                    && match (&a.fn_sig, &b.fn_sig) {
+                        (None, None) => true,
+                        (Some(x), Some(y)) => x.matches(y),
+                        _ => false,
+                    }
+            })
+    }
 }
 
 impl FnParam {
@@ -105,6 +146,12 @@ pub struct InitDecl {
     /// outermost dimension may be unsized, and only a string
     /// or list initializer may size it.
     pub dims: Vec<Option<Expr>>,
+    /// Function-pointer signature for a parenthesized
+    /// declarator (`int (*fp)(int)`): `None` otherwise.
+    /// Present only with no dimensions; the signature
+    /// carries the return type, and `ptr_depth` is 0 (the
+    /// variable holds a callee ID, not a data address).
+    pub fn_sig: Option<FuncSig>,
     pub init: Option<Expr>,
 }
 
@@ -265,6 +312,30 @@ pub fn dump_tu(tu: &TranslationUnit, out: &mut Vec<u8>) {
 /// Serialize a parameter list: `(params (param <name> ...) ...)`.
 /// An unnamed prototype parameter dumps as `(param ...)` with no
 /// name, so `(param)` alone is an unnamed scalar parameter.
+/// Serialize a function-pointer signature: `(fnsig
+/// (params ...) (void)? (pointer)*)`. The `(void)` child
+/// marks a void return; `(pointer)` children mark the
+/// return pointer depth; an empty parameter list omits the
+/// `(params ...)` child, as everywhere.
+fn dump_fn_sig(sig: &FuncSig, out: &mut Vec<u8>) {
+    open(out, "fnsig");
+    if !sig.params.is_empty() {
+        out.push(b' ');
+        dump_params(&sig.params, out);
+    }
+    if sig.is_void {
+        out.push(b' ');
+        open(out, "void");
+        close(out);
+    }
+    for _ in 0..sig.returns_ptr_depth {
+        out.push(b' ');
+        open(out, "pointer");
+        close(out);
+    }
+    close(out);
+}
+
 fn dump_params(params: &[FnParam], out: &mut Vec<u8>) {
     open(out, "params");
     for p in params {
@@ -283,6 +354,10 @@ fn dump_params(params: &[FnParam], out: &mut Vec<u8>) {
             out.push(b' ');
             open(out, "array");
             close(out);
+        }
+        if let Some(sig) = &p.fn_sig {
+            out.push(b' ');
+            dump_fn_sig(sig, out);
         }
         close(out);
     }
@@ -351,6 +426,10 @@ fn dump_decl(d: &Decl, out: &mut Vec<u8>) {
                     close(out);
                 }
             }
+        }
+        if let Some(sig) = &init.fn_sig {
+            out.push(b' ');
+            dump_fn_sig(sig, out);
         }
         if let Some(e) = &init.init {
             out.push(b' ');

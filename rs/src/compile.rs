@@ -254,6 +254,7 @@ impl<'a> Renamer<'a> {
                 name: fresh,
                 ptr_depth: init.ptr_depth,
                 dims,
+                fn_sig: init.fn_sig.clone(),
                 init: init.init.as_ref().map(|e| self.rename_expr(e)).transpose()?,
             });
         }
@@ -463,6 +464,11 @@ fn check_prototype(
     em: &Emitter,
     d: &FuncDecl,
 ) -> Result<FuncSig, CompileError> {
+    // Function-pointer parameters parse and dump, but code
+    // generation lands next; reject them here for now.
+    if d.params.iter().any(|p| p.fn_sig.is_some()) {
+        return Err(err("function pointers are not supported"));
+    }
     check_param_dims(&d.params)?;
     let mut seen: Vec<&[u8]> = Vec::with_capacity(d.params.len());
     for p in &d.params {
@@ -530,6 +536,11 @@ fn rename_function(f: &FuncDef) -> Result<ExpandedFunction, CompileError> {
         array_names: HashSet::new(),
     };
     check_param_dims(&f.params)?;
+    // Function-pointer parameters parse and dump, but code
+    // generation lands next; reject them here for now.
+    if f.params.iter().any(|p| p.fn_sig.is_some()) {
+        return Err(err("function pointers are not supported"));
+    }
     let mut params = Vec::with_capacity(f.params.len());
     for p in &f.params {
         let fresh = renamer.fresh(&p.name);
@@ -546,6 +557,7 @@ fn rename_function(f: &FuncDef) -> Result<ExpandedFunction, CompileError> {
             name: fresh,
             ptr_depth: p.ptr_depth,
             dims: p.dims.clone(),
+            fn_sig: p.fn_sig.clone(),
         });
     }
     let body = renamer.rename_block(&f.body)?;
@@ -739,6 +751,12 @@ impl Emitter {
     fn compile_decl(&mut self, d: &Decl) -> Result<(), CompileError> {
         // `int;` — no declarators, the base visitor emits nothing.
         for init in &d.inits {
+            // Function-pointer declarators parse and dump, but
+            // code generation lands next; reject them here for
+            // now rather than compiling them as scalars.
+            if init.fn_sig.is_some() {
+                return Err(err("function pointers are not supported"));
+            }
             // A non-defining `extern` declarator emits nothing
             // (scalar or array); a use without a definition
             // fails at the use site via `extern_undefined`.

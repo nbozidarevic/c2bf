@@ -34,16 +34,23 @@ source order, e.g.
   consumed, not shown; only `void`-ness is retained (invisibly) for
   code generation. `params` is `[param]*`, present only when the
   parameter list is non-empty (`()` and `(void)` both give no child).
-  `param(name)`: `[pointer*, array*]` — one `pointer` per `*`
-  (depth at most 2), one `array` per bracket for `name[]` or
-  `name[N]` (the sizes are discarded; the inner sizes are the
-  stride).
+  `param(name)`: `[pointer*, array*, fnsig?]` — one `pointer`
+  per `*` (depth at most 2), one `array` per bracket for
+  `name[]` or `name[N]` (the sizes are discarded; the inner
+  sizes are the stride), and one `fnsig` for a
+  function-pointer parameter (`int (*cb)(int)`).
+  `fnsig`: `[params?, (void)?, pointer*]` — the pointed
+  function's parameter list (omitted when empty), a `void`
+  child for a void return, and one `pointer` per `*` of
+  return pointer depth.
 - `decl(spec)`: `[initdecl]*` (`int;` has no children; declarators
   are comma-separated, in order). `spec` is one or more words
   (`unsigned int`, `const char`, `long long`), space-joined.
-- `initdecl(name)`: `[pointer*, (size | unsized)*, init?]` —
+- `initdecl(name)`: `[pointer*, (size | unsized)*, fnsig?, init?]` —
   one `pointer` (no children) per `*` (depth at most 2; a third
-  is a parse error), one `size`/`unsized` per dimension in order
+  is a parse error), one `size`/`unsized` per dimension in order,
+  one `fnsig` for a function-pointer declarator
+  (`int (*fp)(int)`),
   (`size` for `name[N]`, the size expression; `unsized` for
   `name[]`, sized by a string or braced initializer), then the
   initializer. A string literal may initialize an array, as may a
