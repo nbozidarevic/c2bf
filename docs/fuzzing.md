@@ -194,10 +194,21 @@ keeps a `[lo, hi]` bound):
   are reported as skips); the sweep's checks are zero
   mismatches and skips within cap.
 
-Not covered (yet): `scanf %s`/`%c` input, negative `scanf`
-tokens, recursion, function pointers, `goto`, structs, and
-floats. Each is either unsupported or needs its own
-agreement argument before the generator may emit it.
+- Function pointers: at most two variables of type
+  `int (*)(int)`, bound to the scalar helper or to null,
+  never rebound through an unknown target, so every
+  indirect call's return interval is the helper's. The
+  binding is tracked symbolically and merged across
+  branches (a disagreement becomes unknown: comparable,
+  but never callable, since it might be null). Calls use
+  both spellings (`fp(args)`, `(*fp)(args)`); comparisons
+  use only `==`/`!=`/`!`, never ordering (ID order and
+  address order need not agree); null calls are never
+  generated (a crash in C, a no-op here).
+Not covered (yet): negative `scanf` tokens, recursion,
+`goto`, structs, and floats. Each is either unsupported
+or needs its own agreement argument before the generator
+may emit it.
 Not generated: `scanf` with negative tokens (see the
 `scanf` bullet above), and functions taking
 multi-dimensional array parameters (helpers take one

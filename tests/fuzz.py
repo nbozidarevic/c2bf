@@ -138,6 +138,7 @@ class Gen:
         self.mdims = {}
         self.pptrs = {}
         self.aliases = {}
+        self.fnptrs = {}
         self.chartypes = set()
         self.helpers = {}
         self.protected = set()
@@ -182,6 +183,16 @@ class Gen:
     def binop(self, depth, allow_sizeof=True):
         rng = self.rng
         op = rng.choice(BINOPS)
+        # Function-pointer equality uses addresses in C and
+        # callee IDs here: equal exactly when the bindings
+        # name the same function, and ordering is never
+        # generated (ID order and address order need not
+        # agree). The result is always a boolean.
+        if op in ("==", "!=") and self.fnptrs and rng.random() < 0.25:
+            left = rng.choice([*self.fnptrs, "helper", "0"])
+            right = rng.choice([*self.fnptrs, "helper", "0"])
+            if left in self.fnptrs or right in self.fnptrs:
+                return (f"({left} {op} {right})", 0, 1)
         for _ in range(6):
             l = self.expr(depth - 1, allow_sizeof=allow_sizeof)
             r = self.expr(depth - 1, allow_sizeof=allow_sizeof)
@@ -235,6 +246,24 @@ class Gen:
         return (f"({cond[0]} ? {a[0]} : {b[0]})", *iv)
 
     def call(self, depth, allow_sizeof=True):
+        # Indirect calls through a pointer bound to the
+        # helper: never through a null or unknown binding
+        # (a null call crashes in C, and an unknown binding
+        # might be null). The return interval is the
+        # helper's, whatever the spelling.
+        if self.fnptrs and "helper" in self.helpers \
+                and not self.helpers["helper"][1] \
+                and self.rng.random() < 0.35:
+            callable = [n for n, t in self.fnptrs.items()
+                        if t == "helper"]
+            if callable:
+                name = self.rng.choice(callable)
+                ret_iv = self.helpers["helper"][0]
+                arg = self.expr(depth - 1, allow_call=False,
+                                allow_sizeof=allow_sizeof)
+                form = self.rng.choice([f"{name}({arg[0]})",
+                                        f"(*{name})({arg[0]})"])
+                return (form, *ret_iv)
         name, (ret_iv, is_pp, is_char) = self.rng.choice(
             list(self.helpers.items()))
         if is_pp:
@@ -270,6 +299,11 @@ class Gen:
         return (str(v), v, v)
 
     def unop(self, depth, allow_sizeof=True):
+        # `!fp` tests nullness: 0 is null in both models, and
+        # any callee ID is nonzero in both.
+        if self.fnptrs and self.rng.random() < 0.12:
+            name = self.rng.choice(list(self.fnptrs))
+            return (f"(!{name})", 0, 1)
         inner = self.expr(depth - 1, allow_sizeof=allow_sizeof)
         roll = self.rng.random()
         if roll < 0.45:
@@ -614,6 +648,23 @@ class Gen:
             lo = 0
         return (text, lo, hi)
 
+    def decl_fnptr(self):
+        """A function-pointer variable bound to the helper or
+        to null. Only the scalar helper's signature exists in
+        generated programs: (int) -> int. The binding is the
+        generator's record of what the variable holds: the
+        helper's name, None for null, or "?" for unknown
+        after a disagreeing merge."""
+        rng = self.rng
+        if "helper" not in self.helpers or self.helpers["helper"][1]:
+            return None
+        name = self.fresh("f")
+        if rng.random() < 0.3:
+            self.fnptrs[name] = None
+            return f"int (*{name})(int) = 0;"
+        self.fnptrs[name] = "helper"
+        return f"int (*{name})(int) = helper;"
+
     def decl_pp(self):
         """A pointer-to-pointer bound to an existing pointer.
         The binding never changes: rebinding or incrementing
@@ -654,7 +705,7 @@ class Gen:
 
     def snap(self):
         return (dict(self.env), {k: v for k, v in self.arrays.items()},
-                set(self.chartypes))
+                set(self.chartypes), dict(self.fnptrs))
 
     def merge(self, snaps):
         envs, arrs = [s[0] for s in snaps], [s[1] for s in snaps]
@@ -668,6 +719,14 @@ class Gen:
                 old = self.arrays[name]
                 self.arrays[name] = (old[0], (min(i[0] for i in ivs),
                                               max(i[1] for i in ivs)), old[2], old[3])
+        # A function-pointer binding the branches disagree on
+        # becomes unknown: comparable, but never callable
+        # (it might be null, which must not be called).
+        for name in self.fnptrs:
+            vals = [s[3][name] for s in snaps if name in s[3]]
+            if vals:
+                self.fnptrs[name] = vals[0] if all(
+                    v == vals[0] for v in vals) else "?"
 
     def assignable(self):
         return [n for n in self.env if n not in self.protected]
@@ -759,6 +818,25 @@ class Gen:
                 self.arrays[name] = (length, iv_join(iv, (e[1], e[2])),
                                      self.arrays[name][2], is_char)
                 return
+        if roll < 0.47 and self.fnptrs and rng.random() < 0.3:
+            name = rng.choice(list(self.fnptrs))
+            choice = rng.random()
+            if choice < 0.45:
+                lines.append(f"{name} = helper;")
+                self.fnptrs[name] = "helper"
+            elif choice < 0.7:
+                lines.append(f"{name} = 0;")
+                self.fnptrs[name] = None
+            elif len(self.fnptrs) > 1:
+                other = rng.choice(
+                    [n for n in self.fnptrs if n != name])
+                lines.append(f"{name} = {other};")
+                self.fnptrs[name] = self.fnptrs[other]
+            else:
+                cond = self.expr(depth - 1)
+                lines.append(f"{name} = ({cond[0]} ? helper : 0);")
+                self.fnptrs[name] = "?"
+            return
         if roll < 0.47 and self.pptrs and rng.random() < 0.6:
             ppname = rng.choice(list(self.pptrs))
             tgt = self.pptrs[ppname]
@@ -860,7 +938,7 @@ class Gen:
         then_snap = self.snap()
         # Copies: restoring the snapshot dict itself and then
         # mutating it would corrupt the snapshot the merge reads.
-        self.env, self.arrays, self.chartypes = dict(snap[0]), dict(snap[1]), set(snap[2])
+        self.env, self.arrays, self.chartypes, self.fnptrs = dict(snap[0]), dict(snap[1]), set(snap[2]), dict(snap[3])
         else_lines = []
         self.stmts(depth - 1, loop, 1, else_lines, pure, allow_while=True,
                    allow_loop=allow_loop)
@@ -940,7 +1018,7 @@ class Gen:
             lines.extend("  " + s for s in body)
             lines.append("  break;")
             snaps.append(self.snap())
-            self.env, self.arrays, self.chartypes = dict(snap[0]), dict(snap[1]), set(snap[2])
+            self.env, self.arrays, self.chartypes, self.fnptrs = dict(snap[0]), dict(snap[1]), set(snap[2]), dict(snap[3])
         lines.append("default:")
         body = []
         self.stmts(1, loop, 1, body, pure, allow_while=False,
@@ -1111,19 +1189,20 @@ class Gen:
             return (f"{typ} helper({typ} **hp) {{\n"
                     f"  return **hp;\n}}")
         saved = (self.env, self.arrays, self.chartypes, self.ptrs,
-                 self.mdims, self.pptrs)
+                 self.mdims, self.pptrs, self.fnptrs)
         self.env = {"hp": (0, 255)}
         self.arrays = {}
         self.chartypes = set()
         self.ptrs = {}
         self.mdims = {}
         self.pptrs = {}
+        self.fnptrs = {}
         lines = []
         if rng.random() < 0.6:
             lines.append(self.decl_scalar())
         ret = self.readable_expr(2)
         (self.env, self.arrays, self.chartypes, self.ptrs,
-         self.mdims, self.pptrs) = saved
+         self.mdims, self.pptrs, self.fnptrs) = saved
         self.helpers["helper"] = ((ret[1], ret[2]), False, False)
         body = "\n".join("  " + l for l in lines)
         tail = f"  return {ret[0]};"
@@ -1155,8 +1234,19 @@ def gen_program(seed):
         elif roll < 0.86:
             lines.append(g.decl_array())
         else:
-            decl = g.decl_pp()
+            decl = None
+            if roll < 0.93 and len(g.fnptrs) < 2:
+                decl = g.decl_fnptr()
+            if decl is None:
+                decl = g.decl_pp()
             lines.append(decl if decl else g.decl_scalar())
+    # A function-pointer variable needs the helper to point
+    # at; bind one afterwards when none was declared, so
+    # indirect calls get steady coverage.
+    if not g.fnptrs and rng.random() < 0.4:
+        decl = g.decl_fnptr()
+        if decl is not None:
+            lines.append(decl)
     # A pointer-to-pointer declaration needs a pointer declared
     # before it, which the loop above only sometimes provides;
     # bind one afterwards half the time a pointer exists, so
