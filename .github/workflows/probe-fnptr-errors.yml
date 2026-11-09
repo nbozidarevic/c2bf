@@ -1,0 +1,34 @@
+# TEMPORARY: identify which function-pointer error case
+# compiles. Removed after diagnosis.
+name: probe-fnptr-errors
+
+on:
+  push:
+    paths:
+      - .github/workflows/probe-fnptr-errors.yml
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release --manifest-path rs/Cargo.toml
+      - name: Probe cases
+        run: |
+          mkdir -p /tmp/probe
+          printf 'int g(int x) { return x; } int main() { int (*fp)(int, int) = g; return 0; }' > /tmp/probe/c1.c
+          printf 'int g(int x) { return x; } int main() { int (*fp)(int) = g; return fp(1, 2); }' > /tmp/probe/c2.c
+          printf 'int g(int x) { return x; } int main() { int (*fp)(int) = g; fp++; return 0; }' > /tmp/probe/c3.c
+          printf 'int g(int x) { return x; } int main() { int (*fp)(int) = g; fp += 1; return 0; }' > /tmp/probe/c4.c
+          printf 'int g(int x) { return x; } int main() { int (*fp)(int) = g; *fp = g; return 0; }' > /tmp/probe/c5.c
+          printf 'int g(int); int main() { int (*fp)(int) = g; return 0; }' > /tmp/probe/c6.c
+          printf 'int g(int x) { return x; } int main() { int (*fp)(int) = 5; return 0; }' > /tmp/probe/c7.c
+          printf 'int g(int x) { return x; } int main() { g = 1; return 0; }' > /tmp/probe/c8.c
+          for f in /tmp/probe/c*.c; do
+            echo "== $f"
+            ./rs/target/release/bfcompile "$f" > /tmp/probe/out.bf 2>/tmp/probe/err.txt; echo "exit: $? size: $(wc -c < /tmp/probe/out.bf)"; head -c 200 /tmp/probe/err.txt; echo
+          done
