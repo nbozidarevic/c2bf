@@ -464,11 +464,6 @@ fn check_prototype(
     em: &Emitter,
     d: &FuncDecl,
 ) -> Result<FuncSig, CompileError> {
-    // Function-pointer parameters parse and dump, but code
-    // generation lands next; reject them here for now.
-    if d.params.iter().any(|p| p.fn_sig.is_some()) {
-        return Err(err("function pointers are not supported"));
-    }
     check_param_dims(&d.params)?;
     let mut seen: Vec<&[u8]> = Vec::with_capacity(d.params.len());
     for p in &d.params {
@@ -536,11 +531,6 @@ fn rename_function(f: &FuncDef) -> Result<ExpandedFunction, CompileError> {
         array_names: HashSet::new(),
     };
     check_param_dims(&f.params)?;
-    // Function-pointer parameters parse and dump, but code
-    // generation lands next; reject them here for now.
-    if f.params.iter().any(|p| p.fn_sig.is_some()) {
-        return Err(err("function pointers are not supported"));
-    }
     let mut params = Vec::with_capacity(f.params.len());
     for p in &f.params {
         let fresh = renamer.fresh(&p.name);
@@ -636,6 +626,7 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
                 {
                     return Err(err("duplicate function definition"));
                 }
+                em.fn_order.push(f.name.clone());
             }
             External::FuncDecl(d) => {
                 let sig = check_prototype(&em, d)?;
@@ -751,11 +742,24 @@ impl Emitter {
     fn compile_decl(&mut self, d: &Decl) -> Result<(), CompileError> {
         // `int;` — no declarators, the base visitor emits nothing.
         for init in &d.inits {
-            // Function-pointer declarators parse and dump, but
-            // code generation lands next; reject them here for
-            // now rather than compiling them as scalars.
-            if init.fn_sig.is_some() {
-                return Err(err("function pointers are not supported"));
+            // A function-pointer declarator holds a callee ID
+            // in one cell: never a data pointer, never an
+            // array, and its initializer is a designator, a
+            // function pointer of the same signature, or 0.
+            if let Some(sig) = &init.fn_sig {
+                if self.memory.is_array(&init.name) {
+                    return Err(err("cannot redeclare an array as a variable"));
+                }
+                let dest = self.memory.var_cell(&init.name);
+                self.fnptrs.insert(init.name.clone());
+                self.fnptr_sigs.insert(init.name.clone(), sig.clone());
+                let e = match &init.init {
+                    None => return Err(err("Unsupported init declarator")),
+                    Some(e) => e,
+                };
+                let value = self.compile_fnptr_value(e, sig)?;
+                self.copy_value(value, dest);
+                continue;
             }
             // A non-defining `extern` declarator emits nothing
             // (scalar or array); a use without a definition
@@ -1439,6 +1443,9 @@ impl Emitter {
         match e {
             Expr::Ident(name) => {
                 self.check_extern_defined(name)?;
+                if self.functions.contains_key(name) {
+                    return self.fn_id_cell(name);
+                }
                 if let Some((base, _)) = self.memory.array_info(name) {
                     self.address_const(base)
                 } else {
@@ -1518,6 +1525,40 @@ impl Emitter {
         }
     }
 
+    /// Whether `e` names a function as a designator: a
+    /// defined or prototyped function name, a function-pointer
+    /// variable, or a dereference/address chain of one.
+    /// Pure: no code is emitted.
+    fn is_fn_designator(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Paren(inner) => self.is_fn_designator(inner),
+            Expr::Unary { op, e: inner }
+                if op.as_slice() == b"*" || op.as_slice() == b"&" =>
+            {
+                self.is_fn_designator(inner)
+            }
+            Expr::Ident(name) => {
+                self.functions.contains_key(name)
+                    || self.prototypes.contains_key(name)
+                    || self.fnptrs.contains(name)
+            }
+            _ => false,
+        }
+    }
+
+    /// Declared signature of a function-pointer lvalue
+    /// (`fp`, `(fp)`), or `None` for any other target.
+    fn fnptr_lvalue_sig(&self, e: &Expr) -> Option<FuncSig> {
+        let mut cur = e;
+        while let Expr::Paren(inner) = cur {
+            cur = inner;
+        }
+        let Expr::Ident(name) = cur else {
+            return None;
+        };
+        self.fnptr_sigs.get(name).cloned()
+    }
+
     /// Store destination for an assignment target: a static cell,
     /// or a runtime address plus the cells a dispatch searches
     /// (an array range, or every byte address when absent).
@@ -1525,6 +1566,11 @@ impl Emitter {
         match e {
             Expr::Ident(name) => {
                 self.check_extern_defined(name)?;
+                if self.functions.contains_key(name)
+                    || self.prototypes.contains_key(name)
+                {
+                    return Err(err("cannot assign to a function"));
+                }
                 if self.memory.is_array(name) {
                     Err(err("cannot assign to an array"))
                 } else {
@@ -1589,6 +1635,9 @@ impl Emitter {
                 }
             },
             Expr::Unary { op, e: inner } if op.as_slice() == b"*" => {
+                if self.is_fn_designator(inner) {
+                    return Err(err("cannot assign to a function"));
+                }
                 let addr = self.compile_expr(inner)?;
                 Ok(StoreTarget::Any { addr })
             }
@@ -1703,6 +1752,35 @@ impl Emitter {
             return None;
         }
         self.memory.array_info(name).map(|(base, _)| base)
+    }
+
+    /// Cell holding a callee ID when `e` dereferences a
+    /// function designator or a function pointer: `*fp` is
+    /// the ID `fp` holds, `*f` is `f`'s ID, and chains
+    /// collapse the same way. Returns `None` for ordinary
+    /// dereferences, which load through dispatch.
+    fn fnptr_deref_value(&mut self, e: &Expr) -> Result<Option<i32>, CompileError> {
+        match e {
+            Expr::Paren(inner) => self.fnptr_deref_value(inner),
+            Expr::Unary { op, e: inner } if op.as_slice() == b"*" => {
+                self.fnptr_deref_value(inner)
+            }
+            Expr::Ident(name) => {
+                if self.fnptrs.contains(name) {
+                    Ok(Some(self.memory.var_cell(name)))
+                } else if self.functions.contains_key(name) {
+                    Ok(Some(self.fn_id_cell(name)?))
+                } else if self.prototypes.contains_key(name) {
+                    Err(err(format!(
+                        "undefined function '{}'",
+                        String::from_utf8_lossy(name)
+                    )))
+                } else {
+                    Ok(None)
+                }
+            }
+            _ => Ok(None),
+        }
     }
 
     /// Reject dereferencing a plain scalar variable (or an
@@ -2280,8 +2358,12 @@ impl Emitter {
             Expr::Ident(name) => {
                 // A bare array name decays to the address of its
                 // first element; scalars and pointers keep the
-                // variable cell itself.
+                // variable cell itself. A bare function name is
+                // a designator: its callee ID.
                 self.check_extern_defined(name)?;
+                if self.functions.contains_key(name) {
+                    return self.fn_id_cell(name);
+                }
                 if let Some((base, _)) = self.memory.array_info(name) {
                     self.address_const(base)
                 } else {
@@ -2312,9 +2394,25 @@ impl Emitter {
                     // so a subscript's index expression compiles before
                     // the right-hand side.
                     let target = self.store_target(lhs)?;
-                    let r = self.compile_expr(rhs)?;
+                    // A function-pointer target takes only a
+                    // designator, a function pointer of the same
+                    // signature, or 0 — never a plain value.
+                    let r = if let Some(sig) = self.fnptr_lvalue_sig(lhs) {
+                        self.compile_fnptr_value(rhs, &sig)?
+                    } else {
+                        self.compile_expr(rhs)?
+                    };
                     self.store_value(&target, r)
                 } else {
+                    // Arithmetic on function pointers is
+                    // meaningless (callee IDs have no address
+                    // arithmetic); the dereference form below
+                    // is refused by `store_target`.
+                    if self.fnptr_lvalue_sig(lhs).is_some() {
+                        return Err(err(
+                            "arithmetic on function pointers is not supported",
+                        ));
+                    }
                     // Sequenced statements in C++: right-hand side first.
                     let r = self.compile_expr(rhs)?;
                     let (target_value, target) = self.load_target(lhs)?;
@@ -2430,6 +2528,12 @@ impl Emitter {
                 // yields its first row, which decays to the base
                 // address instead of loading the first element.
                 b"*" => {
+                    // Dereferencing a function designator or a
+                    // function pointer yields the callee ID
+                    // itself, never a load through dispatch.
+                    if let Some(cell) = self.fnptr_deref_value(e)? {
+                        return Ok(cell);
+                    }
                     self.check_deref_operand(e)?;
                     if let Some(base) = self.deref_row_base(e) {
                         return self.address_const(base);
@@ -2438,6 +2542,11 @@ impl Emitter {
                     self.load_through(addr)
                 }
                 b"++" => {
+                    if self.fnptr_lvalue_sig(e).is_some() {
+                        return Err(err(
+                            "arithmetic on function pointers is not supported",
+                        ));
+                    }
                     if self.names_array(e) {
                         return Err(err("cannot modify an array"));
                     }
@@ -2456,6 +2565,11 @@ impl Emitter {
                     }
                 }
                 b"--" => {
+                    if self.fnptr_lvalue_sig(e).is_some() {
+                        return Err(err(
+                            "arithmetic on function pointers is not supported",
+                        ));
+                    }
                     if self.names_array(e) {
                         return Err(err("cannot modify an array"));
                     }
@@ -2487,6 +2601,11 @@ impl Emitter {
             }
             Expr::SizeofType(_) => Ok(self.const_value(1)),
             Expr::Postfix { op, e } => {
+                if self.fnptr_lvalue_sig(e).is_some() {
+                    return Err(err(
+                        "arithmetic on function pointers is not supported",
+                    ));
+                }
                 if self.names_array(e) {
                     return Err(err("cannot modify an array"));
                 }
@@ -2614,6 +2733,11 @@ impl Emitter {
         match a {
             Expr::Ident(name) => {
                 self.check_extern_defined(name)?;
+                if self.functions.contains_key(name)
+                    || self.prototypes.contains_key(name)
+                {
+                    return Err(err("cannot assign to a function"));
+                }
                 if let Some((base, len)) = self.memory.array_info(name) {
                     Ok(ScanfTarget::Bounded { base, len })
                 } else if self.memory.is_pointer(name) {
@@ -2720,10 +2844,141 @@ impl Emitter {
     }
 
     /// Compile a call: only `printf`/`scanf` with a string-literal format.
+    /// Cell holding the callee ID of a defined function: its
+    /// position in translation-unit order plus one (0 is
+    /// null). More than 255 defined functions cannot be
+    /// named through a pointer.
+    fn fn_id_cell(&mut self, name: &[u8]) -> Result<i32, CompileError> {
+        match self.fn_order.iter().position(|n| n.as_slice() == name) {
+            Some(idx) if idx < 255 => Ok(self.const_value((idx + 1) as u8)),
+            Some(_) => Err(err("too many functions for function pointer dispatch")),
+            None => Err(err(format!(
+                "undefined function '{}'",
+                String::from_utf8_lossy(name)
+            ))),
+        }
+    }
+
+    /// (cell holding a callee ID, signature) for a function
+    /// designator chain: `f`, `&f`, `*fp`, `**fp`, and
+    /// parenthesized forms. A prototype-only name has no ID;
+    /// anything else that is not a designator or a function
+    /// pointer is an incompatible type.
+    fn fn_designator_chain(&mut self, e: &Expr) -> Result<(i32, FuncSig), CompileError> {
+        match e {
+            Expr::Paren(inner) => self.fn_designator_chain(inner),
+            Expr::Unary { op, e: inner }
+                if op.as_slice() == b"*" || op.as_slice() == b"&" =>
+            {
+                self.fn_designator_chain(inner)
+            }
+            Expr::Ident(name) => {
+                let sig = self.functions.get(name).map(|def| FuncSig {
+                    is_void: def.is_void,
+                    returns_ptr_depth: def.returns_ptr_depth,
+                    params: def.params.clone(),
+                });
+                if let Some(sig) = sig {
+                    let cell = self.fn_id_cell(name)?;
+                    Ok((cell, sig))
+                } else if self.prototypes.contains_key(name) {
+                    Err(err(format!(
+                        "undefined function '{}'",
+                        String::from_utf8_lossy(name)
+                    )))
+                } else if let Some(sig) = self.fnptr_sigs.get(name).cloned() {
+                    Ok((self.memory.var_cell(name), sig))
+                } else {
+                    self.check_extern_defined(name)?;
+                    Err(err("incompatible function pointer type"))
+                }
+            }
+            _ => Err(err("incompatible function pointer type")),
+        }
+    }
+
+    /// Cell holding a function-pointer value for `e` in a
+    /// position whose expected signature is `expected`: a
+    /// designator, a function pointer of a compatible
+    /// signature, a null constant, a ternary of two such
+    /// values, or a cast, parenthesized, or comma form
+    /// around one. Anything else is an incompatible type.
+    fn compile_fnptr_value(&mut self, e: &Expr, expected: &FuncSig) -> Result<i32, CompileError> {
+        let expected = expected.clone();
+        match e {
+            Expr::Paren(inner) => self.compile_fnptr_value(inner, &expected),
+            Expr::Cast { e: inner, .. } => self.compile_fnptr_value(inner, &expected),
+            Expr::Comma(es) => {
+                for prefix in &es[..es.len().saturating_sub(1)] {
+                    self.compile_expr(prefix)?;
+                }
+                match es.last() {
+                    Some(last) => self.compile_fnptr_value(last, &expected),
+                    None => Err(err("incompatible function pointer type")),
+                }
+            }
+            Expr::Int(bytes) => {
+                if int_literal_value(bytes) == 0 {
+                    Ok(self.const_value(0))
+                } else {
+                    Err(err("incompatible function pointer type"))
+                }
+            }
+            Expr::Ternary { cond, then, els } => {
+                let c = self.compile_expr(cond)?;
+                let result = self.const_value(0);
+                let expected_then = expected.clone();
+                let expected_els = expected.clone();
+                self.perform_if_else(
+                    c,
+                    move |em| {
+                        let t = em.compile_fnptr_value(then, &expected_then)?;
+                        em.copy_value(t, result);
+                        Ok(())
+                    },
+                    move |em| {
+                        let v = em.compile_fnptr_value(els, &expected_els)?;
+                        em.copy_value(v, result);
+                        Ok(())
+                    },
+                )?;
+                Ok(result)
+            }
+            _ => {
+                let (cell, sig) = self.fn_designator_chain(e)?;
+                if !sig.matches(&expected) {
+                    return Err(err("incompatible function pointer type"));
+                }
+                Ok(cell)
+            }
+        }
+    }
+
     fn compile_call(&mut self, callee: &Expr, args: &[Expr]) -> Result<i32, CompileError> {
         let name = match callee {
             Expr::Ident(name) => name.as_slice(),
-            _ => return Err(err("Unsupported postfix expression")),
+            _ => {
+                // Parenthesized builtin names still mean the
+                // builtin (`(printf)(...)`); anything else
+                // goes through designator dispatch.
+                let mut cur = callee;
+                while let Expr::Paren(inner) = cur {
+                    cur = inner;
+                }
+                if let Expr::Ident(bname) = cur {
+                    if bname.as_slice() == b"printf" || bname.as_slice() == b"scanf" {
+                        bname.as_slice()
+                    } else if let Some((id, sig)) = self.indirect_callee(callee)? {
+                        return self.compile_indirect_call(id, &sig, args);
+                    } else {
+                        return Err(err("Unsupported postfix expression"));
+                    }
+                } else if let Some((id, sig)) = self.indirect_callee(callee)? {
+                    return self.compile_indirect_call(id, &sig, args);
+                } else {
+                    return Err(err("Unsupported postfix expression"));
+                }
+            }
         };
         if self.functions.contains_key(name) {
             let def = Rc::clone(
@@ -2732,6 +2987,12 @@ impl Emitter {
                     .expect("registered function is present"),
             );
             return self.expand_call(name, &def, args);
+        }
+        // A function-pointer variable as callee dispatches on
+        // the ID it holds, against its declared signature.
+        if let Some(sig) = self.fnptr_sigs.get(name).cloned() {
+            let id = self.memory.var_cell(name);
+            return self.compile_indirect_call(id, &sig, args);
         }
         // A prototype without a definition has no body to expand:
         // the arity is checked against the prototype first (same
@@ -2924,12 +3185,6 @@ impl Emitter {
         def: &ExpandedFunction,
         args: &[Expr],
     ) -> Result<i32, CompileError> {
-        if self.expanding.iter().any(|n| n.as_slice() == name) {
-            return Err(err(format!(
-                "recursive call to function '{}' is not supported",
-                String::from_utf8_lossy(name)
-            )));
-        }
         if args.len() != def.params.len() {
             return Err(err(format!(
                 "wrong number of arguments to function '{}'",
@@ -2951,27 +3206,64 @@ impl Emitter {
         // it is evaluated: an argument expression may yield a live
         // variable cell (a bare identifier does), and a later
         // argument assigning that variable must not rewrite an
-        // earlier argument's value before binding.
+        // earlier argument's value before binding. A
+        // function-pointer argument is checked against the
+        // parameter's signature as it is compiled.
         let mut arg_cells = Vec::with_capacity(args.len());
-        for arg in args {
-            let v = self.compile_expr(arg)?;
+        for (param, arg) in def.params.iter().zip(args.iter()) {
+            let v = if let Some(sig) = &param.fn_sig {
+                self.compile_fnptr_value(arg, sig)?
+            } else {
+                self.compile_expr(arg)?
+            };
             arg_cells.push(self.duplicate_value(v));
+        }
+        self.expand_call_body(name, def, &arg_cells, result, returned, checkpoint)?;
+        Ok(result)
+    }
+
+    /// Bind already-evaluated arguments and compile one
+    /// function body under a fresh return context: shared by
+    /// direct calls and by each guarded arm of an indirect
+    /// call. The caller owns the reclaim checkpoint, so
+    /// cells allocated before it (the result, the returned
+    /// flag, the argument cells) survive; only the body's
+    /// own temporaries are reclaimed here.
+    fn expand_call_body(
+        &mut self,
+        name: &[u8],
+        def: &ExpandedFunction,
+        arg_cells: &[i32],
+        result: i32,
+        returned: i32,
+        checkpoint: i32,
+    ) -> Result<(), CompileError> {
+        if self.expanding.iter().any(|n| n.as_slice() == name) {
+            return Err(err(format!(
+                "recursive call to function '{}' is not supported",
+                String::from_utf8_lossy(name)
+            )));
         }
         for (param, &arg) in def.params.iter().zip(arg_cells.iter()) {
             let cell = self.memory.var_cell(&param.name);
-            if param.ptr_depth > 0 || param.is_array() {
-                self.memory.mark_pointer(&param.name);
-            }
-            // Multi-dimensional array parameters record their
-            // stride (the dimensions after the first) for
-            // subscripting at call sites.
-            if param.dims.len() > 1 {
-                let row_dims: Vec<usize> = param.dims[1..]
-                    .iter()
-                    .copied()
-                    .map(|d| d.expect("parameter stride is sized") as usize)
-                    .collect();
-                self.param_dims.insert(param.name.clone(), row_dims);
+            if let Some(sig) = &param.fn_sig {
+                self.fnptrs.insert(param.name.clone());
+                self.fnptr_sigs.insert(param.name.clone(), sig.clone());
+            } else {
+                if param.ptr_depth > 0 || param.is_array() {
+                    self.memory.mark_pointer(&param.name);
+                }
+                // Multi-dimensional array parameters record their
+                // stride (the dimensions after the first) for
+                // subscripting at call sites.
+                if param.dims.len() > 1 {
+                    let row_dims: Vec<usize> = param.dims[1..]
+                        .iter()
+                        .copied()
+                        .map(|d| d.expect("parameter stride is sized") as usize)
+                        .collect();
+                    self.param_dims.insert(param.name.clone(), row_dims);
+                }
             }
             self.copy_value(arg, cell);
         }
@@ -2991,7 +3283,93 @@ impl Emitter {
             // `void` call used as a value yields zero.
             self.set_value(result, 0);
         }
+        Ok(())
+    }
+
+    /// Indirect call through a callee ID: evaluate the
+    /// arguments once, then dispatch on the ID over every
+    /// defined function whose signature matches. Each
+    /// matching arm expands under an ID-equality guard, so
+    /// only the pointed-to body runs; a null ID (or a
+    /// signature with no defined function) runs no arm and
+    /// leaves the result zero. The result and returned flag
+    /// are shared by all arms, so a matching arm's return
+    /// flows out exactly as for a direct call.
+    fn compile_indirect_call(
+        &mut self,
+        id_cell: i32,
+        sig: &FuncSig,
+        args: &[Expr],
+    ) -> Result<i32, CompileError> {
+        if args.len() != sig.params.len() {
+            return Err(err("wrong number of arguments in indirect call"));
+        }
+        let result = self.const_value(0);
+        let returned = self.const_value(0);
+        let mut arg_cells = Vec::with_capacity(args.len());
+        for (param, arg) in sig.params.iter().zip(args.iter()) {
+            let v = if let Some(psig) = &param.fn_sig {
+                self.compile_fnptr_value(arg, psig)?
+            } else {
+                self.compile_expr(arg)?
+            };
+            arg_cells.push(self.duplicate_value(v));
+        }
+        // Candidate list first: borrowing `self.functions`
+        // while expanding would conflict with `&mut self`.
+        // Functions past the 255 ID cap are directly callable
+        // only; their IDs wrap, so they never match here.
+        let mut candidates: Vec<(usize, Vec<u8>, Rc<ExpandedFunction>)> = Vec::new();
+        for (idx, fname) in self.fn_order.clone().into_iter().enumerate() {
+            if idx >= 255 {
+                continue;
+            }
+            if let Some(def) = self.functions.get(&fname) {
+                let def_sig = FuncSig {
+                    is_void: def.is_void,
+                    returns_ptr_depth: def.returns_ptr_depth,
+                    params: def.params.clone(),
+                };
+                if def_sig.matches(sig) {
+                    candidates.push((idx, fname, Rc::clone(def)));
+                }
+            }
+        }
+        for (idx, fname, def) in candidates {
+            let guard = self.is_equal(id_cell, self.const_value((idx + 1) as u8))?;
+            let arg_cells = arg_cells.clone();
+            self.perform_if(guard, move |em| {
+                let checkpoint = em.checkpoint();
+                em.expand_call_body(&fname, &def, &arg_cells, result, returned, checkpoint)
+            })?;
+        }
         Ok(result)
+    }
+
+    /// (ID cell, signature) when `callee` is a dereference /
+    /// address / parenthesis chain over a function designator
+    /// or function pointer, or `None` when it is some other
+    /// expression (the caller reports it unsupported).
+    fn indirect_callee(
+        &mut self,
+        callee: &Expr,
+    ) -> Result<Option<(i32, FuncSig)>, CompileError> {
+        let mut cur = callee;
+        loop {
+            match cur {
+                Expr::Paren(inner) => cur = inner.as_ref(),
+                Expr::Unary { op, e: inner }
+                    if op.as_slice() == b"*" || op.as_slice() == b"&" =>
+                {
+                    cur = inner.as_ref()
+                }
+                _ => break,
+            }
+        }
+        match cur {
+            Expr::Ident(_) => Ok(Some(self.fn_designator_chain(callee)?)),
+            _ => Ok(None),
+        }
     }
 }
 
@@ -3448,6 +3826,99 @@ mod tests {
             crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
             assert_eq!(out, want, "for {:?}", src);
         }
+    }
+
+    #[test]
+    fn function_pointers_run() {
+        // Callee IDs dispatch on the declared signature for
+        // both call spellings, dereference chains collapse,
+        // null calls yield zero, and designators compare by
+        // identity. A `**` parameter receives an ID the same
+        // way a variable does.
+        let bf = compile(
+            b"int dbl(int x) { return x * 2; } \
+              int tri(int x) { return x * 3; } \
+              void inc(int *p) { *p = *p + 1; } \
+              int apply(int (*cb)(int), int x) { return cb(x) + (*cb)(x); } \
+              int main() { \
+                int (*fp)(int) = dbl; \
+                printf(\"%d,\", fp(4)); \
+                printf(\"%d,\", (*fp)(4)); \
+                printf(\"%d,\", (**fp)(4)); \
+                fp = tri; \
+                printf(\"%d,\", fp(4)); \
+                printf(\"%d,\", apply(fp, 5)); \
+                printf(\"%d,\", fp == tri); \
+                printf(\"%d,\", fp == dbl); \
+                printf(\"%d,\", fp == 0); \
+                fp = 0; \
+                printf(\"%d,\", fp(4)); \
+                printf(\"%d,\", !fp); \
+                int x = 10; \
+                void (*vp)(int *) = inc; \
+                vp(&x); \
+                printf(\"%d,\", x); \
+                printf(\"%d\", apply(dbl, 3)); \
+              }",
+        )
+        .expect("function-pointer program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"8,8,8,12,30,1,0,0,0,1,11,12");
+    }
+
+    #[test]
+    fn function_pointer_errors() {
+        for (src, want) in [
+            (
+                b"int g(int x) { return x; } int main() { int (*fp)(int, int) = g; return 0; }"
+                    as &[u8],
+                "incompatible function pointer type",
+            ),
+            (
+                b"int g(int x) { return x; } int main() { int (*fp)(int) = g; return fp(1, 2); }",
+                "wrong number of arguments in indirect call",
+            ),
+            (
+                b"int g(int x) { return x; } int main() { int (*fp)(int) = g; fp++; return 0; }",
+                "arithmetic on function pointers is not supported",
+            ),
+            (
+                b"int g(int x) { return x; } int main() { int (*fp)(int) = g; fp += 1; return 0; }",
+                "arithmetic on function pointers is not supported",
+            ),
+            (
+                b"int g(int x) { return x; } int main() { int (*fp)(int) = g; *fp = g; return 0; }",
+                "cannot assign to a function",
+            ),
+            (
+                b"int g(int); int main() { int (*fp)(int) = g; return 0; }",
+                "undefined function 'g'",
+            ),
+            (
+                b"int g(int x) { return x; } int main() { int (*fp)(int) = 5; return 0; }",
+                "incompatible function pointer type",
+            ),
+            (
+                b"int g(int x) { return x; } int main() { g = 1; return 0; }",
+                "cannot assign to a function",
+            ),
+        ] {
+            let err = compile(src).expect_err("function-pointer misuse");
+            assert_eq!(err.msg, want, "for {:?}", src);
+        }
+        // Recursion through a pointer is rejected like direct
+        // recursion: expanding `f` again finds it already
+        // expanding.
+        let err = compile(
+            b"int f(int x) { int (*fp)(int) = f; return fp(x); } int main() { return f(1); }",
+        )
+        .expect_err("recursive indirect call");
+        assert!(
+            err.msg.contains("recursive call to function 'f'"),
+            "unexpected error: {}",
+            err.msg
+        );
     }
 
     #[test]

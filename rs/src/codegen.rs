@@ -74,6 +74,20 @@ pub struct Emitter {
     /// error (an undefined reference); `sizeof` operands do
     /// not count, since they are unevaluated.
     pub(crate) extern_undefined: HashSet<Vec<u8>>,
+    /// Names holding function-pointer values (callee IDs),
+    /// by scope-renamed name. A function pointer is not a
+    /// data pointer: it is never in the pointer set, and
+    /// dereferencing it yields the ID, not a load.
+    pub(crate) fnptrs: HashSet<Vec<u8>>,
+    /// Declared signature per function-pointer name, by
+    /// scope-renamed name: variables from their declarator,
+    /// parameters from their signature at call expansion.
+    pub(crate) fnptr_sigs: HashMap<Vec<u8>, FuncSig>,
+    /// Defined function names in translation-unit order, for
+    /// callee-ID assignment: the ID of the function at
+    /// position `i` is `i + 1` (0 is null). Prototypes
+    /// without definitions get no ID.
+    pub(crate) fn_order: Vec<Vec<u8>>,
 }
 
 /// Compile failure: mirrors a C++ `throw "..."` site.
