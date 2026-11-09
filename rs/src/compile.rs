@@ -345,6 +345,7 @@ impl<'a> Renamer<'a> {
             )),
             Stmt::Break => Ok(Stmt::Break),
             Stmt::Continue => Ok(Stmt::Continue),
+            Stmt::Goto { name } => Ok(Stmt::Goto { name: name.clone() }),
             Stmt::Case { label, body } => Ok(Stmt::Case {
                 label: self.rename_expr(label)?,
                 body: Box::new(self.rename_stmt(body)?),
@@ -672,7 +673,7 @@ pub fn compile_program(src: &[u8]) -> Result<CompiledProgram, CompileError> {
                             .get(&f.name)
                             .expect("main is registered above"),
                     );
-                    em.compile_block(&main_def.body)?;
+                    em.compile_function_body(&main_def.body)?;
                 }
             }
             // Prototypes and typedefs emit nothing; prototypes
@@ -1819,16 +1820,26 @@ impl Emitter {
                     } else if after_break || after_continue {
                         self.compile_decl_guarded(d)?
                     } else {
-                        self.compile_decl(d)?
+                        self.compile_decl_goto(d)?
                     }
                 }
                 BlockItem::Stmt(s) => {
+                    // SPIKE (goto): a label statement for a pending
+                    // `goto` must not be guarded by its own flag —
+                    // the flag is cleared by the label itself, and
+                    // a guard evaluated before the clear would skip
+                    // the label forever. Drop the name from the
+                    // pending set first; the remaining flags still
+                    // guard the statement.
+                    if let Stmt::GotoLabel { name, .. } = s {
+                        self.goto_pending.remove(name);
+                    }
                     if after_return {
                         self.compile_stmt_return_guarded(s)?
                     } else if after_break || after_continue {
                         self.compile_stmt_guarded(s)?
                     } else {
-                        self.compile_stmt(s)?
+                        self.compile_stmt_goto(s)?
                     }
                     if stmt_may_break(s) {
                         after_break = true;
@@ -1868,10 +1879,10 @@ impl Emitter {
         if let Some(&flag) = self.continue_stack.last() {
             if flag >= 0 {
                 let nc = self.negate(flag)?;
-                return self.perform_if(nc, |em| em.compile_stmt(s));
+                return self.perform_if(nc, |em| em.compile_stmt_goto(s));
             }
         }
-        self.compile_stmt(s)
+        self.compile_stmt_goto(s)
     }
 
     /// Like `compile_stmt_guarded` for declarations.
@@ -1890,10 +1901,10 @@ impl Emitter {
         if let Some(&flag) = self.continue_stack.last() {
             if flag >= 0 {
                 let nc = self.negate(flag)?;
-                return self.perform_if(nc, |em| em.compile_decl(d));
+                return self.perform_if(nc, |em| em.compile_decl_goto(d));
             }
         }
-        self.compile_decl(d)
+        self.compile_decl_goto(d)
     }
 
     /// Allocate the `broken` flag for a loop whose body may break, and
@@ -1980,6 +1991,150 @@ impl Emitter {
         }
     }
 
+    /// SPIKE (goto): condition `c` additionally gated on every
+    /// flag in `flags` being clear (identity with no flags).
+    fn and_not_gotos(&mut self, mut c: i32, flags: &[i32]) -> Result<i32, CompileError> {
+        for &f in flags {
+            let nf = self.negate(f)?;
+            c = self.logical_and(c, nf)?;
+        }
+        Ok(c)
+    }
+
+    /// SPIKE (goto): run `f` only when every flag in `flags` is
+    /// clear, via one combined guard cell (identity with no
+    /// flags). Used for `for` updates and `do...while` bodies,
+    /// which a loop-condition gate alone cannot skip.
+    fn perform_unless_gotos(
+        &mut self,
+        flags: &[i32],
+        mut f: impl FnMut(&mut Self) -> Result<(), CompileError>,
+    ) -> Result<(), CompileError> {
+        if flags.is_empty() {
+            return f(self);
+        }
+        let mut ok = self.const_value(1);
+        for &flag in flags {
+            let nf = self.negate(flag)?;
+            ok = self.logical_and(ok, nf)?;
+        }
+        self.perform_if(ok, |em| f(em))
+    }
+
+    /// SPIKE (goto): flag cells for `goto`s pending at the start
+    /// of the construct being compiled, sorted and deduplicated.
+    fn pending_goto_flag_cells(&self) -> Vec<i32> {
+        let mut cells: Vec<i32> = self
+            .goto_pending
+            .iter()
+            .filter_map(|n| self.goto_flags.get(n).copied())
+            .collect();
+        cells.sort_unstable();
+        cells.dedup();
+        cells
+    }
+
+    /// SPIKE (goto): flag cells a loop condition (and a `for`
+    /// update) must gate on: `goto`s inside the loop body whose
+    /// label is defined outside the body (an exit jump), plus
+    /// flags pending at the loop's entry. A `goto` whose label
+    /// is inside the body is not gated: the next iteration
+    /// re-enters the body, the pre-label statements are
+    /// guarded by the pending flag, and the label clears it.
+    fn loop_goto_flag_cells(&self, body: &Stmt) -> Vec<i32> {
+        let mut names: HashSet<Vec<u8>> = HashSet::new();
+        goto_targets_in(body, &mut names);
+        let mut inside: HashSet<Vec<u8>> = HashSet::new();
+        goto_labels_in(body, &mut inside);
+        names.retain(|n| !inside.contains(n));
+        for n in &self.goto_pending {
+            names.insert(n.clone());
+        }
+        let mut cells: Vec<i32> = names
+            .iter()
+            .filter_map(|n| self.goto_flags.get(n).copied())
+            .collect();
+        cells.sort_unstable();
+        cells.dedup();
+        cells
+    }
+
+    /// SPIKE (goto): compile `s`, skipping it at runtime if any
+    /// pending `goto` flag is set. Guards nest one per flag, in
+    /// name order for deterministic emission.
+    fn compile_stmt_goto(&mut self, s: &Stmt) -> Result<(), CompileError> {
+        if self.goto_pending.is_empty() {
+            return self.compile_stmt(s);
+        }
+        let mut names: Vec<Vec<u8>> = self.goto_pending.iter().cloned().collect();
+        names.sort();
+        self.compile_stmt_goto_chain(s, &names)
+    }
+
+    fn compile_stmt_goto_chain(
+        &mut self,
+        s: &Stmt,
+        names: &[Vec<u8>],
+    ) -> Result<(), CompileError> {
+        match names.split_first() {
+            None => self.compile_stmt(s),
+            Some((name, rest)) => {
+                let Some(flag) = self.goto_flags.get(name).copied() else {
+                    return self.compile_stmt_goto_chain(s, rest);
+                };
+                let nc = self.negate(flag)?;
+                self.perform_if(nc, |em| em.compile_stmt_goto_chain(s, rest))
+            }
+        }
+    }
+
+    /// SPIKE (goto): like [`Self::compile_stmt_goto`] for
+    /// declarations.
+    fn compile_decl_goto(&mut self, d: &Decl) -> Result<(), CompileError> {
+        if self.goto_pending.is_empty() {
+            return self.compile_decl(d);
+        }
+        let mut names: Vec<Vec<u8>> = self.goto_pending.iter().cloned().collect();
+        names.sort();
+        self.compile_decl_goto_chain(d, &names)
+    }
+
+    fn compile_decl_goto_chain(
+        &mut self,
+        d: &Decl,
+        names: &[Vec<u8>],
+    ) -> Result<(), CompileError> {
+        match names.split_first() {
+            None => self.compile_decl(d),
+            Some((name, rest)) => {
+                let Some(flag) = self.goto_flags.get(name).copied() else {
+                    return self.compile_decl_goto_chain(d, rest);
+                };
+                let nc = self.negate(flag)?;
+                self.perform_if(nc, |em| em.compile_decl_goto_chain(d, rest))
+            }
+        }
+    }
+
+    /// SPIKE (goto): validate a function body, allocate one flag
+    /// cell per label (zero) in label order, compile the body,
+    /// then restore the outer function's goto state. Flag cells
+    /// allocated inside an expansion are reclaimed by the
+    /// caller's checkpoint release, like other expansion temps.
+    fn compile_function_body(&mut self, body: &Block) -> Result<(), CompileError> {
+        let label_order = validate_gotos(body)?;
+        let saved_flags = std::mem::take(&mut self.goto_flags);
+        let saved_pending = std::mem::take(&mut self.goto_pending);
+        for name in label_order {
+            let flag = self.const_value(0);
+            self.goto_flags.insert(name, flag);
+        }
+        let r = self.compile_block(body);
+        self.goto_flags = saved_flags;
+        self.goto_pending = saved_pending;
+        r
+    }
+
     /// Like `compile_stmt_guarded`, additionally skipped at runtime
     /// once the innermost function has returned (statements after a
     /// potential `return` in the same block). The return guard is the
@@ -2032,10 +2187,14 @@ impl Emitter {
             Stmt::While { cond, body } => {
                 let broken = self.loop_break_flag(body)?;
                 let continued = self.loop_continue_flag(body)?;
+                // SPIKE (goto): a `goto` out of the loop exits it,
+                // like `break`; a `goto` into the body is rejected.
+                let goto_flags = self.loop_goto_flag_cells(body);
                 let r = self.perform_while(
                     |em| {
                         let c = em.compile_expr(cond)?;
                         let c = em.and_not_broken(c, broken)?;
+                        let c = em.and_not_gotos(c, &goto_flags)?;
                         em.and_not_returned(c)
                     },
                     |em| em.compile_loop_body(body, continued),
@@ -2047,14 +2206,22 @@ impl Emitter {
             Stmt::DoWhile { body, cond } => {
                 let broken = self.loop_break_flag(body)?;
                 let continued = self.loop_continue_flag(body)?;
-                let r = self.perform_do_while(
-                    |em| {
-                        let c = em.compile_expr(cond)?;
-                        let c = em.and_not_broken(c, broken)?;
-                        em.and_not_returned(c)
-                    },
-                    |em| em.compile_loop_body(body, continued),
-                );
+                let goto_flags = self.loop_goto_flag_cells(body);
+                // The first body emission is unconditional, so a
+                // `goto` pending at entry must guard the whole
+                // loop, not just the re-test.
+                let entry_flags = self.pending_goto_flag_cells();
+                let r = self.perform_unless_gotos(&entry_flags, |em| {
+                    em.perform_do_while(
+                        |em| {
+                            let c = em.compile_expr(cond)?;
+                            let c = em.and_not_broken(c, broken)?;
+                            let c = em.and_not_gotos(c, &goto_flags)?;
+                            em.and_not_returned(c)
+                        },
+                        |em| em.compile_loop_body(body, continued),
+                    )
+                });
                 self.continue_stack.pop();
                 self.break_stack.pop();
                 r
@@ -2062,6 +2229,7 @@ impl Emitter {
             Stmt::For { init, cond, incr, body } => {
                 let broken = self.loop_break_flag(body)?;
                 let continued = self.loop_continue_flag(body)?;
+                let goto_flags = self.loop_goto_flag_cells(body);
                 let r = self.perform_for(
                     |em| em.compile_for_init(init),
                     |em| {
@@ -2070,12 +2238,14 @@ impl Emitter {
                             None => Ok(em.const_value(1)),
                         }?;
                         let c = em.and_not_broken(c, broken)?;
+                        let c = em.and_not_gotos(c, &goto_flags)?;
                         em.and_not_returned(c)
                     },
                     |em| {
-                        // `return` skips the update, as `break` does:
-                        // run it only if the function has not returned.
-                        em.unless_returned(|em| {
+                        // SPIKE (goto): the update is skipped after a
+                        // `goto` out of the loop, as after `break`.
+                        em.perform_unless_gotos(&goto_flags, |em| {
+                            em.unless_returned(|em| {
                             // `break` skips the update: run it only if not broken.
                             if let Some(b) = broken {
                                 let nb = em.negate(b)?;
@@ -2093,6 +2263,7 @@ impl Emitter {
                                     None => Ok(()),
                                 }
                             }
+                            })
                         })
                     },
                     |em| em.compile_loop_body(body, continued),
@@ -2149,7 +2320,33 @@ impl Emitter {
                 self.compile_stmt(body)
             }
             Stmt::Default { body } => self.compile_stmt(body),
-            Stmt::GotoLabel { body, .. } => self.compile_stmt(body),
+            // SPIKE (goto): set the label's flag; the rest of the
+            // block is guarded until the label clears it. The
+            // label records itself as pending in source order,
+            // so statements compiled after a `goto` are guarded
+            // at compile time exactly when they may be skipped.
+            Stmt::Goto { name } => {
+                let Some(flag) = self.goto_flags.get(name).copied() else {
+                    return Err(err(format!(
+                        "undefined label '{}'",
+                        String::from_utf8_lossy(name)
+                    )));
+                };
+                self.set_value(flag, 1);
+                self.goto_pending.insert(name.clone());
+                Ok(())
+            }
+            // SPIKE (goto): clear the label's flag (a no-op when
+            // reached in normal flow) and compile the body; the
+            // label also leaves the pending set, so the body is
+            // not guarded by its own flag.
+            Stmt::GotoLabel { name, body } => {
+                if let Some(flag) = self.goto_flags.get(name).copied() {
+                    self.set_value(flag, 0);
+                }
+                self.goto_pending.remove(name);
+                self.compile_stmt(body)
+            }
         }
     }
 
@@ -3272,7 +3469,7 @@ impl Emitter {
         let saved_continue = std::mem::take(&mut self.continue_stack);
         let saved_return = self.return_context.replace((returned, result));
         self.expanding.push(name.to_vec());
-        let compiled = self.compile_block(&def.body);
+        let compiled = self.compile_function_body(&def.body);
         self.expanding.pop();
         self.break_stack = saved_break;
         self.continue_stack = saved_continue;
@@ -3452,6 +3649,233 @@ fn block_may_return(b: &Block) -> bool {
     })
 }
 
+/// SPIKE (goto): where one label or `goto` sits in a function body:
+/// the enclosing loops and `if` arms (as node ids), whether it is
+/// inside a `switch`, and its source order among labels/gotos.
+#[derive(Clone, Default)]
+struct GotoSite {
+    order: usize,
+    loops: HashSet<usize>,
+    arms: HashSet<usize>,
+    in_switch: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_goto_sites_stmt(
+    s: &Stmt,
+    loops: &mut Vec<usize>,
+    arms: &mut Vec<usize>,
+    in_switch: bool,
+    next_id: &mut usize,
+    order: &mut usize,
+    labels: &mut HashMap<Vec<u8>, GotoSite>,
+    label_order: &mut Vec<Vec<u8>>,
+    gotos: &mut Vec<(Vec<u8>, GotoSite)>,
+) -> Result<(), CompileError> {
+    let site = |loops: &[usize], arms: &[usize], in_switch: bool, order: usize| GotoSite {
+        order,
+        loops: loops.iter().copied().collect(),
+        arms: arms.iter().copied().collect(),
+        in_switch,
+    };
+    match s {
+        Stmt::Goto { name } => {
+            gotos.push((name.clone(), site(loops, arms, in_switch, *order)));
+            *order += 1;
+            Ok(())
+        }
+        Stmt::GotoLabel { name, body } => {
+            if labels.contains_key(name) {
+                return Err(err(format!(
+                    "duplicate label '{}'",
+                    String::from_utf8_lossy(name)
+                )));
+            }
+            labels.insert(name.clone(), site(loops, arms, in_switch, *order));
+            label_order.push(name.clone());
+            *order += 1;
+            collect_goto_sites_stmt(body, loops, arms, in_switch, next_id, order, labels, label_order, gotos)
+        }
+        Stmt::Compound(b) => collect_goto_sites_block(
+            b, loops, arms, in_switch, next_id, order, labels, label_order, gotos,
+        ),
+        Stmt::If { then, els, .. } => {
+            let arm = *next_id;
+            *next_id += 1;
+            arms.push(arm);
+            collect_goto_sites_stmt(then, loops, arms, in_switch, next_id, order, labels, label_order, gotos)?;
+            arms.pop();
+            if let Some(e) = els {
+                let arm = *next_id;
+                *next_id += 1;
+                arms.push(arm);
+                collect_goto_sites_stmt(e, loops, arms, in_switch, next_id, order, labels, label_order, gotos)?;
+                arms.pop();
+            }
+            Ok(())
+        }
+        Stmt::Switch { body, .. } => {
+            collect_goto_sites_stmt(body, loops, arms, true, next_id, order, labels, label_order, gotos)
+        }
+        Stmt::While { body, .. } | Stmt::DoWhile { body, .. } => {
+            let id = *next_id;
+            *next_id += 1;
+            loops.push(id);
+            let r = collect_goto_sites_stmt(body, loops, arms, in_switch, next_id, order, labels, label_order, gotos);
+            loops.pop();
+            r
+        }
+        Stmt::For { body, .. } => {
+            let id = *next_id;
+            *next_id += 1;
+            loops.push(id);
+            let r = collect_goto_sites_stmt(body, loops, arms, in_switch, next_id, order, labels, label_order, gotos);
+            loops.pop();
+            r
+        }
+        Stmt::Case { body, .. } | Stmt::Default { body } => {
+            collect_goto_sites_stmt(body, loops, arms, in_switch, next_id, order, labels, label_order, gotos)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn collect_goto_sites_block(
+    b: &Block,
+    loops: &mut Vec<usize>,
+    arms: &mut Vec<usize>,
+    in_switch: bool,
+    next_id: &mut usize,
+    order: &mut usize,
+    labels: &mut HashMap<Vec<u8>, GotoSite>,
+    label_order: &mut Vec<Vec<u8>>,
+    gotos: &mut Vec<(Vec<u8>, GotoSite)>,
+) -> Result<(), CompileError> {
+    for item in &b.0 {
+        if let BlockItem::Stmt(s) = item {
+            collect_goto_sites_stmt(s, loops, arms, in_switch, next_id, order, labels, label_order, gotos)?;
+        }
+    }
+    Ok(())
+}
+
+/// SPIKE (goto): the forward-only subset this spike measures.
+/// Labels are function-scoped. A `goto` is accepted only when its
+/// label is defined later in the same function, is not inside a
+/// `switch`, is not inside a loop or `if` arm the `goto` is
+/// outside of (jumping in would bypass the loop/branch guard),
+/// and the `goto` itself is not inside a `switch`. Everything
+/// else is a compile error with its own message. Returns label
+/// names in first-seen order, for flag allocation.
+fn validate_gotos(body: &Block) -> Result<Vec<Vec<u8>>, CompileError> {
+    let mut labels: HashMap<Vec<u8>, GotoSite> = HashMap::new();
+    let mut label_order: Vec<Vec<u8>> = Vec::new();
+    let mut gotos: Vec<(Vec<u8>, GotoSite)> = Vec::new();
+    let mut order = 0usize;
+    let mut next_id = 0usize;
+    collect_goto_sites_block(
+        body,
+        &mut Vec::new(),
+        &mut Vec::new(),
+        false,
+        &mut next_id,
+        &mut order,
+        &mut labels,
+        &mut label_order,
+        &mut gotos,
+    )?;
+    for (name, site) in &gotos {
+        let Some(label) = labels.get(name) else {
+            return Err(err(format!(
+                "undefined label '{}'",
+                String::from_utf8_lossy(name)
+            )));
+        };
+        if site.in_switch || label.in_switch {
+            return Err(err("goto in switch is not supported".to_string()));
+        }
+        if !label.loops.is_subset(&site.loops) {
+            return Err(err(format!(
+                "goto into a loop to '{}' is not supported",
+                String::from_utf8_lossy(name)
+            )));
+        }
+        if !label.arms.is_subset(&site.arms) {
+            return Err(err(format!(
+                "goto into an if branch to '{}' is not supported",
+                String::from_utf8_lossy(name)
+            )));
+        }
+        if label.order <= site.order {
+            return Err(err(format!(
+                "backward goto to '{}' is not supported",
+                String::from_utf8_lossy(name)
+            )));
+        }
+    }
+    Ok(label_order)
+}
+
+/// `goto` target names anywhere under `s`.
+fn goto_targets_in(s: &Stmt, out: &mut HashSet<Vec<u8>>) {
+    match s {
+        Stmt::Goto { name } => {
+            out.insert(name.clone());
+        }
+        Stmt::Compound(b) => {
+            for item in &b.0 {
+                if let BlockItem::Stmt(s) = item {
+                    goto_targets_in(s, out);
+                }
+            }
+        }
+        Stmt::If { then, els, .. } => {
+            goto_targets_in(then, out);
+            if let Some(e) = els {
+                goto_targets_in(e, out);
+            }
+        }
+        Stmt::Switch { body, .. }
+        | Stmt::While { body, .. }
+        | Stmt::DoWhile { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::Case { body, .. }
+        | Stmt::Default { body }
+        | Stmt::GotoLabel { body, .. } => goto_targets_in(body, out),
+        _ => {}
+    }
+}
+
+/// Label names defined anywhere under `s`.
+fn goto_labels_in(s: &Stmt, out: &mut HashSet<Vec<u8>>) {
+    match s {
+        Stmt::GotoLabel { name, body } => {
+            out.insert(name.clone());
+            goto_labels_in(body, out);
+        }
+        Stmt::Compound(b) => {
+            for item in &b.0 {
+                if let BlockItem::Stmt(s) = item {
+                    goto_labels_in(s, out);
+                }
+            }
+        }
+        Stmt::If { then, els, .. } => {
+            goto_labels_in(then, out);
+            if let Some(e) = els {
+                goto_labels_in(e, out);
+            }
+        }
+        Stmt::Switch { body, .. }
+        | Stmt::While { body, .. }
+        | Stmt::DoWhile { body, .. }
+        | Stmt::For { body, .. }
+        | Stmt::Case { body, .. }
+        | Stmt::Default { body } => goto_labels_in(body, out),
+        _ => {}
+    }
+}
+
 /// Skip a length modifier (`hh`, `h`, `ll`, `l`, `j`, `z`, `t`)
 /// in a format string, advancing `i` past it. Lengths are no-ops
 /// here (every value is one byte); flags, widths, and precisions
@@ -3509,6 +3933,80 @@ mod tests {
             empty.cells,
             "allocation is deterministic"
         );
+    }
+
+    // SPIKE (goto): forward jumps, cleanup jumps out of an `if`,
+    // exits out of a loop, and a forward jump inside a loop body
+    // all run through the real runner; the rejected shapes each
+    // fail with their own message.
+    #[test]
+    fn goto_forward_skips_statements() {
+        let bf = compile(
+            b"int main() { int x = 1; goto done; x = 2; done: printf(\"%d\", x); }",
+        )
+        .expect("forward goto compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"1");
+    }
+
+    #[test]
+    fn goto_cleanup_out_of_if_and_loop() {
+        let bf = compile(
+            b"int main() { int x = 0; if (1) { goto done; } x = 5; done: printf(\"%d,\", x); int i = 0; while (i < 10) { i = i + 1; if (i == 3) { goto out; } } out: printf(\"%d\", i); }",
+        )
+        .expect("cleanup and loop-exit gotos compile");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"0,3");
+    }
+
+    #[test]
+    fn goto_forward_inside_loop_body() {
+        let bf = compile(
+            b"int main() { int i = 0; int s = 0; while (i < 3) { i = i + 1; goto add; s = 99; add: s = s + 1; } printf(\"%d,%d\", i, s); }",
+        )
+        .expect("goto inside loop body compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"3,3");
+    }
+
+    #[test]
+    fn goto_rejections() {
+        for (src, msg) in [
+            (
+                "int main() { goto nowhere; }",
+                "undefined label 'nowhere'",
+            ),
+            (
+                "int main() { done: printf(\"a\"); goto done; }",
+                "backward goto to 'done' is not supported",
+            ),
+            (
+                "int main() { goto in; while (1) { in: printf(\"x\"); break; } }",
+                "goto into a loop to 'in' is not supported",
+            ),
+            (
+                "int main() { goto in; if (1) { in: printf(\"x\"); } }",
+                "goto into an if branch to 'in' is not supported",
+            ),
+            (
+                "int main() { int x = 1; switch (x) { case 1: goto out; } out: printf(\"x\"); }",
+                "goto in switch is not supported",
+            ),
+            (
+                "int main() { a: printf(\"a\"); { a: printf(\"b\"); } }",
+                "duplicate label 'a'",
+            ),
+        ] {
+            let e = compile(src.as_bytes()).expect_err("goto shape is rejected");
+            assert!(
+                e.msg.contains(msg),
+                "expected `{msg}` in `{}` for {src}",
+                e.msg
+            );
+        }
     }
 
     #[test]

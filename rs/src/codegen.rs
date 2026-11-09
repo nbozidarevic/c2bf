@@ -48,6 +48,20 @@ pub struct Emitter {
     pointer: i32,
     pub(crate) break_stack: Vec<i32>,
     pub(crate) continue_stack: Vec<i32>,
+    /// SPIKE (goto): one flag cell per label in the function
+    /// currently being compiled, allocated (zero) before its
+    /// body; a `goto` sets its label's flag, and every
+    /// statement compiled while the flag is pending is
+    /// guarded on the flag being clear until the label
+    /// clears it. Saved and restored across function
+    /// expansions like the break/continue stacks.
+    pub(crate) goto_flags: HashMap<Vec<u8>, i32>,
+    /// SPIKE (goto): labels whose `goto` may already have
+    /// executed in source order and whose label statement
+    /// has not been compiled yet. Statements and
+    /// declarations compiled while this set is non-empty
+    /// are guarded on every pending flag being clear.
+    pub(crate) goto_pending: HashSet<Vec<u8>>,
     /// Scope-renamed definitions, keyed by function name, built by
     /// `compile_program` before any code is emitted; a call expands
     /// the shared definition inline.
