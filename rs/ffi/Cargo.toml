@@ -1,6 +1,6 @@
 [package]
 name = "c2bf-ffi"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 description = "C ABI adapter over c2bf-core (kept out of the core crate by the pollution veto)"
 license = "MIT"
