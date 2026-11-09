@@ -1,6 +1,7 @@
 # Temporary golden snapshot for the function-pointer fixture.
 # Never merged as a standing workflow; removed after the
-# snapshot is committed.
+# snapshot is committed. Re-triggered for the fixture
+# without the null call (g++ segfaults on it).
 name: golden-snapshot
 
 on:

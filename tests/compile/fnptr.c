@@ -36,7 +36,6 @@ int main() {
   printf("%d,", pick(1, dbl, tri));
   printf("%d,", pick(0, dbl, tri));
   fp = 0;
-  printf("%d,", fp(4));
   printf("%d,", fp == 0);
   printf("%d,", fp != tri);
   fp = &dbl;
