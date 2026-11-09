@@ -144,6 +144,7 @@ class Gen:
         self.protected = set()
         self.counter = 0
         self.emitted = 0
+        self.goto_used = False
 
     def fresh(self, stem):
         self.counter += 1
@@ -732,7 +733,7 @@ class Gen:
         return [n for n in self.env if n not in self.protected]
 
     def stmt(self, depth, loop, lines, pure=False, allow_while=True,
-             allow_loop=True):
+             allow_loop=True, allow_goto=False):
         self.emitted += 1
         if self.emitted > STMT_BUDGET:
             # Budget exhausted: emit nothing. Callers tolerate
@@ -742,6 +743,10 @@ class Gen:
             # that never happened.
             return
         rng = self.rng
+        if allow_goto and not self.goto_used and self.assignable() \
+                and rng.random() < 0.03:
+            self.gen_goto_segment(lines, depth)
+            return
         roll = rng.random()
         if pure:
             # Loop bodies never change persistent state: reasoning
@@ -926,6 +931,36 @@ class Gen:
             return
         self.gen_printf(lines)
 
+    def gen_goto_segment(self, lines, depth):
+        """One forward `goto` segment, as a direct child of
+        `main`'s block: a conditional or unconditional jump over
+        one or two `printf`s to a label carrying one scalar
+        assignment. Only one segment per program, so at most one
+        flag cell is added. The skipped statements are prints
+        only, so no initialization is jumped over (C++ rejects
+        that), the label is defined later in the same block, and
+        the label assignment runs on both paths with the
+        environment the prints leave unchanged — the interval
+        update is unconditional and sound in both models."""
+        rng = self.rng
+        label = self.fresh("gl")
+        self.goto_used = True
+        if rng.random() < 0.5:
+            cond = self.expr(1)
+            if rng.random() < 0.5:
+                lines.append(f"if ({cond[0]}) {{ goto {label}; }}")
+            else:
+                lines.append(f"if ({cond[0]}) goto {label};")
+        else:
+            lines.append(f"goto {label};")
+        for _ in range(rng.randint(1, 2)):
+            self.gen_printf(lines)
+        name = rng.choice(self.assignable())
+        cap = 127 if name in self.chartypes else 255
+        e = self.capped(depth, cap)
+        lines.append(f"{label}: {name} = {e[0]};")
+        self.env[name] = (e[1], e[2])
+
     def gen_if(self, depth, loop, lines, pure=False, allow_while=True,
                allow_loop=True):
         snap = self.snap()
@@ -1030,9 +1065,10 @@ class Gen:
         self.merge(snaps)
 
     def stmts(self, depth, loop, n, lines, pure=False, allow_while=True,
-              allow_loop=True):
+              allow_loop=True, allow_goto=False):
         for _ in range(n):
-            self.stmt(depth, loop, lines, pure, allow_while, allow_loop)
+            self.stmt(depth, loop, lines, pure, allow_while, allow_loop,
+                      allow_goto)
 
     def chain_read(self, depth):
         """A `(*pp)[k]` / `pp[0][k]` read, or None when no
@@ -1273,7 +1309,7 @@ def gen_program(seed):
         lines.extend(decls)
         lines.append(line)
         stdin_parts.append(tokens)
-    g.stmts(2, None, rng.randint(4, 8), lines)
+    g.stmts(2, None, rng.randint(4, 8), lines, allow_goto=True)
     g.gen_printf(lines)
     if rng.random() < 0.5:
         g.gen_printf(lines)

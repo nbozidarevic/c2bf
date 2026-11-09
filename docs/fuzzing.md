@@ -83,6 +83,18 @@ keeps a `[lo, hi]` bound):
   change persistent state — intervals across iterations would
   need a fixpoint, so bodies only print or control flow — and
   loop counters leave scope with their loop.
+- At most one forward `goto` segment per program, as a direct
+  child of `main`'s block: a conditional (`if (cond) goto L;`,
+  braced or not) or unconditional jump over one or two
+  `printf`s to a label carrying one scalar assignment. The
+  skipped statements are prints only, so no initialization is
+  jumped over (C++ rejects that); the label is defined later
+  in the same block, and the label assignment runs on both
+  paths with the environment the prints leave unchanged, so
+  its interval update is unconditional and sound in both
+  models. Loop exits and jumps into loops, branches, or
+  `switch` bodies stay fixture-only, as do backward jumps
+  (all rejected by the compiler).
 - Array indices are always in range (constant or bounded
   variable indices). `sizeof` is generated only for `char`
   storage (`sizeof(int)` is 4 in C, 1 here). `while` loops are
@@ -207,7 +219,7 @@ keeps a `[lo, hi]` bound):
   address order need not agree); null calls are never
   generated (a crash in C, a no-op here).
 Not covered (yet): negative `scanf` tokens, recursion,
-`goto`, structs, and floats. Each is either unsupported
+structs, and floats. Each is either unsupported
 or needs its own agreement argument before the generator
 may emit it.
 Not generated: `scanf` with negative tokens (see the
