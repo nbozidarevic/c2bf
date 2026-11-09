@@ -211,7 +211,7 @@ those deviations were not mirrored in the port. The deviations
 that remain are source-language ones, stated as defined behavior
 in "Tape and cells" above: division/modulo by zero, `scanf` sign,
 base-prefix, and `%s` handling, wrapping single-byte arithmetic,
-and the `sizeof` exceptions.
+jumping over an initializer, and the `sizeof` exceptions.
 
 ## Port notes (retired C++ behaviors)
 
@@ -301,6 +301,18 @@ call site.
   value; a value returned from a `void` function is ignored, and
   a `void` call used as a value yields zero. `return` in `main`
   stays a no-op, as before: the operand is not compiled.
+- `goto` jumps forward only, to a label defined later in the
+  same function, one flag cell per label: statements between
+  the jump and the label are skipped at runtime, including
+  loop re-entry and the `for` update after a jump out of a
+  loop, and declarations jumped over keep zero (their
+  initializer is skipped). Duplicate or undefined labels,
+  backward jumps, jumps into a loop, an `if` arm, or a
+  `switch`, and jumps inside a `switch` are compile errors.
+  Labels are function-scoped; a label with no preceding
+  `goto` is a no-op marker. Decision record:
+  `docs/decisions/0020-goto-spike.md`. Pinned by the `goto_*`
+  oracle fixtures and unit tests.
 - Prototypes (forward declarations) are file-scope only, with
   optional parameter names: `int f(int);` declares `f` without a
   body and emits nothing. A prototype must agree with its

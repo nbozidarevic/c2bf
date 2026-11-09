@@ -12,6 +12,20 @@ the top, matching tag `v0.5.0`. Entries below are grouped by
 the roadmap phases that produced them. See `docs/versioning.md`
 for when and how versions change.
 
+## Unreleased
+
+- Language: forward-only `goto` (`goto done;` to a label
+  defined later in the same function), compiled with one
+  flag cell per label; jumps out of loops and `if` arms and
+  over initializers (which keep zero) are supported, while
+  backward jumps and jumps into loops, `if` arms, or
+  `switch` bodies are compile errors. Pinned by the
+  `goto_*` oracle fixtures. Decision record:
+  `docs/decisions/0020-goto-spike.md`.
+- Tests: differential fuzzer generates at most one forward
+  `goto` segment per program, jumping over `printf`s to a
+  label carrying one scalar assignment.
+
 ## v0.5.0
 
 - Language: function pointers (`int (*fp)(int)`) holding
