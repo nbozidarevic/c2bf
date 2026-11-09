@@ -3878,7 +3878,11 @@ mod tests {
                 "incompatible function pointer type",
             ),
             (
-                b"int g(int x) { return x; } int main() { int (*fp)(int) = g; return fp(1, 2); }",
+                // Note: a return operand in `main` is never
+                // compiled (documented at `Stmt::Return`), so
+                // the call sits in a printf argument, where it
+                // is compiled.
+                b"int g(int x) { return x; } int main() { int (*fp)(int) = g; printf(\"%d\", fp(1, 2)); return 0; }",
                 "wrong number of arguments in indirect call",
             ),
             (
@@ -3913,7 +3917,7 @@ mod tests {
         // recursion: expanding `f` again finds it already
         // expanding.
         let err = compile(
-            b"int f(int x) { int (*fp)(int) = f; return fp(x); } int main() { return f(1); }",
+            b"int f(int x) { int (*fp)(int) = f; return fp(x); } int main() { printf(\"%d\", f(1)); return 0; }",
         )
         .expect_err("recursive indirect call");
         assert!(
