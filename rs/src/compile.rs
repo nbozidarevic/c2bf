@@ -3973,6 +3973,23 @@ mod tests {
     }
 
     #[test]
+    fn goto_skips_initializer() {
+        // Jumping over an initializer leaves the cell zero: the
+        // declaration's init emission is guarded by the pending
+        // flag. No g++-oracle fixture can pin this — jumping over
+        // an initialization is an error in C++ — so the runner
+        // pins it here: without the declaration guard the
+        // output would be `5`.
+        let bf = compile(
+            b"int main() { int x = 0; goto done; int y = 5; done: printf(\"%d\", x + y); }",
+        )
+        .expect("goto over initializer compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"0");
+    }
+
+    #[test]
     fn goto_rejections() {
         for (src, msg) in [
             (
