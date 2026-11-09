@@ -56,6 +56,7 @@ How the emitted Brainfuck size (bytes) for each golden fixture changed across no
 | Assignment-value capture | `9936220` | 53 | 35651049 | +1635694 | Assignment expressions yield the stored value, captured in a fresh cell (0017). 24 fixtures grow by 1,635,694 BF bytes in total (+4.81%), worst ptrptr +8.8% and pointers +9.1%; allocated cells grow by 182 across 17 fixtures. Runtime footprints reproduce every prior entry exactly. |
 | Function pointers | `dac4e96` | 54 | 37377777 | +0 | Function-pointer variables hold callee IDs, and indirect calls dispatch over matching signatures (0019). All 53 existing fixtures are byte-identical, with allocated cells unchanged. Adds one fixture: fnptr (1,726,728 BF bytes on 525 cells). |
 | Forward-only goto | `2d5bafd` | 64 | 37745038 | +0 | Forward-only `goto` with one flag cell per label (0020). All 54 existing fixtures are byte-identical, with allocated cells and runtime footprints unchanged. Adds ten fixtures: goto_fwd (28,219 BF bytes on 67 cells), goto_fwd_struct (28,040 on 70), goto_cleanup (49,605 on 91), goto_cleanup_struct (48,650 on 116), goto_loop (38,600 on 76), goto_loop_struct (38,456 on 91), goto_for (33,200 on 79), goto_for_struct (32,948 on 79), goto_dowhile (35,890 on 80), and goto_dowhile_struct (33,653 on 79). |
+| scanf EOF sentinel | `3dc494d` | 65 | 38220065 | +111250 | scanf number readers detect EOF with a zero sentinel (0021). The 12 fixtures using number conversions grow by 111,250 BF bytes in total (formats +43,127; the rest +315 to +19,189 each); allocated cells grow by 1-7 and runtime footprints by 1-8 cells touched on the same fixtures. Every other fixture is byte-identical, with allocated cells and runtime footprints unchanged. Adds one fixture: scanf_eof (363,777 BF bytes on 209 cells). |
 
 ## Sizes by fixture
 
@@ -1604,6 +1605,78 @@ Forward-only `goto` with one flag cell per label (0020). All 54 existing fixture
 | `typespec` | 78768 | +0 |
 | `unary` | 84407 | +0 |
 
+### scanf EOF sentinel (`3dc494d`)
+
+scanf number readers detect EOF with a zero sentinel (0021). The 12 fixtures using number conversions grow by 111,250 BF bytes in total (formats +43,127; the rest +315 to +19,189 each); allocated cells grow by 1-7 and runtime footprints by 1-8 cells touched on the same fixtures. Every other fixture is byte-identical, with allocated cells and runtime footprints unchanged. Adds one fixture: scanf_eof (363,777 BF bytes on 209 cells).
+
+| Fixture | Bytes | Change vs previous |
+|---|---|---|
+| `addition` | 13985 | +0 |
+| `addsub` | 126266 | +0 |
+| `arrays` | 113274 | +0 |
+| `assign` | 257923 | +0 |
+| `bitassign` | 127165 | +0 |
+| `bitwise` | 460258 | +0 |
+| `braceinit` | 292759 | +0 |
+| `branch` | 5636 | +0 |
+| `break` | 155254 | +0 |
+| `casts` | 97203 | +0 |
+| `cmp` | 234565 | +0 |
+| `complex` | 77274 | +3125 |
+| `continue` | 209911 | +0 |
+| `define` | 55445 | +0 |
+| `div` | 146154 | +0 |
+| `dowhile` | 127346 | +0 |
+| `enums` | 104402 | +0 |
+| `fnptr` | 1726728 | +0 |
+| `fordecl` | 63868 | +0 |
+| `formats` | 1815284 | +43127 |
+| `functions` | 803284 | +0 |
+| `goto_cleanup` | 52714 | +3109 |
+| `goto_cleanup_struct` | 51729 | +3079 |
+| `goto_dowhile` | 39003 | +3113 |
+| `goto_dowhile_struct` | 36726 | +3073 |
+| `goto_for` | 33200 | +0 |
+| `goto_for_struct` | 32948 | +0 |
+| `goto_fwd` | 28219 | +0 |
+| `goto_fwd_struct` | 28040 | +0 |
+| `goto_loop` | 38600 | +0 |
+| `goto_loop_struct` | 38456 | +0 |
+| `hello_world` | 597 | +0 |
+| `io` | 66999 | +6070 |
+| `literals` | 124481 | +0 |
+| `logic` | 195177 | +0 |
+| `loop` | 50087 | +0 |
+| `micro_order_arith` | 500 | +0 |
+| `micro_order_assign` | 71 | +0 |
+| `micro_order_bitwise` | 5319 | +0 |
+| `micro_order_case` | 77 | +0 |
+| `micro_order_deref` | 345813 | +0 |
+| `micro_order_eq` | 457 | +0 |
+| `micro_order_index` | 555 | +0 |
+| `micro_order_le` | 1402 | +0 |
+| `micro_order_shift` | 363 | +0 |
+| `mod` | 154842 | +0 |
+| `mul` | 113344 | +0 |
+| `multidecl` | 58453 | +0 |
+| `multidim` | 5069027 | +11745 |
+| `pointerret` | 588182 | +0 |
+| `pointers` | 3201856 | +19189 |
+| `printfmt` | 147112 | +0 |
+| `printnum` | 333085 | +0 |
+| `prototypes` | 365550 | +0 |
+| `ptrptr` | 15390064 | +11738 |
+| `scanf_eof` | 363777 | — |
+| `scanfstr` | 1371878 | +3567 |
+| `sizeof` | 56011 | +0 |
+| `storage` | 57318 | +0 |
+| `strings` | 1610128 | +0 |
+| `switch` | 34464 | +0 |
+| `ternary` | 156376 | +0 |
+| `typedefs` | 799906 | +315 |
+| `typespec` | 78768 | +0 |
+| `unary` | 84407 | +0 |
+
 ## Cells allocated (compiler)
 
 Tape cells the compiler's bump allocator reserved for each program (`Memory::allocated_cells` after compilation). Allocation never reuses cells, so this is the static tape footprint: fewer allocated cells means less tape reserved, whether or not execution ever visits them all.
@@ -2334,6 +2407,67 @@ Tape cells the compiler's bump allocator reserved for each program (`Memory::all
 | `switch` | 173 |
 | `ternary` | 235 |
 | `typedefs` | 130 |
+| `typespec` | 161 |
+| `unary` | 172 |
+
+### scanf EOF sentinel (`3dc494d`)
+
+| Fixture | Cells alloc |
+|---|---|
+| `addition` | 67 |
+| `addsub` | 205 |
+| `arrays` | 214 |
+| `assign` | 310 |
+| `bitassign` | 210 |
+| `bitwise` | 638 |
+| `braceinit` | 209 |
+| `branch` | 64 |
+| `break` | 161 |
+| `casts` | 139 |
+| `cmp` | 376 |
+| `complex` | 135 |
+| `continue` | 218 |
+| `define` | 101 |
+| `div` | 178 |
+| `dowhile` | 147 |
+| `enums` | 131 |
+| `fnptr` | 525 |
+| `fordecl` | 109 |
+| `formats` | 628 |
+| `functions` | 281 |
+| `goto_cleanup` | 92 |
+| `goto_cleanup_struct` | 117 |
+| `goto_dowhile` | 85 |
+| `goto_dowhile_struct` | 84 |
+| `goto_for` | 79 |
+| `goto_for_struct` | 79 |
+| `goto_fwd` | 67 |
+| `goto_fwd_struct` | 70 |
+| `goto_loop` | 76 |
+| `goto_loop_struct` | 91 |
+| `hello_world` | 24 |
+| `io` | 110 |
+| `literals` | 142 |
+| `logic` | 213 |
+| `loop` | 90 |
+| `mod` | 304 |
+| `mul` | 205 |
+| `multidecl` | 113 |
+| `multidim` | 642 |
+| `pointerret` | 80 |
+| `pointers` | 487 |
+| `printfmt` | 187 |
+| `printnum` | 328 |
+| `prototypes` | 119 |
+| `ptrptr` | 570 |
+| `scanf_eof` | 209 |
+| `scanfstr` | 221 |
+| `sizeof` | 100 |
+| `storage` | 104 |
+| `strings` | 215 |
+| `switch` | 173 |
+| `ternary` | 235 |
+| `typedefs` | 131 |
 | `typespec` | 161 |
 | `unary` | 172 |
 
@@ -3815,6 +3949,76 @@ Tape cells actually used when each milestone's committed golden program runs wit
 | `switch` | 160 | 159 | 0 |
 | `ternary` | 222 | 221 | 0 |
 | `typedefs` | 117 | 116 | 0 |
+| `typespec` | 148 | 147 | 0 |
+| `unary` | 137 | 136 | 0 |
+
+### scanf EOF sentinel (`3dc494d`)
+
+| Fixture | Cells touched | Peak cell | Low cell |
+|---|---|---|---|
+| `addition` | 67 | 66 | 0 |
+| `addsub` | 205 | 204 | 0 |
+| `arrays` | 201 | 200 | 0 |
+| `assign` | 297 | 296 | 0 |
+| `bitassign` | 210 | 209 | 0 |
+| `bitwise` | 625 | 624 | 0 |
+| `braceinit` | 209 | 208 | 0 |
+| `branch` | 60 | 61 | 0 |
+| `break` | 148 | 147 | 0 |
+| `casts` | 139 | 138 | 0 |
+| `cmp` | 347 | 346 | 0 |
+| `complex` | 135 | 134 | 0 |
+| `continue` | 205 | 204 | 0 |
+| `define` | 88 | 87 | 0 |
+| `div` | 165 | 164 | 0 |
+| `dowhile` | 134 | 133 | 0 |
+| `enums` | 122 | 121 | 0 |
+| `fnptr` | 512 | 511 | 0 |
+| `fordecl` | 96 | 95 | 0 |
+| `formats` | 434 | 621 | 0 |
+| `functions` | 281 | 280 | 0 |
+| `goto_cleanup` | 84 | 83 | 0 |
+| `goto_cleanup_struct` | 83 | 82 | 0 |
+| `goto_dowhile` | 79 | 78 | 0 |
+| `goto_dowhile_struct` | 78 | 77 | 0 |
+| `goto_for` | 66 | 65 | 0 |
+| `goto_for_struct` | 66 | 65 | 0 |
+| `goto_fwd` | 52 | 51 | 0 |
+| `goto_fwd_struct` | 50 | 49 | 0 |
+| `goto_loop` | 76 | 75 | 0 |
+| `goto_loop_struct` | 91 | 90 | 0 |
+| `hello_world` | 24 | 23 | 0 |
+| `io` | 110 | 109 | 0 |
+| `literals` | 122 | 121 | 0 |
+| `logic` | 200 | 199 | 0 |
+| `loop` | 90 | 89 | 0 |
+| `micro_order_arith` | 18 | 17 | 0 |
+| `micro_order_assign` | 5 | 4 | 0 |
+| `micro_order_bitwise` | 46 | 45 | 0 |
+| `micro_order_case` | 6 | 5 | 0 |
+| `micro_order_deref` | 17 | 16 | 0 |
+| `micro_order_eq` | 15 | 14 | 0 |
+| `micro_order_index` | 13 | 12 | 0 |
+| `micro_order_le` | 20 | 19 | 0 |
+| `micro_order_shift` | 14 | 13 | 0 |
+| `mod` | 291 | 290 | 0 |
+| `mul` | 205 | 204 | 0 |
+| `multidecl` | 100 | 99 | 0 |
+| `multidim` | 638 | 637 | 0 |
+| `pointerret` | 80 | 79 | 0 |
+| `pointers` | 487 | 486 | 0 |
+| `printfmt` | 187 | 186 | 0 |
+| `printnum` | 328 | 327 | 0 |
+| `prototypes` | 119 | 118 | 0 |
+| `ptrptr` | 566 | 565 | 0 |
+| `scanf_eof` | 209 | 208 | 0 |
+| `scanfstr` | 194 | 193 | 0 |
+| `sizeof` | 87 | 86 | 0 |
+| `storage` | 95 | 94 | 0 |
+| `strings` | 215 | 214 | 0 |
+| `switch` | 160 | 159 | 0 |
+| `ternary` | 222 | 221 | 0 |
+| `typedefs` | 118 | 117 | 0 |
 | `typespec` | 148 | 147 | 0 |
 | `unary` | 137 | 136 | 0 |
 

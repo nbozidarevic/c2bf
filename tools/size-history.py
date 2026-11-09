@@ -301,6 +301,20 @@ MILESTONES = [
         "on 79), goto_dowhile (35,890 on 80), and "
         "goto_dowhile_struct (33,653 on 79).",
     ),
+    (
+        "3dc494d393e38c9246d4c83d7dd6f52a64923a83",
+        "scanf EOF sentinel",
+        "scanf number readers detect EOF with a zero "
+        "sentinel (0021). The 12 fixtures using number "
+        "conversions grow by 111,250 BF bytes in total "
+        "(formats +43,127; the rest +315 to +19,189 "
+        "each); allocated cells grow by 1-7 and runtime "
+        "footprints by 1-8 cells touched on the same "
+        "fixtures. Every other fixture is byte-identical, "
+        "with allocated cells and runtime footprints "
+        "unchanged. Adds one fixture: scanf_eof (363,777 "
+        "BF bytes on 209 cells).",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
