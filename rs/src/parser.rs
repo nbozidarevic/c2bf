@@ -630,7 +630,7 @@ impl<'a> Parser<'a> {
                 if self.at_punct(b"(") {
                     let returns_fn_sig = spec.fn_sig.clone();
                     let is_decl = self.after_param_list_is_semicolon();
-                    let params = self.parse_params(!is_decl)?;
+                    let params = self.parse_params(is_decl)?;
                     if is_decl {
                         return Ok(External::FuncDecl(
                             self.parse_funcdecl(spec, name, returns_fn_sig, params)?,
@@ -887,7 +887,7 @@ impl<'a> Parser<'a> {
         {
             let name = self.next_tok().text;
             let is_decl = self.after_param_list_is_semicolon();
-            let params = self.parse_params(!is_decl)?;
+            let params = self.parse_params(is_decl)?;
             if is_decl {
                 let d = self.parse_funcdecl(spec, name, None, params)?;
                 return Ok(External::FuncDecl(d));
