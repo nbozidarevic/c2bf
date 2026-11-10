@@ -4192,7 +4192,7 @@ mod tests {
         .expect("typedef and return programs compile");
         let mut out = Vec::new();
         crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
-        assert_eq!(out, b"8,12,8,12");
+        assert_eq!(out, b"8,12,8,12,");
     }
 
     #[test]
@@ -4203,7 +4203,7 @@ mod tests {
         .expect("array program compiles");
         let mut out = Vec::new();
         crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
-        assert_eq!(out, b"8,12,8,8,20,1");
+        assert_eq!(out, b"8,12,8,8,20,1,");
     }
 
     #[test]
@@ -4222,7 +4222,7 @@ mod tests {
                 "nested function pointer returns are not supported",
             ),
             (
-                "int dbl(int x) { return x; } int (*make(int c))(int) { return 5; } int main() { return 0; }",
+                "int dbl(int x) { return x; } int (*make(int c))(int) { return 5; } int main() { int (*fp)(int) = make(1); return 0; }",
                 "incompatible function pointer type",
             ),
             (
