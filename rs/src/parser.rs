@@ -589,6 +589,9 @@ impl<'a> Parser<'a> {
         if self.at_spec_start() {
             let mark = self.p;
             let mut spec = self.parse_spec()?;
+            if let Some(is_def) = self.scan_fnptr_return_def() {
+                return self.parse_fnptr_return(spec, is_def);
+            }
             // `*`s before the name and a `(` after it are a
             // pointer-returning function declarator (`char
             // *f()`, `int **f()`); `*`s anywhere else belong
@@ -626,13 +629,15 @@ impl<'a> Parser<'a> {
                 let name = self.next_tok().text;
                 if self.at_punct(b"(") {
                     let returns_fn_sig = spec.fn_sig.clone();
-                    if self.after_param_list_is_semicolon() {
+                    let is_decl = self.after_param_list_is_semicolon();
+                    let params = self.parse_params(!is_decl)?;
+                    if is_decl {
                         return Ok(External::FuncDecl(
-                            self.parse_funcdecl(spec, name, returns_fn_sig)?,
+                            self.parse_funcdecl(spec, name, returns_fn_sig, params)?,
                         ));
                     }
                     return Ok(External::FuncDef(
-                        self.parse_funcdef(spec, name, returns_fn_sig)?,
+                        self.parse_funcdef(spec, name, returns_fn_sig, params)?,
                     ));
                 }
             }
@@ -678,6 +683,7 @@ impl<'a> Parser<'a> {
             // parentheses is the function-pointer star; stars
             // before it are the pointed-to return type's.
             let (inner, name) = self.parse_paren_stars_name(false)?;
+            let paren_dims = self.parse_paren_dims()?;
             if !self.at_punct(b"(") {
                 return self.fail(
                     "parenthesized typedef declarators without a parameter list are not supported"
@@ -698,6 +704,32 @@ impl<'a> Parser<'a> {
                     "arrays of function pointers are not supported".to_string(),
                 );
             }
+            let mut dims: Vec<Option<i32>> = Vec::new();
+            for dim in paren_dims {
+                match dim {
+                    None => dims.push(None),
+                    Some(Expr::Int(bytes)) => {
+                        let len = int_text_value(&bytes);
+                        if len <= 0 {
+                            return self.fail(
+                                "array size must be positive".to_string(),
+                            );
+                        }
+                        dims.push(Some(len));
+                    }
+                    Some(_) => {
+                        return self.fail(
+                            "array size must be an integer literal".to_string(),
+                        );
+                    }
+                }
+            }
+            if dims.len() > 1 {
+                return self.fail(
+                    "multi-dimensional function-pointer arrays are not supported"
+                        .to_string(),
+                );
+            }
             if self.at_punct(b"=") {
                 return self.fail("typedef declarators take no initializer".to_string());
             }
@@ -711,7 +743,7 @@ impl<'a> Parser<'a> {
                 name: name.clone(),
                 spec: spec.words,
                 ptr_depth: 0,
-                dims: Vec::new(),
+                dims,
                 fn_sig: Some(sig),
             };
             if let Some(old) = self.typedefs.get(&name) {
@@ -854,11 +886,13 @@ impl<'a> Parser<'a> {
             && self.peek_at(1).text == b"("
         {
             let name = self.next_tok().text;
-            if self.after_param_list_is_semicolon() {
-                let d = self.parse_funcdecl(spec, name, None)?;
+            let is_decl = self.after_param_list_is_semicolon();
+            let params = self.parse_params(!is_decl)?;
+            if is_decl {
+                let d = self.parse_funcdecl(spec, name, None, params)?;
                 return Ok(External::FuncDecl(d));
             }
-            let f = self.parse_funcdef(spec, name, None)?;
+            let f = self.parse_funcdef(spec, name, None, params)?;
             return Ok(External::FuncDef(f));
         }
         if self.at_punct(b";") {
@@ -881,6 +915,83 @@ impl<'a> Parser<'a> {
             inits,
             is_extern: false,
         }))
+    }
+
+    /// Whether the tokens from here spell a function returning
+    /// a function pointer: `[ *s ] ( [*s] name ( params ) ) (
+    /// params )` followed by `{` (a definition, returned as
+    /// `Some(true)`) or `;` (a prototype, `Some(false)`).
+    /// Anything else is `None`, and the normal external paths
+    /// run. The scan only reads tokens; the cursor does not
+    /// move. Leading stars are the pointed-to return type's
+    /// pointer depth; the stars inside the parentheses must
+    /// be exactly one (checked while parsing).
+    fn scan_fnptr_return_def(&self) -> Option<bool> {
+        let mut k: isize = 0;
+        let tok = |k: isize| self.peek_at(k);
+        while tok(k).kind == Kind::Punct && tok(k).text == b"*" {
+            k += 1;
+        }
+        if !(tok(k).kind == Kind::Punct && tok(k).text == b"(") {
+            return None;
+        }
+        k += 1;
+        while tok(k).kind == Kind::Punct && tok(k).text == b"*" {
+            k += 1;
+        }
+        if tok(k).kind != Kind::Ident {
+            return None;
+        }
+        k += 1;
+        if !(tok(k).kind == Kind::Punct && tok(k).text == b"(") {
+            return None;
+        }
+        k = self.scan_balanced(k)?;
+        if !(tok(k).kind == Kind::Punct && tok(k).text == b")") {
+            return None;
+        }
+        k += 1;
+        if !(tok(k).kind == Kind::Punct && tok(k).text == b"(") {
+            return None;
+        }
+        k = self.scan_balanced(k)?;
+        if !(tok(k).kind == Kind::Punct && tok(k).text == b")") {
+            return None;
+        }
+        k += 1;
+        if tok(k).kind == Kind::Punct && tok(k).text == b"{" {
+            Some(true)
+        } else if tok(k).kind == Kind::Punct && tok(k).text == b";" {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
+    /// Offset just past the `)` matching the `(` at `start`
+    /// (relative token offset), counting nested parentheses, or
+    /// `None` when the end of input comes first. The cursor
+    /// does not move.
+    fn scan_balanced(&self, start: isize) -> Option<isize> {
+        let mut depth = 0i32;
+        let mut k = start;
+        loop {
+            let t = self.peek_at(k);
+            if t.kind == Kind::End {
+                return None;
+            }
+            if t.kind == Kind::Punct {
+                if t.text == b"(" {
+                    depth += 1;
+                } else if t.text == b")" {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(k);
+                    }
+                }
+            }
+            k += 1;
+        }
     }
 
     /// Whether the token after the parameter list starting at the
@@ -977,6 +1088,7 @@ impl<'a> Parser<'a> {
                         // parameter with redundant parentheses.
                         let (inner, paren_name) =
                             self.parse_paren_stars_name(allow_unnamed)?;
+                        let paren_dims = self.parse_paren_dims()?;
                         if self.at_punct(b"(") {
                             // A function-pointer typedef does not
                             // compose with a parenthesized
@@ -1003,10 +1115,62 @@ impl<'a> Parser<'a> {
                                         .to_string(),
                                 );
                             }
+                            // Dimensions inside the parentheses
+                            // are the array dimensions, converted
+                            // like declarator brackets: the first
+                            // may be unsized or any expression
+                            // (recorded when literal, discarded
+                            // otherwise), later ones must be
+                            // positive integer literals.
+                            let mut paren_dims_i32: Vec<Option<i32>> = Vec::new();
+                            for (k, dim) in paren_dims.iter().enumerate() {
+                                match dim {
+                                    None => {
+                                        if k == 0 {
+                                            paren_dims_i32.push(None);
+                                        } else {
+                                            return self.fail(
+                                                "array size must be an integer literal"
+                                                    .to_string(),
+                                            );
+                                        }
+                                    }
+                                    Some(Expr::Int(bytes)) => {
+                                        let len = int_text_value(bytes);
+                                        if k == 0 {
+                                            paren_dims_i32.push(Some(len));
+                                        } else if len <= 0 {
+                                            return self.fail(
+                                                "array size must be positive".to_string(),
+                                            );
+                                        } else {
+                                            paren_dims_i32.push(Some(len));
+                                        }
+                                    }
+                                    Some(_) => {
+                                        if k == 0 {
+                                            paren_dims_i32.push(None);
+                                        } else {
+                                            return self.fail(
+                                                "array size must be an integer literal"
+                                                    .to_string(),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            let mut dims = paren_dims_i32;
+                            dims.extend(spec.dims.iter().copied());
+                            if dims.len() > 1 {
+                                return self.fail(
+                                    "multi-dimensional function-pointer arrays are not supported"
+                                        .to_string(),
+                                );
+                            }
                             params.push(FnParam {
                                 name: paren_name,
                                 ptr_depth: 0,
-                                dims: Vec::new(),
+                                dims,
                                 fn_sig: Some(Box::new(sig)),
                             });
                             if !self.at_punct(b",") {
@@ -1028,7 +1192,7 @@ impl<'a> Parser<'a> {
                                     .to_string(),
                             );
                         }
-                        if self.at_punct(b"[") {
+                        if !paren_dims.is_empty() || self.at_punct(b"[") {
                             return self.fail(
                                 "pointer to array is not supported".to_string(),
                             );
@@ -1113,9 +1277,9 @@ impl<'a> Parser<'a> {
                     }
                     let mut dims = declarator_dims;
                     dims.extend(spec.dims.iter().copied());
-                    if spec.fn_sig.is_some() && !dims.is_empty() {
+                    if spec.fn_sig.is_some() && dims.len() > 1 {
                         return self.fail(
-                            "arrays of function pointers are not supported"
+                            "multi-dimensional function-pointer arrays are not supported"
                                 .to_string(),
                         );
                     }
@@ -1136,13 +1300,79 @@ impl<'a> Parser<'a> {
         Ok(params)
     }
 
+    /// Parse a function returning a function pointer in the
+    /// direct spelling: `[ *s ] ( [*] name ( params ) ) (
+    /// params )`, followed by a body (definition) or `;`
+    /// (prototype, decided by the caller from the lookahead).
+    /// Leading stars are the pointed-to return type's pointer
+    /// depth; the inner star count must be exactly one.
+    fn parse_fnptr_return(
+        &mut self,
+        spec: Spec,
+        is_def: bool,
+    ) -> Result<External, ParseError> {
+        let mut ret_depth = 0u8;
+        while self.at_punct(b"*") {
+            if ret_depth >= 2 {
+                return self.fail(
+                    "pointer to pointer to pointer is not supported".to_string(),
+                );
+            }
+            self.next_tok();
+            ret_depth += 1;
+        }
+        self.expect_punct(b"(", "'('")?;
+        let mut inner = 0u8;
+        while self.at_punct(b"*") {
+            inner += 1;
+            self.next_tok();
+        }
+        let name = self.expect_ident("declarator name")?.text;
+        if inner != 1 {
+            return self.fail(if inner == 0 {
+                "parenthesized function declarators are not supported".to_string()
+            } else {
+                "pointer to function pointer is not supported".to_string()
+            });
+        }
+        let params = self.parse_params(!is_def)?;
+        self.expect_punct(b")", "')'")?;
+        let sig = self.parse_fn_sig_params(&spec, ret_depth)?;
+        if is_def {
+            Ok(External::FuncDef(self.parse_funcdef(
+                spec,
+                name,
+                Some(sig),
+                params,
+            )?))
+        } else {
+            Ok(External::FuncDecl(self.parse_funcdecl(
+                spec,
+                name,
+                Some(sig),
+                params,
+            )?))
+        }
+    }
+
     fn parse_funcdef(
         &mut self,
         spec: Spec,
         name: Vec<u8>,
         returns_fn_sig: Option<FuncSig>,
+        params: Vec<FnParam>,
     ) -> Result<FuncDef, ParseError> {
-        let params = self.parse_params(false)?;
+        // A function pointer that itself returns a function
+        // pointer is deferred: the returned signature may not
+        // carry one of its own.
+        if returns_fn_sig
+            .as_ref()
+            .is_some_and(|s| s.returns_fn_sig.is_some())
+        {
+            return self.fail(
+                "nested function pointer returns are not supported".to_string(),
+            );
+        }
         // The function name lives in the file scope (so a later
         // call to it is not mistaken for an enumerator), and the
         // parameters live in their own scope enclosing the body.
@@ -1175,11 +1405,19 @@ impl<'a> Parser<'a> {
         spec: Spec,
         name: Vec<u8>,
         returns_fn_sig: Option<FuncSig>,
+        params: Vec<FnParam>,
     ) -> Result<FuncDecl, ParseError> {
+        if returns_fn_sig
+            .as_ref()
+            .is_some_and(|s| s.returns_fn_sig.is_some())
+        {
+            return self.fail(
+                "nested function pointer returns are not supported".to_string(),
+            );
+        }
         if let Some(file) = self.scopes.first_mut() {
             file.insert(name.clone());
         }
-        let params = self.parse_params(true)?;
         self.expect_punct(b";", "';'")?;
         Ok(FuncDecl {
             name,
@@ -1317,6 +1555,26 @@ impl<'a> Parser<'a> {
         Ok((inner, name))
     }
 
+    /// Consume bracket dimensions following a parenthesized
+    /// declarator head (`(*arr[3])`, `(*arr[])`): one entry
+    /// per bracket, `None` for an empty bracket. Callers
+    /// convert the size expressions to their own dimension
+    /// form (declarator expressions, parameter sizes, or
+    /// typedef sizes).
+    fn parse_paren_dims(&mut self) -> Result<Vec<Option<Expr>>, ParseError> {
+        let mut dims = Vec::new();
+        while self.at_punct(b"[") {
+            self.next_tok();
+            if self.at_punct(b"]") {
+                dims.push(None);
+            } else {
+                dims.push(Some(self.parse_assignment()?));
+            }
+            self.expect_punct(b"]", "']'")?;
+        }
+        Ok(dims)
+    }
+
     /// Parse a function-pointer parameter list after a
     /// parenthesized declarator head, and build its
     /// signature. Nested function-pointer parameters and
@@ -1407,6 +1665,7 @@ impl<'a> Parser<'a> {
             // parameter list after a bare parenthesized name.
             let (inner, name) = self.parse_paren_stars_name(false)?;
             self.declare_name(&name);
+            let paren_dims = self.parse_paren_dims()?;
             if self.at_punct(b"(") {
                 // A function-pointer typedef does not compose
                 // with a parenthesized declarator: the
@@ -1433,14 +1692,42 @@ impl<'a> Parser<'a> {
                         "arrays of function pointers are not supported".to_string(),
                     );
                 }
+                // Dimensions inside the parentheses are the
+                // array dimensions (`(*arr[3])(int)`); at most
+                // one, and sized dimensions must be integer
+                // literals (an empty bracket is sized by a
+                // braced-list initializer, as for arrays).
+                let mut dims = paren_dims;
+                dims.extend(base.dims.iter().map(|d| {
+                    d.as_ref()
+                        .map(|len| Expr::Int(len.to_string().into_bytes()))
+                }));
+                if dims.len() > 1 {
+                    return self.fail(
+                        "multi-dimensional function-pointer arrays are not supported"
+                            .to_string(),
+                    );
+                }
+                for dim in &dims {
+                    if let Some(e) = dim {
+                        if !matches!(e, Expr::Int(_)) {
+                            return self.fail(
+                                "array size must be an integer literal".to_string(),
+                            );
+                        }
+                    }
+                }
                 let init = self.parse_opt_init()?;
                 return Ok(InitDecl {
                     name,
                     ptr_depth: 0,
-                    dims: Vec::new(),
+                    dims,
                     fn_sig: Some(sig),
                     init,
                 });
+            }
+            if !paren_dims.is_empty() {
+                return self.fail("pointer to array is not supported".to_string());
             }
             if base.fn_sig.is_some() && inner > 1 {
                 return self.fail(
@@ -1492,9 +1779,10 @@ impl<'a> Parser<'a> {
             d.as_ref()
                 .map(|len| Expr::Int(len.to_string().into_bytes()))
         }));
-        if base.fn_sig.is_some() && !dims.is_empty() {
+        if base.fn_sig.is_some() && dims.len() > 1 {
             return self.fail(
-                "arrays of function pointers are not supported".to_string(),
+                "multi-dimensional function-pointer arrays are not supported"
+                    .to_string(),
             );
         }
         let init = if self.at_punct(b"=") {
@@ -2794,6 +3082,26 @@ mod tests {
         assert_sexp(
             "typedef int (*cb)(int); typedef cb (*get)(void);",
             "(tu (typedef cb int (fnsig (params (param)))) (typedef get int (fnsig (fnsig (params (param))))))",
+        );
+        assert_sexp(
+            "int (*f(int x))(int) { return 0; }",
+            "(tu (funcdef f (params (param x)) (compound (return (int 0)))))",
+        );
+        assert_sexp(
+            "int (*f(int))(int);",
+            "(tu (funcdecl f (params (param))))",
+        );
+        assert_sexp(
+            "int (*arr[3])(int);",
+            "(tu (decl int (initdecl arr (int 3) (fnsig (params (param))))))",
+        );
+        assert_sexp(
+            "typedef int (*cb[3])(int);",
+            "(tu (typedef cb int (int 3) (fnsig (params (param)))))",
+        );
+        assert_sexp(
+            "int f(int (*arr[3])(int));",
+            "(tu (funcdecl f (params (param arr (array) (fnsig (params (param)))))))",
         );
         assert_err(
             "typedef int (*cb)(int);\ntypedef cb *p;",
