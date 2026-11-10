@@ -1205,7 +1205,7 @@ impl<'a> Parser<'a> {
                                 total_depth
                             },
                             dims: spec.dims.clone(),
-                            fn_sig: spec.fn_sig.clone(),
+                            fn_sig: spec.fn_sig.clone().map(Box::new),
                         });
                         if !self.at_punct(b",") {
                             break;
@@ -1287,7 +1287,7 @@ impl<'a> Parser<'a> {
                         name,
                         ptr_depth,
                         dims,
-                        fn_sig: spec.fn_sig.clone(),
+                        fn_sig: spec.fn_sig.clone().map(Box::new),
                     });
                     if !self.at_punct(b",") {
                         break;

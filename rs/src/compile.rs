@@ -1617,14 +1617,15 @@ impl Emitter {
             return None;
         }
         let class = self.classify_chain(cur).ok()?;
-        let (root, count) = match &class {
+        let root = Self::flatten_chain(cur).0;
+        let count = match &class {
             ChainClass::Array {
                 dims, indices, ..
-            } => (Self::flatten_chain(cur).0, (dims.len(), indices.len())),
+            } => (dims.len(), indices.len()),
             ChainClass::ParamArray {
                 row_dims, indices, ..
-            } => (Self::flatten_chain(cur).0, (row_dims.len() + 1, indices.len())),
-            ChainClass::Pointer { root, indices } => (root, (1, indices.len())),
+            } => (row_dims.len() + 1, indices.len()),
+            ChainClass::Pointer { indices, .. } => (1, indices.len()),
         };
         let (total, used) = count;
         if used != total {
@@ -3687,9 +3688,10 @@ impl Emitter {
         let saved_break = std::mem::take(&mut self.break_stack);
         let saved_continue = std::mem::take(&mut self.continue_stack);
         let saved_return = self.return_context.replace((returned, result));
-        let saved_return_fn_sig = self
-            .return_fn_sig
-            .replace(def.returns_fn_sig.clone().map(|sig| *sig));
+        let saved_return_fn_sig = std::mem::replace(
+            &mut self.return_fn_sig,
+            def.returns_fn_sig.clone().map(|sig| *sig),
+        );
         self.expanding.push(name.to_vec());
         let compiled = self.compile_function_body(&def.body);
         self.expanding.pop();
