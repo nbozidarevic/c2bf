@@ -274,12 +274,43 @@ call site.
   Arithmetic, compound assignment, and increment on
   function pointers are compile errors, as are stores
   through a dereferenced function pointer. Comparison
-  (`==`, `!=`, `!`) tests identity/nullness. Still
-  unsupported, each a parse or compile error:
-  function-pointer returns, typedef function-pointer
-  types, arrays of function pointers, pointers to
-  function pointers, nested function-pointer parameters,
-  and parenthesized pointer-to-array declarators.
+  (`==`, `!=`, `!`) tests identity/nullness.
+- Typedef function-pointer types: `typedef int (*cb)(int);`
+  aliases the signature, spelled through in variable,
+  parameter, and return declarators (`cb fp`, `cb arr[3]`,
+  `cb f(int)`), including return-pointer spellings and
+  composition where the aliased type itself returns a
+  function pointer. A `*` on top of such a typedef, or a
+  parenthesized declarator over one, is a compile error
+  (a pointer to a function pointer, or a nested return).
+- Functions may return function pointers, spelled through
+  a typedef (`cb f(int)`) or directly
+  (`int (*f(int))(int)`): `return` compiles its operand
+  as a function-pointer value against the returned
+  signature, a bare `return;` yields null, and calls
+  through the result (`f()(x)`, `(*f())(x)`) dispatch
+  like any indirect call. A function pointer that itself
+  returns one, and a pointer-to-function-pointer return,
+  are compile errors.
+- Arrays of function pointers are one-dimensional only:
+  `int (*arr[3])(int)`, `cb arr[3]`, and typedef array
+  spellings hold one callee ID per element, initialized
+  from a braced list (unsized only with one), subscripted
+  and called by element (`arr[i](x)`, `(*arr[i])(x)`),
+  including through a one-dimensional array parameter
+  (which decays to an address, like every array
+  parameter). Subscript assignment validates the
+  signature; `*arr[i]` collapses to the ID like `*fp`.
+  Multi-dimensional arrays of function pointers are
+  compile errors, as are string initializers for them.
+  `sizeof` of such an array is its element count, as for
+  `char` arrays in this byte model.
+  Still unsupported, each a parse or compile error:
+  pointers to function pointers, nested function-pointer
+  parameters, nested function-pointer returns,
+  multi-dimensional function-pointer arrays,
+  function-pointer variables in `for` declarators, and
+  parenthesized pointer-to-array declarators.
 - Parameters are values, except pointer (`*`) and array (`[]`/`[N]`)
   parameters, which receive an address. Array parameters decay to
   pointers, and the size is discarded. Arguments evaluate

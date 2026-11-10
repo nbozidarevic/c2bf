@@ -14,6 +14,22 @@ the top, matching tag `v0.6.1`. Entries below are grouped by
 the roadmap phases that produced them. See `docs/versioning.md`
 for when and how versions change.
 
+## Unreleased
+
+- Language: the deferred function-pointer forms from
+  record 0019 — typedef function-pointer types,
+  function-pointer returns (typedef and direct
+  spellings), and one-dimensional arrays of function
+  pointers (including array parameters), with subscript
+  calls, signature-checked assignment, and deref
+  collapse. Pinned by the `fnptr_typedef`, `fnptrret`,
+  and `fnptrarr` oracle fixtures. Decision record:
+  `docs/decisions/0022-fnptr-deferred-forms.md`.
+- Tests: differential fuzzer generates typedef
+  function-pointer spellings and at most one
+  function-pointer array per program, with per-element
+  binding tracking and helper-bound element calls.
+
 ## v0.6.1
 
 - Fixed: `scanf` number conversions (`%d`, `%u`, `%o`, `%x`,
