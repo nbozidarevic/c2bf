@@ -139,6 +139,10 @@ class Gen:
         self.pptrs = {}
         self.aliases = {}
         self.fnptrs = {}
+        # Function-pointer arrays: name -> per-element binding
+        # ("helper", None for null, or "?" for unknown), tracked
+        # like `fnptrs` so only helper-bound elements are called.
+        self.fnptr_arrays = {}
         self.chartypes = set()
         self.helpers = {}
         self.protected = set()
@@ -189,10 +193,15 @@ class Gen:
         # name the same function, and ordering is never
         # generated (ID order and address order need not
         # agree). The result is always a boolean.
-        if op in ("==", "!=") and self.fnptrs and rng.random() < 0.25:
-            left = rng.choice([*self.fnptrs, "helper", "0"])
-            right = rng.choice([*self.fnptrs, "helper", "0"])
-            if left in self.fnptrs or right in self.fnptrs:
+        if op in ("==", "!=") and (self.fnptrs or self.fnptr_arrays) \
+                and rng.random() < 0.25:
+            elems = [f"{n}[{k}]" for n, bs in self.fnptr_arrays.items()
+                     for k in range(len(bs))]
+            pool = [*self.fnptrs, "helper", "0", *elems]
+            left = rng.choice(pool)
+            right = rng.choice(pool)
+            if left in self.fnptrs or right in self.fnptrs \
+                    or left in elems or right in elems:
                 return (f"({left} {op} {right})", 0, 1)
         for _ in range(6):
             l = self.expr(depth - 1, allow_sizeof=allow_sizeof)
@@ -265,6 +274,22 @@ class Gen:
                 form = self.rng.choice([f"{name}({arg[0]})",
                                         f"(*{name})({arg[0]})"])
                 return (form, *ret_iv)
+        # An indirect call through a helper-bound array
+        # element, in either spelling: the return interval
+        # is the helper's, whatever the spelling.
+        if self.fnptr_arrays and "helper" in self.helpers \
+                and not self.helpers["helper"][1] \
+                and self.rng.random() < 0.2:
+            elems = [(n, k) for n, bs in self.fnptr_arrays.items()
+                     for k, b in enumerate(bs) if b == "helper"]
+            if elems:
+                name, k = self.rng.choice(elems)
+                ret_iv = self.helpers["helper"][0]
+                arg = self.expr(depth - 1, allow_call=False,
+                                allow_sizeof=allow_sizeof)
+                form = self.rng.choice([f"{name}[{k}]({arg[0]})",
+                                        f"(*{name}[{k}])({arg[0]})"])
+                return (form, *ret_iv)
         name, (ret_iv, is_pp, is_char) = self.rng.choice(
             list(self.helpers.items()))
         if is_pp:
@@ -301,7 +326,12 @@ class Gen:
 
     def unop(self, depth, allow_sizeof=True):
         # `!fp` tests nullness: 0 is null in both models, and
-        # any callee ID is nonzero in both.
+        # any callee ID is nonzero in both. Array elements
+        # test the same way.
+        if self.fnptr_arrays and self.rng.random() < 0.06:
+            name = self.rng.choice(list(self.fnptr_arrays))
+            k = self.rng.randrange(len(self.fnptr_arrays[name]))
+            return (f"(!{name}[{k}])", 0, 1)
         if self.fnptrs and self.rng.random() < 0.12:
             name = self.rng.choice(list(self.fnptrs))
             return (f"(!{name})", 0, 1)
@@ -552,20 +582,25 @@ class Gen:
         return f"{typ} *{name} = &{target};"
 
     def gen_typedef(self):
-        """One file-scope typedef, pointer or array alias.
-        Uses are spelled through the alias in declarations;
-        the alias name never collides with a variable stem."""
+        """One file-scope typedef: pointer, array, or
+        function-pointer alias. Uses are spelled through the
+        alias in declarations; the alias name never collides
+        with a variable stem."""
         rng = self.rng
-        if rng.random() < 0.5:
+        roll = rng.random()
+        if roll < 0.4:
             is_char = rng.random() < 0.5
             typ = "char" if is_char else "int"
             self.aliases["TPA"] = ("ptr", 1, is_char)
             return f"typedef {typ} *TPA;"
-        is_char = rng.random() < 0.5
-        typ = "char" if is_char else "int"
-        dim = rng.randint(2, 3)
-        self.aliases["TAA"] = ("array", [dim], is_char)
-        return f"typedef {typ} TAA[{dim}];"
+        if roll < 0.7:
+            is_char = rng.random() < 0.5
+            typ = "char" if is_char else "int"
+            dim = rng.randint(2, 3)
+            self.aliases["TAA"] = ("array", [dim], is_char)
+            return f"typedef {typ} TAA[{dim}];"
+        self.aliases["TCB"] = ("fnptr", None, False)
+        return "typedef int (*TCB)(int);"
 
     def decl_md_array(self):
         """One multi-dimensional array: 2D, or 3D with
@@ -662,9 +697,39 @@ class Gen:
         name = self.fresh("f")
         if rng.random() < 0.3:
             self.fnptrs[name] = None
+            if "TCB" in self.aliases and rng.random() < 0.4:
+                return f"TCB {name} = 0;"
             return f"int (*{name})(int) = 0;"
         self.fnptrs[name] = "helper"
+        if "TCB" in self.aliases and rng.random() < 0.4:
+            return f"TCB {name} = helper;"
         return f"int (*{name})(int) = helper;"
+
+    def decl_fnptr_array(self):
+        """A function-pointer array bound element-wise to the
+        helper or to null, spelled directly or through the
+        `TCB` alias when one exists. Per-element bindings
+        are tracked so only helper-bound elements are
+        called; the array is never rebound wholesale."""
+        rng = self.rng
+        if "helper" not in self.helpers or self.helpers["helper"][1]:
+            return None
+        name = self.fresh("fa")
+        n = rng.randint(2, 3)
+        bindings = []
+        elems = []
+        for _ in range(n):
+            if rng.random() < 0.3:
+                bindings.append(None)
+                elems.append("0")
+            else:
+                bindings.append("helper")
+                elems.append("helper")
+        self.fnptr_arrays[name] = bindings
+        inits = ", ".join(elems)
+        if "TCB" in self.aliases and rng.random() < 0.4:
+            return f"TCB {name}[{n}] = {{{inits}}};"
+        return f"int (*{name}[{n}])(int) = {{{inits}}};"
 
     def decl_pp(self):
         """A pointer-to-pointer bound to an existing pointer.
@@ -706,7 +771,8 @@ class Gen:
 
     def snap(self):
         return (dict(self.env), {k: v for k, v in self.arrays.items()},
-                set(self.chartypes), dict(self.fnptrs))
+                set(self.chartypes), dict(self.fnptrs),
+                {k: list(v) for k, v in self.fnptr_arrays.items()})
 
     def merge(self, snaps):
         envs, arrs = [s[0] for s in snaps], [s[1] for s in snaps]
@@ -728,6 +794,15 @@ class Gen:
             if vals:
                 self.fnptrs[name] = vals[0] if all(
                     v == vals[0] for v in vals) else "?"
+        # Per-element bindings merge element-wise, like the
+        # scalar bindings: a disagreement becomes unknown.
+        for name in self.fnptr_arrays:
+            for k in range(len(self.fnptr_arrays[name])):
+                vals = [s[4][name][k] for s in snaps
+                        if name in s[4] and k < len(s[4][name])]
+                if vals:
+                    self.fnptr_arrays[name][k] = vals[0] if all(
+                        v == vals[0] for v in vals) else "?"
 
     def assignable(self):
         return [n for n in self.env if n not in self.protected]
@@ -823,6 +898,18 @@ class Gen:
                 self.arrays[name] = (length, iv_join(iv, (e[1], e[2])),
                                      self.arrays[name][2], is_char)
                 return
+        if roll < 0.47 and self.fnptr_arrays and rng.random() < 0.3:
+            # Rebind one array element to the helper or to
+            # null, updating only that element's binding.
+            name = rng.choice(list(self.fnptr_arrays))
+            k = rng.randrange(len(self.fnptr_arrays[name]))
+            if rng.random() < 0.6:
+                lines.append(f"{name}[{k}] = helper;")
+                self.fnptr_arrays[name][k] = "helper"
+            else:
+                lines.append(f"{name}[{k}] = 0;")
+                self.fnptr_arrays[name][k] = None
+            return
         if roll < 0.47 and self.fnptrs and rng.random() < 0.3:
             name = rng.choice(list(self.fnptrs))
             choice = rng.random()
@@ -973,7 +1060,7 @@ class Gen:
         then_snap = self.snap()
         # Copies: restoring the snapshot dict itself and then
         # mutating it would corrupt the snapshot the merge reads.
-        self.env, self.arrays, self.chartypes, self.fnptrs = dict(snap[0]), dict(snap[1]), set(snap[2]), dict(snap[3])
+        self.env, self.arrays, self.chartypes, self.fnptrs, self.fnptr_arrays = dict(snap[0]), dict(snap[1]), set(snap[2]), dict(snap[3]), {k: list(v) for k, v in snap[4].items()}
         else_lines = []
         self.stmts(depth - 1, loop, 1, else_lines, pure, allow_while=True,
                    allow_loop=allow_loop)
@@ -1053,7 +1140,7 @@ class Gen:
             lines.extend("  " + s for s in body)
             lines.append("  break;")
             snaps.append(self.snap())
-            self.env, self.arrays, self.chartypes, self.fnptrs = dict(snap[0]), dict(snap[1]), set(snap[2]), dict(snap[3])
+            self.env, self.arrays, self.chartypes, self.fnptrs, self.fnptr_arrays = dict(snap[0]), dict(snap[1]), set(snap[2]), dict(snap[3]), {k: list(v) for k, v in snap[4].items()}
         lines.append("default:")
         body = []
         self.stmts(1, loop, 1, body, pure, allow_while=False,
@@ -1225,7 +1312,7 @@ class Gen:
             return (f"{typ} helper({typ} **hp) {{\n"
                     f"  return **hp;\n}}")
         saved = (self.env, self.arrays, self.chartypes, self.ptrs,
-                 self.mdims, self.pptrs, self.fnptrs)
+                 self.mdims, self.pptrs, self.fnptrs, self.fnptr_arrays)
         self.env = {"hp": (0, 255)}
         self.arrays = {}
         self.chartypes = set()
@@ -1233,12 +1320,13 @@ class Gen:
         self.mdims = {}
         self.pptrs = {}
         self.fnptrs = {}
+        self.fnptr_arrays = {}
         lines = []
         if rng.random() < 0.6:
             lines.append(self.decl_scalar())
         ret = self.readable_expr(2)
         (self.env, self.arrays, self.chartypes, self.ptrs,
-         self.mdims, self.pptrs, self.fnptrs) = saved
+         self.mdims, self.pptrs, self.fnptrs, self.fnptr_arrays) = saved
         self.helpers["helper"] = ((ret[1], ret[2]), False, False)
         body = "\n".join("  " + l for l in lines)
         tail = f"  return {ret[0]};"
@@ -1269,6 +1357,9 @@ def gen_program(seed):
             lines.append(g.decl_md_array())
         elif roll < 0.86:
             lines.append(g.decl_array())
+        elif roll < 0.90 and not g.fnptr_arrays:
+            decl = g.decl_fnptr_array()
+            lines.append(decl if decl else g.decl_scalar())
         else:
             decl = None
             if roll < 0.93 and len(g.fnptrs) < 2:

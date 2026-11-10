@@ -140,12 +140,14 @@ keeps a `[lo, hi]` bound):
   contain `sizeof`: a `size_t` value in a braced-list
   element is a narrowing error in C++, even when the value
   fits.
-- One file-scope typedef per program at most, pointer or
-  array alias, spelled through in declarations (`TPA *pp`
-  for depth 2, `TAA m[n]` for composed dimensions). Alias
-  uses are rare by construction (the alias must precede a
-  declaration of matching element type); the same paths
-  are covered by hand fixtures and parser tests.
+- One file-scope typedef per program at most, pointer,
+  array, or function-pointer alias, spelled through in
+  declarations (`TPA *pp` for depth 2, `TAA m[n]` for
+  composed dimensions, `TCB fp` for a function-pointer
+  variable or array). Alias uses are rare by construction
+  (the alias must precede a declaration of matching
+  element type); the same paths are covered by hand
+  fixtures and parser tests.
 - Helper functions are occasionally `**` helpers
   (`int helper(int **hp) { return **hp; }`, `char` flavor
   too), called only with the address of a pointer of the
@@ -225,7 +227,16 @@ keeps a `[lo, hi]` bound):
   both spellings (`fp(args)`, `(*fp)(args)`); comparisons
   use only `==`/`!=`/`!`, never ordering (ID order and
   address order need not agree); null calls are never
-  generated (a crash in C, a no-op here).
+  generated (a crash in C, a no-op here). At most one
+  function-pointer array per program (2–3 elements, each
+  bound to the helper or to null, spelled directly or
+  through `TCB`); bindings are tracked per element and
+  merged element-wise, only helper-bound elements are
+  called (both spellings), and elements are rebound one
+  at a time to the helper or to null. Function-pointer
+  returns are not generated (no returning helper exists);
+  deref-collapse uses of an element as a value
+  (`*arr[k]`) are fixture-only.
 Not covered (yet): negative `scanf` tokens, recursion,
 structs, and floats. Each is either unsupported
 or needs its own agreement argument before the generator
