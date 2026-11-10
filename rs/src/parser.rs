@@ -950,6 +950,12 @@ impl<'a> Parser<'a> {
             return None;
         }
         k += 1;
+        // The inner parameter list's `)` is followed by the
+        // parenthesized head's own `)`, then the outer list.
+        if !(tok(k).kind == Kind::Punct && tok(k).text == b")") {
+            return None;
+        }
+        k += 1;
         if !(tok(k).kind == Kind::Punct && tok(k).text == b"(") {
             return None;
         }
