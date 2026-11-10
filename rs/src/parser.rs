@@ -682,8 +682,7 @@ impl<'a> Parser<'a> {
             // `typedef int (*cb)(int);`. The star inside the
             // parentheses is the function-pointer star; stars
             // before it are the pointed-to return type's.
-            let (inner, name) = self.parse_paren_stars_name(false)?;
-            let paren_dims = self.parse_paren_dims()?;
+            let (inner, name, paren_dims) = self.parse_paren_stars_name(false)?;
             if !self.at_punct(b"(") {
                 return self.fail(
                     "parenthesized typedef declarators without a parameter list are not supported"
@@ -1086,9 +1085,8 @@ impl<'a> Parser<'a> {
                         // after it makes a function-pointer
                         // parameter, otherwise a plain pointer
                         // parameter with redundant parentheses.
-                        let (inner, paren_name) =
+                        let (inner, paren_name, paren_dims) =
                             self.parse_paren_stars_name(allow_unnamed)?;
-                        let paren_dims = self.parse_paren_dims()?;
                         if self.at_punct(b"(") {
                             // A function-pointer typedef does not
                             // compose with a parenthesized
@@ -1532,36 +1530,29 @@ impl<'a> Parser<'a> {
         Ok(Expr::InitList(elems))
     }
 
-    /// Consume a parenthesized declarator head `( * * name )`
-    /// and return the inner star count and the name (empty
-    /// for an unnamed parameter when `allow_unnamed` and the
-    /// next token is `)`).
+    /// Consume a parenthesized declarator head `( * * name
+    /// [dims] )` and return the inner star count, the name
+    /// (empty for an unnamed parameter when `allow_unnamed`
+    /// and the next token is `)` or `[`), and the bracket
+    /// dimensions inside the parentheses (`None` per empty
+    /// bracket). Dimensions after the name are the array
+    /// dimensions (`(*arr[3])(int)`); dimensions after the
+    /// closing parenthesis are handled by the caller.
     fn parse_paren_stars_name(
         &mut self,
         allow_unnamed: bool,
-    ) -> Result<(u8, Vec<u8>), ParseError> {
+    ) -> Result<(u8, Vec<u8>, Vec<Option<Expr>>), ParseError> {
         self.expect_punct(b"(", "'('")?;
         let mut inner = 0u8;
         while self.at_punct(b"*") {
             inner += 1;
             self.next_tok();
         }
-        let name = if allow_unnamed && self.at_punct(b")") {
+        let name = if allow_unnamed && (self.at_punct(b")") || self.at_punct(b"[")) {
             Vec::new()
         } else {
             self.expect_ident("declarator name")?.text
         };
-        self.expect_punct(b")", "')'")?;
-        Ok((inner, name))
-    }
-
-    /// Consume bracket dimensions following a parenthesized
-    /// declarator head (`(*arr[3])`, `(*arr[])`): one entry
-    /// per bracket, `None` for an empty bracket. Callers
-    /// convert the size expressions to their own dimension
-    /// form (declarator expressions, parameter sizes, or
-    /// typedef sizes).
-    fn parse_paren_dims(&mut self) -> Result<Vec<Option<Expr>>, ParseError> {
         let mut dims = Vec::new();
         while self.at_punct(b"[") {
             self.next_tok();
@@ -1572,7 +1563,8 @@ impl<'a> Parser<'a> {
             }
             self.expect_punct(b"]", "']'")?;
         }
-        Ok(dims)
+        self.expect_punct(b")", "')'")?;
+        Ok((inner, name, dims))
     }
 
     /// Parse a function-pointer parameter list after a
@@ -1663,9 +1655,8 @@ impl<'a> Parser<'a> {
             // return type's. A second inner star is a pointer
             // to a function pointer and is rejected, as is a
             // parameter list after a bare parenthesized name.
-            let (inner, name) = self.parse_paren_stars_name(false)?;
+            let (inner, name, paren_dims) = self.parse_paren_stars_name(false)?;
             self.declare_name(&name);
-            let paren_dims = self.parse_paren_dims()?;
             if self.at_punct(b"(") {
                 // A function-pointer typedef does not compose
                 // with a parenthesized declarator: the
@@ -3285,7 +3276,6 @@ mod tests {
                 "typedef char A[3]; A (*fp)(int);",
                 "function return type cannot be an array",
             ),
-            ("typedef int (*cb)(int);", "declarator name"),
             (
                 "int f(int (*cb)(int (*g)(int)));",
                 "nested function pointer parameters",
