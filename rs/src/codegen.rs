@@ -78,6 +78,13 @@ pub struct Emitter {
     /// `(returned_cell, result_cell)` of the innermost function being
     /// expanded, or `None` while compiling `main`.
     pub(crate) return_context: Option<(i32, i32)>,
+    /// Signature of a function pointer the innermost function
+    /// being expanded returns, or `None` for scalar, pointer,
+    /// and void returns (and outside an expansion). A `return`
+    /// operand compiles as a function-pointer value against
+    /// it; saved and restored across expansions like the
+    /// return context.
+    pub(crate) return_fn_sig: Option<FuncSig>,
     /// Multi-dimensional array parameters, by scope-renamed name:
     /// the dimensions after the first (the stride), recorded at
     /// call expansion from the parameter signature. One-
@@ -99,6 +106,14 @@ pub struct Emitter {
     /// scope-renamed name: variables from their declarator,
     /// parameters from their signature at call expansion.
     pub(crate) fnptr_sigs: HashMap<Vec<u8>, FuncSig>,
+    /// Names of function-pointer arrays (variables, globals,
+    /// and one-dimensional array parameters), by
+    /// scope-renamed name: their elements hold callee IDs,
+    /// with the signature in [`Self::fnptr_sigs`]. Array
+    /// names are not in [`Self::fnptrs`]: the name itself
+    /// decays to an address, and only a full subscript
+    /// names an element.
+    pub(crate) fnptr_arrays: HashSet<Vec<u8>>,
     /// Defined function names in translation-unit order, for
     /// callee-ID assignment: the ID of the function at
     /// position `i` is `i + 1` (0 is null). Prototypes

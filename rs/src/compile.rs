@@ -457,6 +457,11 @@ fn check_param_dims(params: &[FnParam]) -> Result<(), CompileError> {
                 "array parameter dimensions after the first must have a size",
             ));
         }
+        if p.fn_sig.is_some() && p.dims.len() > 1 {
+            return Err(err(
+                "multi-dimensional function-pointer arrays are not supported",
+            ));
+        }
     }
     Ok(())
 }
@@ -748,23 +753,29 @@ impl Emitter {
         // `int;` — no declarators, the base visitor emits nothing.
         for init in &d.inits {
             // A function-pointer declarator holds a callee ID
-            // in one cell: never a data pointer, never an
-            // array, and its initializer is a designator, a
-            // function pointer of the same signature, or 0.
+            // in one cell: never a data pointer, and its
+            // initializer is a designator, a function pointer
+            // of the same signature, or 0. A declarator with
+            // dimensions is a function-pointer array instead
+            // and goes through the array path below (the
+            // extern and array checks there apply, and
+            // `compile_array_decl` handles the signature).
             if let Some(sig) = &init.fn_sig {
-                if self.memory.is_array(&init.name) {
-                    return Err(err("cannot redeclare an array as a variable"));
+                if init.dims.is_empty() {
+                    if self.memory.is_array(&init.name) {
+                        return Err(err("cannot redeclare an array as a variable"));
+                    }
+                    let dest = self.memory.var_cell(&init.name);
+                    self.fnptrs.insert(init.name.clone());
+                    self.fnptr_sigs.insert(init.name.clone(), sig.clone());
+                    let e = match &init.init {
+                        None => return Err(err("Unsupported init declarator")),
+                        Some(e) => e,
+                    };
+                    let value = self.compile_fnptr_value(e, sig)?;
+                    self.copy_value(value, dest);
+                    continue;
                 }
-                let dest = self.memory.var_cell(&init.name);
-                self.fnptrs.insert(init.name.clone());
-                self.fnptr_sigs.insert(init.name.clone(), sig.clone());
-                let e = match &init.init {
-                    None => return Err(err("Unsupported init declarator")),
-                    Some(e) => e,
-                };
-                let value = self.compile_fnptr_value(e, sig)?;
-                self.copy_value(value, dest);
-                continue;
             }
             // A non-defining `extern` declarator emits nothing
             // (scalar or array); a use without a definition
@@ -850,6 +861,16 @@ impl Emitter {
                 }
             }
         }
+        // A function-pointer array is one-dimensional only
+        // (multi-dimensional shapes are rejected at parse
+        // time, re-checked here for hand-built ASTs), never
+        // string-initialized: its elements are callee IDs.
+        let fn_sig = init.fn_sig.clone();
+        if fn_sig.is_some() && sized.len() > 1 {
+            return Err(err(
+                "multi-dimensional function-pointer arrays are not supported",
+            ));
+        }
         // A string initializer fills the elements (plus a NUL when
         // it fits); a braced list fills them in order, zero-filling
         // the rest; any other initializer is rejected, as before.
@@ -870,11 +891,23 @@ impl Emitter {
                 }
             }
             Some(_) if array_unsized => {
+                if fn_sig.is_some() {
+                    return Err(err(
+                        "unsized function-pointer array requires a braced initializer list",
+                    ));
+                }
                 return Err(err("unsized array requires a string initializer"));
             }
             Some(_) => return Err(err("array initializers are not supported")),
             None => None,
         };
+        // A function-pointer array is never string-initialized:
+        // its elements are callee IDs, not characters.
+        if fn_sig.is_some() && string_init.is_some() {
+            return Err(err(
+                "string initializer is not supported for function-pointer arrays",
+            ));
+        }
         // String initializers size only one-dimensional
         // arrays; a list holding exactly one string literal is
         // a string initializer too, so both shapes are
@@ -945,6 +978,14 @@ impl Emitter {
             (dims, len)
         };
         self.memory.record_array_dims(&init.name, dims.clone());
+        // Function-pointer arrays register their element
+        // signature here (both the fresh and the redeclared
+        // paths below re-fill, and both need the registry).
+        if let Some(sig) = &fn_sig {
+            self.fnptr_arrays.insert(init.name.clone());
+            self.fnptr_sigs
+                .insert(init.name.clone(), sig.clone());
+        }
         // Fill the elements: string bytes plus zero fill (a NUL
         // terminator when it fits), list elements in source order
         // plus zero fill, or plain clearing. Setting every element
@@ -969,7 +1010,14 @@ impl Emitter {
                             "nested initializer lists are not supported",
                         ));
                     }
-                    let src = em.compile_expr(elem)?;
+                    // Function-pointer elements compile as
+                    // signature-checked values (designators,
+                    // function pointers, null, ternaries);
+                    // data elements compile as plain values.
+                    let src = match &fn_sig {
+                        Some(sig) => em.compile_fnptr_value(elem, sig)?,
+                        None => em.compile_expr(elem)?,
+                    };
                     em.copy_value(src, base + offset as i32);
                 }
                 for cell in base + elems.len() as i32..base + len as i32 {
@@ -1532,7 +1580,8 @@ impl Emitter {
 
     /// Whether `e` names a function as a designator: a
     /// defined or prototyped function name, a function-pointer
-    /// variable, or a dereference/address chain of one.
+    /// variable, a full subscript of a function-pointer
+    /// array, or a dereference/address chain of one.
     /// Pure: no code is emitted.
     fn is_fn_designator(&self, e: &Expr) -> bool {
         match e {
@@ -1547,21 +1596,112 @@ impl Emitter {
                     || self.prototypes.contains_key(name)
                     || self.fnptrs.contains(name)
             }
+            Expr::Index { .. } => self.fnptr_element_sig(e).is_some(),
             _ => false,
         }
     }
 
+    /// Element signature of a full subscript of a
+    /// function-pointer array: `arr[i]` (a named array, or a
+    /// one-dimensional array parameter, whose name is in
+    /// the function-pointer-array registry), or `None` for
+    /// any other subscript (data arrays, rows, pointer
+    /// chains through dereferences). Pure: no code is
+    /// emitted.
+    fn fnptr_element_sig(&self, e: &Expr) -> Option<FuncSig> {
+        let mut cur = e;
+        while let Expr::Paren(inner) = cur {
+            cur = inner;
+        }
+        if !matches!(cur, Expr::Index { .. }) {
+            return None;
+        }
+        let class = self.classify_chain(cur).ok()?;
+        let (root, count) = match &class {
+            ChainClass::Array {
+                dims, indices, ..
+            } => (Self::flatten_chain(cur).0, (dims.len(), indices.len())),
+            ChainClass::ParamArray {
+                row_dims, indices, ..
+            } => (Self::flatten_chain(cur).0, (row_dims.len() + 1, indices.len())),
+            ChainClass::Pointer { root, indices } => (root, (1, indices.len())),
+        };
+        let (total, used) = count;
+        if used != total {
+            return None;
+        }
+        let Expr::Ident(name) = root else {
+            return None;
+        };
+        if !self.fnptr_arrays.contains(name) {
+            return None;
+        }
+        self.fnptr_sigs.get(name).cloned()
+    }
+
+    /// Signature of the function-pointer value `e` evaluates
+    /// to, when `e` is one: a designator, a function-pointer
+    /// variable or array element, a call returning a
+    /// function pointer (recursively), or a dereference /
+    /// address / cast / parenthesis chain over one. `None`
+    /// for every other expression, including a bare
+    /// function-pointer array name (an address, not a
+    /// value). Pure: no code is emitted.
+    fn fnptr_value_sig(&self, e: &Expr) -> Option<FuncSig> {
+        match e {
+            Expr::Paren(inner) => self.fnptr_value_sig(inner),
+            Expr::Cast { e: inner, .. } => self.fnptr_value_sig(inner),
+            Expr::Unary { op, e: inner }
+                if op.as_slice() == b"*" || op.as_slice() == b"&" =>
+            {
+                self.fnptr_value_sig(inner)
+            }
+            Expr::Ident(name) => {
+                if self.fnptr_arrays.contains(name) {
+                    return None;
+                }
+                if let Some(def) = self.functions.get(name) {
+                    Some(FuncSig {
+                        is_void: def.is_void,
+                        returns_ptr_depth: def.returns_ptr_depth,
+                        returns_fn_sig: def.returns_fn_sig.clone(),
+                        params: def.params.clone(),
+                    })
+                } else if let Some(sig) = self.prototypes.get(name) {
+                    Some((**sig).clone())
+                } else {
+                    self.fnptr_sigs.get(name).cloned()
+                }
+            }
+            Expr::Index { .. } => self.fnptr_element_sig(e),
+            Expr::Call { callee, .. } => self
+                .fnptr_value_sig(callee)
+                .and_then(|sig| sig.returns_fn_sig.map(|b| *b)),
+            _ => None,
+        }
+    }
+
     /// Declared signature of a function-pointer lvalue
-    /// (`fp`, `(fp)`), or `None` for any other target.
+    /// (`fp`, `(fp)`, or a full subscript `arr[i]` of a
+    /// function-pointer array), or `None` for any other
+    /// target. Array names themselves are not lvalues of
+    /// this kind: assigning to one is an array assignment,
+    /// not a function-pointer assignment.
     fn fnptr_lvalue_sig(&self, e: &Expr) -> Option<FuncSig> {
         let mut cur = e;
         while let Expr::Paren(inner) = cur {
             cur = inner;
         }
-        let Expr::Ident(name) = cur else {
-            return None;
-        };
-        self.fnptr_sigs.get(name).cloned()
+        match cur {
+            Expr::Ident(name) => {
+                if self.fnptr_arrays.contains(name) {
+                    return None;
+                }
+                self.fnptr_sigs.get(name).cloned()
+            }
+            Expr::Index { .. } => self.fnptr_element_sig(cur),
+            _ => None,
+        }
     }
 
     /// Store destination for an assignment target: a static cell,
@@ -1780,6 +1920,23 @@ impl Emitter {
                         "undefined function '{}'",
                         String::from_utf8_lossy(name)
                     )))
+                } else {
+                    Ok(None)
+                }
+            }
+            // Dereferencing a function-pointer array element
+            // or a call returning a function pointer yields
+            // the ID itself, never a load through dispatch.
+            Expr::Index { .. } => {
+                if self.fnptr_element_sig(e).is_some() {
+                    Ok(Some(self.compile_expr(e)?))
+                } else {
+                    Ok(None)
+                }
+            }
+            Expr::Call { .. } => {
+                if self.fnptr_value_sig(e).is_some() {
+                    Ok(Some(self.compile_expr(e)?))
                 } else {
                     Ok(None)
                 }
@@ -2285,7 +2442,15 @@ impl Emitter {
                     return Ok(());
                 };
                 if let Some(e) = e {
-                    let v = self.compile_expr(e)?;
+                    // A function returning a function pointer
+                    // returns a signature-checked value (a
+                    // designator, a function pointer, a call
+                    // returning one, or null); anything else is
+                    // an incompatible type.
+                    let v = match self.return_fn_sig.clone() {
+                        Some(sig) => self.compile_fnptr_value(e, &sig)?,
+                        None => self.compile_expr(e)?,
+                    };
                     self.copy_value(v, result);
                 }
                 self.set_value(returned, 1);
@@ -3088,12 +3253,40 @@ impl Emitter {
                         "undefined function '{}'",
                         String::from_utf8_lossy(name)
                     )))
-                } else if let Some(sig) = self.fnptr_sigs.get(name).cloned() {
+                } else if self.fnptrs.contains(name) {
+                    // A function-pointer array name is an
+                    // address, not a value: it must not reach
+                    // here, but if the registry and the set
+                    // ever disagree, the error below (not a
+                    // fresh zero cell) is the safe outcome.
+                    let Some(sig) = self.fnptr_sigs.get(name).cloned() else {
+                        self.check_extern_defined(name)?;
+                        return Err(err("incompatible function pointer type"));
+                    };
                     Ok((self.memory.var_cell(name), sig))
                 } else {
                     self.check_extern_defined(name)?;
                     Err(err("incompatible function pointer type"))
                 }
+            }
+            // A full subscript of a function-pointer array
+            // evaluates to the element's callee ID; a call
+            // returning a function pointer evaluates to the
+            // ID its result cell holds. Both need their
+            // signature from the element / return shape.
+            Expr::Index { .. } => {
+                let Some(sig) = self.fnptr_element_sig(e) else {
+                    return Err(err("incompatible function pointer type"));
+                };
+                let cell = self.compile_expr(e)?;
+                Ok((cell, sig))
+            }
+            Expr::Call { .. } => {
+                let Some(sig) = self.fnptr_value_sig(e) else {
+                    return Err(err("incompatible function pointer type"));
+                };
+                let cell = self.compile_expr(e)?;
+                Ok((cell, sig))
             }
             _ => Err(err("incompatible function pointer type")),
         }
@@ -3192,9 +3385,14 @@ impl Emitter {
         }
         // A function-pointer variable as callee dispatches on
         // the ID it holds, against its declared signature.
-        if let Some(sig) = self.fnptr_sigs.get(name).cloned() {
-            let id = self.memory.var_cell(name);
-            return self.compile_indirect_call(id, &sig, args);
+        // A function-pointer array name is not a callee: it
+        // decays to an address, and calling it is an error
+        // below, like any other non-callable name.
+        if self.fnptrs.contains(name) {
+            if let Some(sig) = self.fnptr_sigs.get(name).cloned() {
+                let id = self.memory.var_cell(name);
+                return self.compile_indirect_call(id, &sig, args);
+            }
         }
         // A prototype without a definition has no body to expand:
         // the arity is checked against the prototype first (same
@@ -3413,7 +3611,12 @@ impl Emitter {
         // parameter's signature as it is compiled.
         let mut arg_cells = Vec::with_capacity(args.len());
         for (param, arg) in def.params.iter().zip(args.iter()) {
-            let v = if let Some(sig) = &param.fn_sig {
+            // A function-pointer parameter takes a
+            // signature-checked value; a function-pointer
+            // array parameter takes an address, like every
+            // array parameter.
+            let v = if param.fn_sig.is_some() && param.dims.is_empty() {
+                let sig = param.fn_sig.as_ref().expect("fn_sig is present");
                 self.compile_fnptr_value(arg, sig)?
             } else {
                 self.compile_expr(arg)?
@@ -3449,9 +3652,20 @@ impl Emitter {
         for (param, &arg) in def.params.iter().zip(arg_cells.iter()) {
             let cell = self.memory.var_cell(&param.name);
             if let Some(sig) = &param.fn_sig {
-                self.fnptrs.insert(param.name.clone());
-                self.fnptr_sigs
-                    .insert(param.name.clone(), (**sig).clone());
+                if param.dims.is_empty() {
+                    self.fnptrs.insert(param.name.clone());
+                    self.fnptr_sigs
+                        .insert(param.name.clone(), (**sig).clone());
+                } else {
+                    // A function-pointer array parameter decays
+                    // to an address in its cell, like every
+                    // array parameter; its elements hold callee
+                    // IDs under this signature.
+                    self.fnptr_arrays.insert(param.name.clone());
+                    self.fnptr_sigs
+                        .insert(param.name.clone(), (**sig).clone());
+                    self.memory.mark_pointer(&param.name);
+                }
             } else {
                 if param.ptr_depth > 0 || param.is_array() {
                     self.memory.mark_pointer(&param.name);
@@ -3473,12 +3687,16 @@ impl Emitter {
         let saved_break = std::mem::take(&mut self.break_stack);
         let saved_continue = std::mem::take(&mut self.continue_stack);
         let saved_return = self.return_context.replace((returned, result));
+        let saved_return_fn_sig = self
+            .return_fn_sig
+            .replace(def.returns_fn_sig.clone().map(|sig| *sig));
         self.expanding.push(name.to_vec());
         let compiled = self.compile_function_body(&def.body);
         self.expanding.pop();
         self.break_stack = saved_break;
         self.continue_stack = saved_continue;
         self.return_context = saved_return;
+        self.return_fn_sig = saved_return_fn_sig;
         compiled?;
         self.release_temps(checkpoint);
         if def.is_void {
@@ -3511,7 +3729,8 @@ impl Emitter {
         let returned = self.const_value(0);
         let mut arg_cells = Vec::with_capacity(args.len());
         for (param, arg) in sig.params.iter().zip(args.iter()) {
-            let v = if let Some(psig) = &param.fn_sig {
+            let v = if param.fn_sig.is_some() && param.dims.is_empty() {
+                let psig = param.fn_sig.as_ref().expect("fn_sig is present");
                 self.compile_fnptr_value(arg, psig)?
             } else {
                 self.compile_expr(arg)?
@@ -3573,6 +3792,24 @@ impl Emitter {
         }
         match cur {
             Expr::Ident(_) => Ok(Some(self.fn_designator_chain(callee)?)),
+            // A full subscript of a function-pointer array
+            // holds the callee ID to dispatch on; a call
+            // returning a function pointer holds it in its
+            // result cell. Other expressions are not callees.
+            Expr::Index { .. } => match self.fnptr_element_sig(cur) {
+                Some(sig) => {
+                    let id = self.compile_expr(cur)?;
+                    Ok(Some((id, sig)))
+                }
+                None => Ok(None),
+            },
+            Expr::Call { .. } => match self.fnptr_value_sig(cur) {
+                Some(sig) => {
+                    let id = self.compile_expr(cur)?;
+                    Ok(Some((id, sig)))
+                }
+                None => Ok(None),
+            },
             _ => Ok(None),
         }
     }
@@ -3939,6 +4176,69 @@ mod tests {
             empty.cells,
             "allocation is deterministic"
         );
+    }
+
+    // Function-pointer deferred forms (0022): typedef types,
+    // direct and typedef returns, and arrays, run through
+    // the real runner; the rejected shapes each fail with
+    // their own message.
+    #[test]
+    fn fnptr_typedef_returns_and_arrays() {
+        let bf = compile(
+            b"typedef int (*cb)(int); int dbl(int x) { return x * 2; } int tri(int x) { return x * 3; } cb choose(int c) { if (c) { return dbl; } return tri; } int (*make(int c))(int) { if (c) { return dbl; } return tri; } int main() { int (*fp)(int) = choose(1); printf(\"%d,\", fp(4)); printf(\"%d,\", make(0)(4)); printf(\"%d,\", (*make(1))(4)); cb fp2 = choose(0); printf(\"%d,\", fp2(4)); }",
+        )
+        .expect("typedef and return programs compile");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"8,12,8,12");
+    }
+
+    #[test]
+    fn fnptr_array_subscripts_and_params() {
+        let bf = compile(
+            b"int dbl(int x) { return x * 2; } int tri(int x) { return x * 3; } int callall(int (*a[])(int), int x) { return a[0](x) + (*a[1])(x); } int main() { int (*arr[3])(int) = {dbl, tri, 0}; int i = 1; printf(\"%d,\", arr[0](4)); printf(\"%d,\", arr[i](4)); printf(\"%d,\", (*arr[0])(4)); arr[2] = dbl; printf(\"%d,\", arr[2](4)); printf(\"%d,\", callall(arr, 4)); printf(\"%d,\", arr[1] == tri); }",
+        )
+        .expect("array program compiles");
+        let mut out = Vec::new();
+        crate::runner::run(&bf, &mut std::io::empty(), &mut out).expect("bf runs");
+        assert_eq!(out, b"8,12,8,8,20,1");
+    }
+
+    #[test]
+    fn fnptr_deferred_rejections() {
+        for (src, msg) in [
+            (
+                "int main() { int (**fp)(int) = 0; }",
+                "pointer to function pointer is not supported",
+            ),
+            (
+                "int (*a[2][3])(int); int main() { return 0; }",
+                "multi-dimensional function-pointer arrays are not supported",
+            ),
+            (
+                "typedef int (*cb)(int); typedef cb (*get)(void); get f(void) { return 0; } int main() { return 0; }",
+                "nested function pointer returns are not supported",
+            ),
+            (
+                "int dbl(int x) { return x; } int (*make(int c))(int) { return 5; } int main() { return 0; }",
+                "incompatible function pointer type",
+            ),
+            (
+                "int dbl(int x) { return x; } int oth(int x) { return x; } int main() { int (*arr[2])(int) = {dbl, oth}; int (*fp)(int, int) = arr[0]; return 0; }",
+                "incompatible function pointer type",
+            ),
+            (
+                "int dbl(int x) { return x; } int main() { int (*arr[2])(int) = {dbl, 0}; arr[0] += dbl; return 0; }",
+                "arithmetic on function pointers is not supported",
+            ),
+        ] {
+            let e = compile(src.as_bytes()).expect_err("shape is rejected");
+            assert!(
+                e.msg.contains(msg),
+                "expected `{msg}` in `{}` for {src}",
+                e.msg
+            );
+        }
     }
 
     // SPIKE (goto): forward jumps, cleanup jumps out of an `if`,
