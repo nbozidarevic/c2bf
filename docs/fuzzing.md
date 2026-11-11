@@ -57,7 +57,10 @@ extensions (0020) passed 461 seeds, skipped 39 (7.8%),
 and mismatched none. The 500-seed sweep after the scanf
 EOF fix (0021), with goto segments and EOF-terminated
 inputs, passed 458 seeds, skipped 42 (8.4%), and
-mismatched none.
+mismatched none. The 500-seed sweep after the
+function-pointer deferred forms (0022), with typedef
+spellings and function-pointer arrays, passed 461
+seeds, skipped 39 (7.8%), and mismatched none.
 
 ## Generator guarantees
 

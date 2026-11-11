@@ -29,6 +29,8 @@ for when and how versions change.
   function-pointer spellings and at most one
   function-pointer array per program, with per-element
   binding tracking and helper-bound element calls.
+  500-seed sweep: 461 pass, 39 skip (address limit),
+  0 mismatches.
 
 ## v0.6.1
 
