@@ -279,7 +279,7 @@ class Gen:
         # is the helper's, whatever the spelling.
         if self.fnptr_arrays and "helper" in self.helpers \
                 and not self.helpers["helper"][1] \
-                and self.rng.random() < 0.2:
+                and self.rng.random() < 0.1:
             elems = [(n, k) for n, bs in self.fnptr_arrays.items()
                      for k, b in enumerate(bs) if b == "helper"]
             if elems:
@@ -1357,7 +1357,7 @@ def gen_program(seed):
             lines.append(g.decl_md_array())
         elif roll < 0.86:
             lines.append(g.decl_array())
-        elif roll < 0.90 and not g.fnptr_arrays:
+        elif roll < 0.88 and not g.fnptr_arrays:
             decl = g.decl_fnptr_array()
             lines.append(decl if decl else g.decl_scalar())
         else:
