@@ -315,6 +315,18 @@ MILESTONES = [
         "unchanged. Adds one fixture: scanf_eof (363,777 "
         "BF bytes on 209 cells).",
     ),
+    (
+        "0a7a786339fcc83ac19afc631bb051e66eaa84a2",
+        "Function-pointer deferred forms",
+        "Typedef function-pointer types, function-pointer "
+        "returns, and one-dimensional function-pointer arrays "
+        "(0022). All 65 existing fixtures are "
+        "byte-identical, with allocated cells and runtime "
+        "footprints unchanged. Adds three fixtures: "
+        "fnptr_typedef (457,329 BF bytes on 262 cells), "
+        "fnptrret (502,191 on 300), and fnptrarr "
+        "(1,241,446 on 412).",
+    ),
 ]
 
 GOLDEN_DIR = "tests/golden/bf"
