@@ -9,12 +9,13 @@ that, matching tag `v0.3.1`, `0.4.0` from the release below
 that, matching tag `v0.4.0`, `0.4.1` from the release below
 that, matching tag `v0.4.1`, `0.5.0` from the release below
 that, matching tag `v0.5.0`, `0.6.0` from the release below
-that, matching tag `v0.6.0`, and `0.6.1` from the release at
-the top, matching tag `v0.6.1`. Entries below are grouped by
+that, matching tag `v0.6.0`, `0.6.1` from the release below
+that, matching tag `v0.6.1`, and `0.7.0` from the release at
+the top, matching tag `v0.7.0`. Entries below are grouped by
 the roadmap phases that produced them. See `docs/versioning.md`
 for when and how versions change.
 
-## Unreleased
+## v0.7.0
 
 - Language: the deferred function-pointer forms from
   record 0019 — typedef function-pointer types,
